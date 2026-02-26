@@ -1,0 +1,8 @@
+# Requirement packages for TC2 (class copilot) application
+flask
+flask-cors
+python-docx
+pandas
+ollama
+gunicorn
+chromadb
