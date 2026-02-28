@@ -27,6 +27,7 @@ from docx.oxml import OxmlElement
 
 # AI Clients
 from ollama import Client 
+from chromadb.config import Settings # Add this line
 from chromadb.utils import embedding_functions
 
 # Import configurations
@@ -45,7 +46,10 @@ class KnowledgeBase:
     """
     def __init__(self, db_file):
         self.db_file = db_file
-        self.chroma = chromadb.Client()
+        
+        # Initialize client with telemetry disabled
+        self.chroma = chromadb.Client(Settings(anonymized_telemetry=False)) 
+        
         self.embed_fn = embedding_functions.OllamaEmbeddingFunction(
             url=f"{OLLAMA_HOST}/api/embeddings", 
             model_name=EMBED_MODEL
@@ -101,9 +105,6 @@ class KnowledgeBase:
         return ""
 
 class Researcher:
-    """
-    Handles external data gathering via Google Custom Search API.
-    """
     @staticmethod
     def search(query, limit=2):
         if "YOUR_GOOGLE" in GOOGLE_API_KEY: 
@@ -125,15 +126,43 @@ class Researcher:
             return None
 
     @staticmethod
+    def fetch_page_content(url):
+        """Fetches and extracts visible text from a given URL."""
+        try:
+            # Add headers to prevent basic bot-blocking
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            resp = requests.get(url, headers=headers, timeout=5)
+            soup = BeautifulSoup(resp.content, 'html.parser')
+            
+            # Extract text from paragraphs and headers
+            texts = soup.find_all(['p', 'h1', 'h2', 'h3', 'li'])
+            content = ' '.join([t.get_text(strip=True) for t in texts])
+            
+            # Limit characters to avoid blowing up the LLM context window
+            return content[:4000] 
+        except Exception as e:
+            logger.error(f"Failed to scrape {url}: {e}")
+            return ""
+
+    @staticmethod
     def get_entity_profile(entity_name):
-        res = Researcher.search(f"{entity_name} official address email contact profile", limit=2)
+        res = Researcher.search(f"{entity_name} official company profile about us", limit=2)
         if not res or 'items' not in res: 
             return f"{entity_name} (Contact info lookup failed)"
+        
+        # Fetch actual text from the top URL instead of just the snippet
+        top_url = res['items'][0]['link']
+        page_content = Researcher.fetch_page_content(top_url)
+        
+        if page_content:
+            return f"Profile data from {top_url}:\n{page_content}"
+        
+        # Fallback to snippets if scraping fails
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
     @staticmethod
     def get_contact_details(entity_name):
-        query = f"{entity_name} alamat nomor telepon email fax contact details"
+        query = f"{entity_name} alamat nomor telepon email contact details"
         res = Researcher.search(query, limit=3)
         if not res or 'items' not in res: 
             return f"{entity_name} (Details unavailable in search)"
