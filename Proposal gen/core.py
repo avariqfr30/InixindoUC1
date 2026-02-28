@@ -5,6 +5,7 @@ import logging
 import requests
 import pandas as pd
 import chromadb
+from chromadb.config import Settings
 import concurrent.futures
 import matplotlib
 matplotlib.use('Agg')
@@ -27,7 +28,6 @@ from docx.oxml import OxmlElement
 
 # AI Clients
 from ollama import Client 
-from chromadb.config import Settings # Add this line
 from chromadb.utils import embedding_functions
 
 # Import configurations
@@ -41,15 +41,12 @@ logger = logging.getLogger(__name__)
 
 class KnowledgeBase:
     """
-    Manages the local vector database using ChromaDB and Ollama embeddings.
-    Handles data ingestion from CSV and context retrieval via RAG.
+    Manages both deterministic tabular lookups and the local vector database.
     """
     def __init__(self, db_file):
         self.db_file = db_file
-        
-        # Initialize client with telemetry disabled
-        self.chroma = chromadb.Client(Settings(anonymized_telemetry=False)) 
-        
+        # Fixed the telemetry issue here
+        self.chroma = chromadb.Client(Settings(anonymized_telemetry=False))
         self.embed_fn = embedding_functions.OllamaEmbeddingFunction(
             url=f"{OLLAMA_HOST}/api/embeddings", 
             model_name=EMBED_MODEL
@@ -76,14 +73,14 @@ class KnowledgeBase:
             
             ids, docs, metas = [], [], []
             for idx, row in self.df.iterrows():
-                client = row.get('Client Entity')
-                project = row.get('Strategic Initiative')
-                context = row.get('Strategic Context & Pain Points')
-                text_rep = f"Client: {client} | Project: {project} | Context: {context}"
+                client = row.iloc[0] # Dynamic first column
+                project = row.iloc[1] # Dynamic second column
+                
+                text_rep = " | ".join([f"{col}: {val}" for col, val in row.items()])
                 
                 ids.append(str(idx))
                 docs.append(text_rep)
-                metas.append(row.to_dict())
+                metas.append(row.astype(str).to_dict())
                 
             if ids: 
                 self.collection.add(documents=docs, metadatas=metas, ids=ids)
@@ -93,18 +90,43 @@ class KnowledgeBase:
             logger.error(f"Error refreshing KnowledgeBase data: {e}")
             return False
 
+    def get_exact_context(self, topic, sub_topic):
+        """Fetches the exact row based on the UI dropdown selections."""
+        if self.df is None or self.df.empty:
+            return "No structural data loaded."
+            
+        try:
+            main_col = self.df.columns[0]
+            sub_col = self.df.columns[1]
+            
+            match = self.df[(self.df[main_col] == topic) & (self.df[sub_col] == sub_topic)]
+            
+            if not match.empty:
+                row_dict = match.iloc[0].to_dict()
+                context_str = ""
+                for key, value in row_dict.items():
+                    context_str += f"- {key}: {value}\n"
+                return context_str
+                
+            return "No specific tabular data found for this selection."
+        except Exception as e:
+            logger.error(f"Pandas lookup failed: {e}")
+            return ""
+
     def query(self, client, project, context_keywords=None):
         try:
             q_text = f"{project} implementation for {client} {context_keywords or ''}"
             res = self.collection.query(query_texts=[q_text], n_results=2)
-            if res['documents']: 
+            if res['documents'] and len(res['documents'][0]) > 0: 
                 return "\n".join(res['documents'][0])
         except Exception as e: 
             logger.error(f"Error querying vector DB: {e}")
-            
         return ""
 
 class Researcher:
+    """
+    Handles deep web scraping and API searches.
+    """
     @staticmethod
     def search(query, limit=2):
         if "YOUR_GOOGLE" in GOOGLE_API_KEY: 
@@ -129,16 +151,12 @@ class Researcher:
     def fetch_page_content(url):
         """Fetches and extracts visible text from a given URL."""
         try:
-            # Add headers to prevent basic bot-blocking
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
             resp = requests.get(url, headers=headers, timeout=5)
             soup = BeautifulSoup(resp.content, 'html.parser')
             
-            # Extract text from paragraphs and headers
             texts = soup.find_all(['p', 'h1', 'h2', 'h3', 'li'])
             content = ' '.join([t.get_text(strip=True) for t in texts])
-            
-            # Limit characters to avoid blowing up the LLM context window
             return content[:4000] 
         except Exception as e:
             logger.error(f"Failed to scrape {url}: {e}")
@@ -150,14 +168,12 @@ class Researcher:
         if not res or 'items' not in res: 
             return f"{entity_name} (Contact info lookup failed)"
         
-        # Fetch actual text from the top URL instead of just the snippet
         top_url = res['items'][0]['link']
         page_content = Researcher.fetch_page_content(top_url)
         
         if page_content:
             return f"Profile data from {top_url}:\n{page_content}"
         
-        # Fallback to snippets if scraping fails
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
     @staticmethod
@@ -169,9 +185,7 @@ class Researcher:
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
 class LogoManager:
-    """
-    Fetches client logos and extracts the dominant theme color to style the document.
-    """
+    """Fetches client logos and extracts the dominant theme color."""
     @staticmethod
     def get_logo_and_color(client_name):
         if "YOUR_GOOGLE" in GOOGLE_API_KEY: 
@@ -207,9 +221,7 @@ class LogoManager:
         return None, DEFAULT_COLOR
 
 class StyleEngine:
-    """
-    Applies base document margins, typography, and paragraph spacing.
-    """
+    """Applies base document margins, typography, and paragraph spacing."""
     @staticmethod
     def apply_document_styles(doc):
         style = doc.styles['Normal']
@@ -230,10 +242,7 @@ class StyleEngine:
             section.right_margin = Cm(2.54)
 
 class ChartEngine:
-    """
-    Handles the generation of matplotlib visuals for the proposal.
-    All charts return in-memory image streams (BytesIO).
-    """
+    """Handles the generation of matplotlib visuals."""
     @staticmethod
     def _get_plt_color(theme_color):
         return tuple(c/255 for c in theme_color)
@@ -241,71 +250,109 @@ class ChartEngine:
     @staticmethod
     def create_bar_chart(data_str, theme_color):
         try:
+            # Parse the new syntax: "Title | Y-Axis Label | L1,10; L2,20"
+            parts = data_str.split('|')
+            if len(parts) == 3:
+                title_str, ylabel_str, raw_data = parts[0].strip(), parts[1].strip(), parts[2].strip()
+            else:
+                title_str, ylabel_str, raw_data = "Data Analysis", "Value", data_str
+
             labels, values = [], []
-            for p in data_str.split(';'):
+            for p in raw_data.split(';'):
                 if ',' in p:
-                    l, v = p.split(',')
+                    l, v = p.split(',', 1)
                     labels.append(l.strip())
                     values.append(float(re.sub(r'[^\d.]', '', v)))
                     
-            if not labels: 
-                return None
+            if not labels: return None
 
-            plt.figure(figsize=(6.5, 3.5))
-            plt.bar(labels, values, color=ChartEngine._get_plt_color(theme_color), 
-                   alpha=0.9, width=0.6, zorder=3, edgecolor='white', linewidth=0.5)
-            plt.title("Analisis Data Penunjang", fontsize=11, fontweight='bold', pad=15, color='#333333')
-            plt.grid(axis='y', linestyle=':', alpha=0.4, zorder=0)
-            plt.gca().spines['top'].set_visible(False)
-            plt.gca().spines['right'].set_visible(False)
-            plt.tick_params(axis='x', rotation=15, labelsize=9)
+            fig, ax = plt.subplots(figsize=(7, 4.5))
+            bars = ax.bar(labels, values, color=ChartEngine._get_plt_color(theme_color), 
+                   alpha=0.9, width=0.5, zorder=3, edgecolor='white', linewidth=1)
             
+            # Formatting Labels and Titles
+            ax.set_title(title_str, fontsize=12, fontweight='bold', pad=20, color='#222222')
+            ax.set_ylabel(ylabel_str, fontsize=10, color='#444444', fontweight='bold')
+            ax.grid(axis='y', linestyle=':', alpha=0.4, zorder=0)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            plt.xticks(rotation=20, ha='right', fontsize=9)
+            
+            # NEW: Add exact value annotations on top of each bar
+            for bar in bars:
+                yval = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2.0, yval + (max(values)*0.02), 
+                        f'{yval:g}', ha='center', va='bottom', fontsize=9, fontweight='bold', color='#333333')
+            
+            # Add padding to top so text doesn't cut off
+            ax.set_ylim(0, max(values) + (max(values) * 0.15))
+
             img = io.BytesIO()
             plt.savefig(img, format='png', bbox_inches='tight', dpi=150)
             plt.close()
             img.seek(0)
             return img
         except Exception as e: 
-            logger.error(f"Bar chart generation failed: {e}")
+            logger.error(f"Bar chart failed: {e}")
             return None
 
     @staticmethod
     def create_gantt_chart(data_str, theme_color):
         try:
+            # Parse the new syntax: "Title | Time Unit | Task1,0,2; Task2,2,4"
+            parts = data_str.split('|')
+            if len(parts) == 3:
+                title_str, unit_str, raw_data = parts[0].strip(), parts[1].strip(), parts[2].strip()
+            else:
+                title_str, unit_str, raw_data = "Implementation Timeline", "Duration", data_str
+
             tasks = []
-            for p in data_str.split(';'):
-                parts = p.split(',')
-                if len(parts) >= 3:
+            for p in raw_data.split(';'):
+                t_parts = p.split(',')
+                if len(t_parts) >= 3:
                     tasks.append({
-                        "task": parts[0].strip(),
-                        "start": float(re.sub(r'[^\d.]', '', parts[1])),
-                        "dur": float(re.sub(r'[^\d.]', '', parts[2]))
+                        "task": t_parts[0].strip(),
+                        "start": float(re.sub(r'[^\d.]', '', t_parts[1])),
+                        "dur": float(re.sub(r'[^\d.]', '', t_parts[2]))
                     })
                     
-            if not tasks: 
-                return None
+            if not tasks: return None
             
-            tasks = tasks[::-1]
+            tasks = tasks[::-1] # Reverse so the first task renders at the top
             names = [t['task'] for t in tasks]
             starts = [t['start'] for t in tasks]
             durs = [t['dur'] for t in tasks]
             
-            fig, ax = plt.subplots(figsize=(7.5, max(3, len(tasks)*0.7)))
+            fig, ax = plt.subplots(figsize=(8.5, max(4, len(tasks)*0.8)))
             
             for i, (name, start, dur) in enumerate(zip(names, starts, durs)):
-                rect = patches.FancyBboxPatch((start, i-0.25), dur, 0.5, 
+                rect = patches.FancyBboxPatch((start, i-0.3), dur, 0.6, 
                                             boxstyle="round,pad=0.02,rounding_size=0.1",
-                                            ec="none", fc=ChartEngine._get_plt_color(theme_color), 
-                                            alpha=0.85)
+                                            ec="#ffffff", fc=ChartEngine._get_plt_color(theme_color), 
+                                            alpha=0.9, lw=1.5)
                 ax.add_patch(rect)
+                
+                # NEW: Add text explicitly stating the duration inside/next to the Gantt bar
+                text_x = start + (dur / 2)
+                ax.text(text_x, i, f"{dur:g} {unit_str}", ha='center', va='center', 
+                        color='white', fontweight='bold', fontsize=9, zorder=5)
 
+            # Formatting
             ax.set_yticks(range(len(names)))
-            ax.set_yticklabels(names, fontsize=10)
-            ax.set_xlabel("Timeline (Bulan/Minggu)", fontsize=9, fontweight='bold')
-            ax.set_title("Rencana Implementasi", fontsize=12, fontweight='bold', pad=15)
-            ax.grid(axis='x', linestyle='--', alpha=0.3)
-            ax.set_xlim(0, max([t['start'] + t['dur'] for t in tasks]) + 1)
-            ax.set_ylim(-0.5, len(names)-0.5)
+            ax.set_yticklabels(names, fontsize=10, fontweight='medium')
+            ax.set_xlabel(f"Timeline ({unit_str})", fontsize=10, fontweight='bold', labelpad=10)
+            ax.set_title(title_str, fontsize=13, fontweight='bold', pad=20, color='#222222')
+            
+            ax.grid(axis='x', linestyle='--', alpha=0.5, zorder=0)
+            
+            # Dynamic X-axis padding
+            max_x = max([t['start'] + t['dur'] for t in tasks])
+            ax.set_xlim(0, max_x + (max_x * 0.1))
+            ax.set_ylim(-0.6, len(names)-0.4)
+            
+            # Force X-axis ticks to be integers for clean timelines
+            import matplotlib.ticker as ticker
+            ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
             
             img = io.BytesIO()
             plt.savefig(img, format='png', bbox_inches='tight', dpi=150)
@@ -313,15 +360,14 @@ class ChartEngine:
             img.seek(0)
             return img
         except Exception as e: 
-            logger.error(f"Gantt chart generation failed: {e}")
+            logger.error(f"Gantt chart failed: {e}")
             return None
 
     @staticmethod
     def create_flowchart(data_str, theme_color):
         try:
             steps = [s.strip() for s in data_str.split('->')]
-            if len(steps) < 2: 
-                return None
+            if len(steps) < 2: return None
             
             steps = ["\n".join(textwrap.wrap(s, width=18)) for s in steps]
             fig, ax = plt.subplots(figsize=(8, 3))
@@ -353,7 +399,7 @@ class ChartEngine:
             img.seek(0)
             return img
         except Exception as e: 
-            logger.error(f"Flowchart generation failed: {e}")
+            logger.error(f"Flowchart failed: {e}")
             return None
 
     @staticmethod
@@ -369,19 +415,15 @@ class ChartEngine:
             plt.close()
             img.seek(0)
             return img
-        except Exception as e: 
-            logger.error(f"Math image generation failed: {e}")
+        except Exception: 
             return None
 
 class DocumentBuilder:
-    """
-    Parses Markdown/HTML from the LLM and translates it into native docx elements.
-    """
+    """Parses Markdown/HTML from the LLM to native docx."""
     @staticmethod
     def _remove_duplicate_header(raw_text, title):
         lines = raw_text.strip().split('\n')
-        if not lines: 
-            return raw_text
+        if not lines: return raw_text
             
         first_line = lines[0].strip().replace('#', '').strip()
         ratio = SequenceMatcher(None, first_line.lower(), title.lower()).ratio()
@@ -395,8 +437,7 @@ class DocumentBuilder:
         soup = BeautifulSoup(html_content, 'html.parser')
         
         for element in soup.children:
-            if element.name is None: 
-                continue
+            if element.name is None: continue
             
             if element.name in ['h1', 'h2', 'h3']:
                 level = int(element.name[1])
@@ -408,8 +449,7 @@ class DocumentBuilder:
             
             elif element.name == 'p':
                 text = element.get_text().strip()
-                if not text: 
-                    continue
+                if not text: continue
                 p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.LEFT
                 DocumentBuilder._process_inline_html(p, element)
@@ -422,8 +462,7 @@ class DocumentBuilder:
 
             elif element.name == 'table':
                 rows = element.find_all('tr')
-                if not rows: 
-                    continue
+                if not rows: continue
                     
                 max_cols = max([len(r.find_all(['td', 'th'])) for r in rows])
                 table = doc.add_table(rows=len(rows), cols=max_cols)
@@ -441,8 +480,7 @@ class DocumentBuilder:
                             
                             if row.find('th') or i == 0:
                                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                for run in p.runs: 
-                                    run.bold = True
+                                for run in p.runs: run.bold = True
                                     
                                 tcPr = cell._element.get_or_add_tcPr()
                                 shd = OxmlElement('w:shd')
@@ -472,26 +510,22 @@ class DocumentBuilder:
         for line in lines:
             line = line.strip()
             
-            # Visual Processing Tokens
             if line.startswith('[[CHART:') and line.endswith(']]'):
                 data = line.replace('[[CHART:', '').replace(']]', '').strip()
                 img = ChartEngine.create_bar_chart(data, theme_color)
-                if img: 
-                    doc.add_paragraph().add_run().add_picture(img, width=Inches(5.5))
+                if img: doc.add_paragraph().add_run().add_picture(img, width=Inches(5.5))
                 continue
             
             if line.startswith('[[GANTT:') and line.endswith(']]'):
                 data = line.replace('[[GANTT:', '').replace(']]', '').strip()
                 img = ChartEngine.create_gantt_chart(data, theme_color)
-                if img: 
-                    doc.add_paragraph().add_run().add_picture(img, width=Inches(6))
+                if img: doc.add_paragraph().add_run().add_picture(img, width=Inches(6))
                 continue
                 
             if line.startswith('[[FLOW:') and line.endswith(']]'):
                 data = line.replace('[[FLOW:', '').replace(']]', '').strip()
                 img = ChartEngine.create_flowchart(data, theme_color)
-                if img: 
-                    doc.add_paragraph().add_run().add_picture(img, width=Inches(6.5))
+                if img: doc.add_paragraph().add_run().add_picture(img, width=Inches(6.5))
                 continue
 
             if line.startswith('[[MATH:') and line.endswith(']]'):
@@ -513,8 +547,7 @@ class DocumentBuilder:
     def create_cover(doc, client, project, logo_stream=None, theme_color=DEFAULT_COLOR):
         StyleEngine.apply_document_styles(doc)
         
-        for _ in range(3): 
-            doc.add_paragraph()
+        for _ in range(3): doc.add_paragraph()
             
         if logo_stream:
             try:
@@ -542,17 +575,14 @@ class DocumentBuilder:
         p_name.runs[0].font.size = Pt(16)
         p_name.runs[0].italic = True
 
-        for _ in range(4): 
-            doc.add_paragraph()
+        for _ in range(4): doc.add_paragraph()
             
         s = doc.add_paragraph(f"Disusun Oleh:\n{WRITER_FIRM_NAME}")
         s.alignment = WD_ALIGN_PARAGRAPH.CENTER
         doc.add_page_break()
 
 class ProposalGenerator:
-    """
-    Orchestrates the data gathering, LLM prompting, and document assembly.
-    """
+    """Orchestrates generation using precise structural injection and vector fallbacks."""
     def __init__(self, kb_instance):
         self.ollama = Client(host=OLLAMA_HOST)
         self.kb = kb_instance
@@ -560,45 +590,45 @@ class ProposalGenerator:
 
     def _fetch_chapter_context(self, chap, client, project, global_future, writer_future):
         try:
-            try: 
-                global_data = global_future.result(timeout=10)
-            except Exception: 
-                global_data = ""
+            try: global_data = global_future.result(timeout=10)
+            except Exception: global_data = ""
             
-            try: 
-                writer_data = writer_future.result(timeout=10)
-            except Exception: 
-                writer_data = "Unavailable"
+            try: writer_data = writer_future.result(timeout=10)
+            except Exception: writer_data = "Unavailable"
 
+            # 1. Gather exact, deterministic tabular row constraints
+            structured_row_data = self.kb.get_exact_context(client, project)
+            
+            # 2. Gather broader context from past proposals
             rag_data = self.kb.query(client, project, chap['keywords'])
+            
             persona = PERSONAS.get(chap['id'], PERSONAS['default'])
             subs = "\n".join([f"- {s}" for s in chap['subs']])
             
             visual_prompt = "Do not force visuals."
             if "visual_intent" in chap:
-                if chap['visual_intent'] == "bar_chart":
-                    visual_prompt = "Supported by: [[CHART: Label,10; Label2,20]]."
-                elif chap['visual_intent'] == "gantt":
-                    visual_prompt = "Timeline visual: [[GANTT: Phase1,1,2; Phase2,3,4]]."
-                elif chap['visual_intent'] == "flowchart":
-                    visual_prompt = "Process visual: [[FLOW: Step1 -> Step2]]."
+                if chap['visual_intent'] == "bar_chart": 
+                    visual_prompt = "Mandatory Data Visual: [[CHART: Custom Chart Title | Y-Axis Label | Category 1,15; Category 2,30]]. Extract exact metrics from the structural data."
+                elif chap['visual_intent'] == "gantt": 
+                    visual_prompt = "Mandatory Timeline Visual: [[GANTT: Project Implementation Schedule | Time Unit (e.g., Months) | Task 1,0,2; Task 2,2,4]]."
+                elif chap['visual_intent'] == "flowchart": 
+                    visual_prompt = "Process visual: [[FLOW: Step 1 -> Step 2 -> Step 3]]."
 
             extra = ""
             if chap['id'] == 'chap_9':
                 extra = f"""
                 [MANDATORY]
                 Create a Markdown Table for Contact Information.
-                Use exactly this data found via search for {WRITER_FIRM_NAME}:
-                {writer_data}
+                Use exactly this data: {writer_data}
                 Columns: "Office Location", "Phone", "Email".
-                Always refer to the writer firm as "{WRITER_FIRM_NAME}", not just "Inixindo".
                 """
 
             prompt = PROPOSAL_SYSTEM_PROMPT.format(
                 client=client,
                 writer_firm=WRITER_FIRM_NAME,
                 persona=persona,
-                global_data=global_data,
+                web_data=f"Client Web Data:\n{global_data}\nFirm Details:\n{writer_data}",
+                structured_row_data=structured_row_data,
                 rag_data=rag_data,
                 visual_prompt=visual_prompt,
                 extra_instructions=extra,
@@ -625,10 +655,9 @@ class ProposalGenerator:
                 self._fetch_chapter_context, chap, client, project, global_future, writer_future
             )
 
-        try: 
-            logo_stream, theme_color = logo_future.result(timeout=8)
+        try: logo_stream, theme_color = logo_future.result(timeout=8)
         except Exception as e:
-            logger.warning(f"Logo retrieval timed out or failed: {e}")
+            logger.warning(f"Logo retrieval failed: {e}")
             logo_stream, theme_color = None, DEFAULT_COLOR
 
         doc = Document()

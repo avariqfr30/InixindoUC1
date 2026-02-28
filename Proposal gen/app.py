@@ -4,7 +4,6 @@ import logging
 from flask import Flask, send_file, request, jsonify, render_template
 from flask_cors import CORS
 
-# Import from our modularized files
 from core import ProposalGenerator, KnowledgeBase
 from config import DB_FILE
 
@@ -14,7 +13,6 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
-# Initialize Core Services
 kb = KnowledgeBase(DB_FILE)
 generator = ProposalGenerator(kb)
 
