@@ -5,7 +5,7 @@ from flask import Flask, send_file, request, jsonify, render_template
 from flask_cors import CORS
 
 from core import ProposalGenerator, KnowledgeBase
-from config import DB_FILE
+from config import DB_FILE, DATA_MAPPING
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -26,19 +26,36 @@ def get_config():
         return jsonify({"error": "DB Load Failed"}), 500
         
     tree = {}
-    main_col = kb.df.columns[0]
-    sub_col = kb.df.columns[1]
     
-    for entity in kb.df[main_col].unique():
-        options = kb.df[kb.df[main_col] == entity][sub_col].unique().tolist()
-        tree[entity] = {"label": entity, "options": options}
+    for entity in kb.df['entity'].dropna().unique():
+        tree[entity] = {"label": entity, "topics": {}}
         
-    return jsonify({"structure": tree, "labels": [main_col, sub_col]})
+        entity_df = kb.df[kb.df['entity'] == entity]
+        
+        for topic in entity_df['topic'].dropna().unique():
+            topic_df = entity_df[entity_df['topic'] == topic]
+            budgets = topic_df['budget'].dropna().unique().tolist()
+            
+            tree[entity]["topics"][topic] = {
+                "label": topic,
+                "budgets": budgets
+            }
+            
+    return jsonify({
+        "structure": tree, 
+        "labels": [DATA_MAPPING["entity"], DATA_MAPPING["topic"], DATA_MAPPING["budget"]] 
+    })
 
 @app.route('/generate', methods=['POST'])
 def generate_doc():
     data = request.json
-    doc, filename = generator.run(data['topic'], data['sub_topic'])
+    
+    entity = data.get('entity')
+    topic = data.get('topic')
+    budget = data.get('budget')
+    service_type = data.get('service_type') # Capture the new UI selection
+    
+    doc, filename = generator.run(entity, topic, budget, service_type)
     
     out = io.BytesIO()
     doc.save(out)

@@ -34,7 +34,7 @@ from chromadb.utils import embedding_functions
 from config import (
     GOOGLE_API_KEY, GOOGLE_CX_ID, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL,
     WRITER_FIRM_NAME, DEFAULT_COLOR, PROPOSAL_STRUCTURE, PERSONAS, 
-    PROPOSAL_SYSTEM_PROMPT
+    PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING
 )
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,6 @@ class KnowledgeBase:
     """
     def __init__(self, db_file):
         self.db_file = db_file
-        # Fixed the telemetry issue here
         self.chroma = chromadb.Client(Settings(anonymized_telemetry=False))
         self.embed_fn = embedding_functions.OllamaEmbeddingFunction(
             url=f"{OLLAMA_HOST}/api/embeddings", 
@@ -67,14 +66,40 @@ class KnowledgeBase:
             self.df = pd.read_csv(self.db_file)
             self.df.columns = [c.strip() for c in self.df.columns]
             
+            # --- APPLY DATA MAPPING LAYER ---
+            rename_dict = {v: k for k, v in DATA_MAPPING.items()}
+            self.df.rename(columns=rename_dict, inplace=True)
+            
+            # --- APPLY RUPIAH BUDGET RANGE FORMATTING ---
+            def format_rupiah_range(val):
+                try:
+                    clean_str = re.sub(r'[^\d]', '', str(val))
+                    if not clean_str: 
+                        return val
+                        
+                    base_val = int(clean_str)
+                    ceiling_val = base_val + 5000000
+                    
+                    floor_str = f"Rp. {base_val:,}".replace(',', '.')
+                    ceiling_str = f"Rp. {ceiling_val:,}".replace(',', '.')
+                    
+                    return f"{floor_str} - {ceiling_str}"
+                except Exception as e:
+                    logger.warning(f"Could not format budget value '{val}': {e}")
+                    return val
+
+            if 'budget' in self.df.columns:
+                self.df['budget'] = self.df['budget'].apply(format_rupiah_range)
+            
+            # --- LOAD INTO VECTOR DB ---
             existing = self.collection.get()['ids']
             if existing: 
                 self.collection.delete(existing)
             
             ids, docs, metas = [], [], []
             for idx, row in self.df.iterrows():
-                client = row.iloc[0] # Dynamic first column
-                project = row.iloc[1] # Dynamic second column
+                client = row['entity'] 
+                project = row['topic'] 
                 
                 text_rep = " | ".join([f"{col}: {val}" for col, val in row.items()])
                 
@@ -90,22 +115,22 @@ class KnowledgeBase:
             logger.error(f"Error refreshing KnowledgeBase data: {e}")
             return False
 
-    def get_exact_context(self, topic, sub_topic):
+    def get_exact_context(self, entity, topic, budget=None):
         """Fetches the exact row based on the UI dropdown selections."""
         if self.df is None or self.df.empty:
             return "No structural data loaded."
             
         try:
-            main_col = self.df.columns[0]
-            sub_col = self.df.columns[1]
+            match = self.df[(self.df['entity'] == entity) & (self.df['topic'] == topic)]
             
-            match = self.df[(self.df[main_col] == topic) & (self.df[sub_col] == sub_topic)]
+            if budget and not match.empty:
+                match = match[match['budget'] == budget]
             
             if not match.empty:
                 row_dict = match.iloc[0].to_dict()
                 context_str = ""
                 for key, value in row_dict.items():
-                    context_str += f"- {key}: {value}\n"
+                    context_str += f"- {key.capitalize()}: {value}\n"
                 return context_str
                 
             return "No specific tabular data found for this selection."
@@ -226,8 +251,8 @@ class StyleEngine:
     def apply_document_styles(doc):
         style = doc.styles['Normal']
         font = style.font
-        font.name = 'Calibri'
-        font.size = Pt(11)
+        font.name = 'Times New Roman'
+        font.size = Pt(12)
         
         pf = style.paragraph_format
         pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
@@ -250,7 +275,6 @@ class ChartEngine:
     @staticmethod
     def create_bar_chart(data_str, theme_color):
         try:
-            # Parse the new syntax: "Title | Y-Axis Label | L1,10; L2,20"
             parts = data_str.split('|')
             if len(parts) == 3:
                 title_str, ylabel_str, raw_data = parts[0].strip(), parts[1].strip(), parts[2].strip()
@@ -270,7 +294,6 @@ class ChartEngine:
             bars = ax.bar(labels, values, color=ChartEngine._get_plt_color(theme_color), 
                    alpha=0.9, width=0.5, zorder=3, edgecolor='white', linewidth=1)
             
-            # Formatting Labels and Titles
             ax.set_title(title_str, fontsize=12, fontweight='bold', pad=20, color='#222222')
             ax.set_ylabel(ylabel_str, fontsize=10, color='#444444', fontweight='bold')
             ax.grid(axis='y', linestyle=':', alpha=0.4, zorder=0)
@@ -278,13 +301,11 @@ class ChartEngine:
             ax.spines['right'].set_visible(False)
             plt.xticks(rotation=20, ha='right', fontsize=9)
             
-            # NEW: Add exact value annotations on top of each bar
             for bar in bars:
                 yval = bar.get_height()
                 ax.text(bar.get_x() + bar.get_width()/2.0, yval + (max(values)*0.02), 
                         f'{yval:g}', ha='center', va='bottom', fontsize=9, fontweight='bold', color='#333333')
             
-            # Add padding to top so text doesn't cut off
             ax.set_ylim(0, max(values) + (max(values) * 0.15))
 
             img = io.BytesIO()
@@ -299,7 +320,6 @@ class ChartEngine:
     @staticmethod
     def create_gantt_chart(data_str, theme_color):
         try:
-            # Parse the new syntax: "Title | Time Unit | Task1,0,2; Task2,2,4"
             parts = data_str.split('|')
             if len(parts) == 3:
                 title_str, unit_str, raw_data = parts[0].strip(), parts[1].strip(), parts[2].strip()
@@ -318,7 +338,7 @@ class ChartEngine:
                     
             if not tasks: return None
             
-            tasks = tasks[::-1] # Reverse so the first task renders at the top
+            tasks = tasks[::-1] 
             names = [t['task'] for t in tasks]
             starts = [t['start'] for t in tasks]
             durs = [t['dur'] for t in tasks]
@@ -332,12 +352,10 @@ class ChartEngine:
                                             alpha=0.9, lw=1.5)
                 ax.add_patch(rect)
                 
-                # NEW: Add text explicitly stating the duration inside/next to the Gantt bar
                 text_x = start + (dur / 2)
                 ax.text(text_x, i, f"{dur:g} {unit_str}", ha='center', va='center', 
                         color='white', fontweight='bold', fontsize=9, zorder=5)
 
-            # Formatting
             ax.set_yticks(range(len(names)))
             ax.set_yticklabels(names, fontsize=10, fontweight='medium')
             ax.set_xlabel(f"Timeline ({unit_str})", fontsize=10, fontweight='bold', labelpad=10)
@@ -345,12 +363,10 @@ class ChartEngine:
             
             ax.grid(axis='x', linestyle='--', alpha=0.5, zorder=0)
             
-            # Dynamic X-axis padding
             max_x = max([t['start'] + t['dur'] for t in tasks])
             ax.set_xlim(0, max_x + (max_x * 0.1))
             ax.set_ylim(-0.6, len(names)-0.4)
             
-            # Force X-axis ticks to be integers for clean timelines
             import matplotlib.ticker as ticker
             ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
             
@@ -444,7 +460,7 @@ class DocumentBuilder:
                 p = doc.add_heading(element.get_text().strip(), level=level)
                 for run in p.runs:
                     run.font.color.rgb = RGBColor(*theme_color)
-                    run.font.name = 'Arial'
+                    run.font.name = 'Times New Roman'
                     run.font.size = Pt(14 if level == 2 else 12)
             
             elif element.name == 'p':
@@ -507,6 +523,8 @@ class DocumentBuilder:
         lines = raw_text.split('\n')
         clean_lines = []
         
+        in_table = False
+        
         for line in lines:
             line = line.strip()
             
@@ -536,6 +554,17 @@ class DocumentBuilder:
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     p.add_run().add_picture(img, width=Inches(2.5))
                 continue
+            
+            # --- START FIX: Markdown Table Spacing Tracker ---
+            if line.startswith('|'):
+                if not in_table:
+                    # If we are starting a table, ensure the previous line was totally blank
+                    if clean_lines and clean_lines[-1] != "":
+                        clean_lines.append("")
+                    in_table = True
+            else:
+                in_table = False
+            # --- END FIX ---
                 
             clean_lines.append(line)
         
@@ -588,7 +617,7 @@ class ProposalGenerator:
         self.kb = kb_instance
         self.io_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
-    def _fetch_chapter_context(self, chap, client, project, global_future, writer_future):
+    def _fetch_chapter_context(self, chap, client, project, budget, service_type, global_future, writer_future):
         try:
             try: global_data = global_future.result(timeout=10)
             except Exception: global_data = ""
@@ -596,14 +625,23 @@ class ProposalGenerator:
             try: writer_data = writer_future.result(timeout=10)
             except Exception: writer_data = "Unavailable"
 
-            # 1. Gather exact, deterministic tabular row constraints
-            structured_row_data = self.kb.get_exact_context(client, project)
-            
-            # 2. Gather broader context from past proposals
+            structured_row_data = self.kb.get_exact_context(client, project, budget)
             rag_data = self.kb.query(client, project, chap['keywords'])
             
             persona = PERSONAS.get(chap['id'], PERSONAS['default'])
-            subs = "\n".join([f"- {s}" for s in chap['subs']])
+            
+            # --- DYNAMIC SUB-CHAPTER INJECTION ---
+            subs_list = chap['subs'].copy()
+            if chap['id'] == 'chap_3':
+                if service_type == 'Training' and 'sub_training' in chap:
+                    subs_list.append(chap['sub_training'])
+                elif service_type == 'Consulting' and 'sub_consulting' in chap:
+                    subs_list.append(chap['sub_consulting'])
+                else:
+                    # Default fallback just in case
+                    subs_list.append(chap['sub_consulting'])
+                    
+            subs = "\n".join([f"- {s}" for s in subs_list])
             
             visual_prompt = "Do not force visuals."
             if "visual_intent" in chap:
@@ -633,7 +671,8 @@ class ProposalGenerator:
                 visual_prompt=visual_prompt,
                 extra_instructions=extra,
                 chapter_title=chap['title'],
-                sub_chapters=subs
+                sub_chapters=subs,
+                length_intent=chap.get('length_intent', 'Be very concise.')
             )
 
             return {"prompt": prompt, "success": True}
@@ -642,8 +681,8 @@ class ProposalGenerator:
             logger.error(f"Failed to fetch context for {chap['id']}: {e}")
             return {"prompt": "", "success": False, "error": str(e)}
 
-    def run(self, client, project):
-        logger.info(f"Starting Proposal Generation: Client={client}, Project={project}")
+    def run(self, client, project, budget=None, service_type="Consulting"):
+        logger.info(f"Starting Proposal Generation: Client={client}, Project={project}, Service={service_type}")
         
         global_future = self.io_pool.submit(Researcher.get_entity_profile, client)
         writer_future = self.io_pool.submit(Researcher.get_contact_details, WRITER_FIRM_NAME)
@@ -652,7 +691,7 @@ class ProposalGenerator:
         context_futures = {}
         for chap in PROPOSAL_STRUCTURE:
             context_futures[chap['id']] = self.io_pool.submit(
-                self._fetch_chapter_context, chap, client, project, global_future, writer_future
+                self._fetch_chapter_context, chap, client, project, budget, service_type, global_future, writer_future
             )
 
         try: logo_stream, theme_color = logo_future.result(timeout=8)
@@ -675,7 +714,7 @@ class ProposalGenerator:
                             {'role': 'system', 'content': ctx['prompt']}, 
                             {'role': 'user', 'content': f"Write content for {chap['title']}."}
                         ],
-                        options={'num_ctx': 4096}
+                        options={'num_ctx': 4096}  
                     )
                     
                     h = doc.add_heading(chap['title'], level=1)

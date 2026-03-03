@@ -2,8 +2,8 @@
 import os
 
 # --- CREDENTIALS & HOSTS ---
-GOOGLE_API_KEY = "API_KEY"
-GOOGLE_CX_ID = "CX_ID"
+GOOGLE_API_KEY = "AIzaSyDd87rQ4KkZ7PwkQb2okpjV9DGKUIBJuKM"
+GOOGLE_CX_ID = "828eb1d6dff1d4e13"
 OLLAMA_HOST = "http://127.0.0.1:11434"
 
 # --- MODELS & DB ---
@@ -14,6 +14,15 @@ DB_FILE = "db.csv"
 # --- FIRM IDENTITY ---
 WRITER_FIRM_NAME = "Inixindo Jogja" 
 DEFAULT_COLOR = (0, 51, 102)
+
+# --- DATA MAPPING LAYER ---
+# Keys are your app's internal standard names.
+# Values are the client's actual database/CSV column names.
+DATA_MAPPING = {
+    "entity": "Client Entity",
+    "topic": "Strategic Initiative",
+    "budget": "Investment Estimation"
+}
 
 # --- PROMPTS ---
 PROPOSAL_SYSTEM_PROMPT = """
@@ -31,10 +40,11 @@ ROLE: {persona}.
 
 MANDATORY RULES:
 1. DO NOT repeat the Chapter Title in your output.
-2. WRITE EXTENSIVELY (Word-Heavy).
-3. Ground your entire response ONLY in the Exact Project Requirements provided above. Do not invent methodologies or features that are not listed in the structural data.
-4. {visual_prompt}
-5. {extra_instructions}
+2. HIGH INFORMATION DENSITY. Write comprehensively but concisely. Use clear paragraphs for explanations and bullet points for lists. Provide deep, valuable insights.
+3. TARGET LENGTH & STYLE: {length_intent}
+4. Ground your entire response ONLY in the Exact Project Requirements provided above. Do not invent methodologies or features that are not listed in the structural data.
+5. {visual_prompt}
+6. {extra_instructions}
 
 WRITE CONTENT FOR '{chapter_title}' covering:
 {sub_chapters}
@@ -53,7 +63,7 @@ PROPOSAL_STRUCTURE = [
         ],
         "keywords": "problem pain points business environment gap urgency",
         "visual_intent": "bar_chart",
-        "length_intent": "Comprehensive and highly detailed. Thoroughly explain the background and urgency (approx. 500 words)."
+        "length_intent": "Detailed and comprehensive. Thoroughly explain the background and urgency, using a mix of paragraphs and bullet points. (Target: 400-500 words)."
     },
     {
         "id": "chap_2", "title": "BAB II – MAKSUD DAN TUJUAN PROGRAM",
@@ -65,21 +75,22 @@ PROPOSAL_STRUCTURE = [
             "2.5 Ruang Lingkup Program"
         ],
         "keywords": "objectives scope targets",
-        "length_intent": "Clear, structured, and descriptive. Elaborate on each objective using bullet points where necessary (approx. 300 words)."
+        "length_intent": "Structured and descriptive. Elaborate on each objective clearly. (Target: 250-350 words)."
     },
     {
         "id": "chap_3", "title": "BAB III – SOLUSI YANG DITAWARKAN",
         "subs": [
-            "3.1 Pendekatan Solusi (Training, Consulting, atau Terintegrasi)", 
+            "3.1 Pendekatan Solusi", 
             "3.2 Kerangka Solusi Berbasis Kebutuhan Klien", 
             "3.3 Posisi Solusi dalam Peta Transformasi Klien", 
-            "3.4 Nilai Tambah & Diferensiasi Solusi", 
-            "3.5 Solusi Pelatihan: Konsep, Learning Path, Metodologi, Metode Pelaksanaan, Output", 
-            "3.6 Solusi Konsultan: Pendekatan, Metodologi Kerja, Deliverables, Keterlibatan Tim"
+            "3.4 Nilai Tambah & Diferensiasi Solusi"
         ],
+        # Conditional sub-chapters injected dynamically via core.py
+        "sub_training": "3.5 Solusi Pelatihan: Konsep, Learning Path, Metodologi, Metode Pelaksanaan, Output",
+        "sub_consulting": "3.5 Solusi Konsultan: Pendekatan, Metodologi Kerja, Deliverables, Keterlibatan Tim",
         "keywords": "solution framework training consulting methodology",
         "visual_intent": "flowchart",
-        "length_intent": "Highly detailed, technical, and methodical. Provide deep explanations of the framework and methodologies. Use clear sub-headings (approx. 800 words)."
+        "length_intent": "Highly detailed, technical, and methodical. Provide deep explanations of the framework and methodologies. Use clear sub-headings. (Target: 600-800 words)."
     },
     {
         "id": "chap_4", "title": "BAB IV – RENCANA AKSI & IMPLEMENTASI",
@@ -92,7 +103,7 @@ PROPOSAL_STRUCTURE = [
         ],
         "keywords": "action plan timeline raci risk management",
         "visual_intent": "gantt",
-        "length_intent": "Structured timeline and responsibilities. Use strict Markdown tables for the RACI matrix and Timeline (approx. 400 words)."
+        "length_intent": "Structured and descriptive. Use Markdown tables for the RACI matrix and Timeline, but include detailed explanatory text for each phase. (Target: 400 words)."
     },
     {
         "id": "chap_5", "title": "BAB V – OUTPUT, OUTCOME, DAN INDIKATOR KEBERHASILAN",
@@ -104,7 +115,7 @@ PROPOSAL_STRUCTURE = [
             "5.5 Mekanisme Evaluasi & Perbaikan"
         ],
         "keywords": "kpi output outcome evaluation",
-        "length_intent": "Impact-focused and highly descriptive. Explain the metrics and outcomes clearly (approx. 350 words)."
+        "length_intent": "Impact-focused and highly descriptive. Explain the metrics and outcomes clearly. (Target: 300-400 words)."
     },
     {
         "id": "chap_6", "title": "BAB VI – TIM PELAKSANA",
@@ -114,7 +125,7 @@ PROPOSAL_STRUCTURE = [
             "6.3 Pengalaman Relevan Tim"
         ],
         "keywords": "team structure roles competence",
-        "length_intent": "Professional profiles and team hierarchy. Use bullet points for competencies (approx. 200 words)."
+        "length_intent": "Professional profiles and team hierarchy. Describe competencies with sufficient detail. (Target: 200-250 words)."
     },
     {
         "id": "chap_7", "title": "BAB VII – PORTOFOLIO & PENGALAMAN",
@@ -125,7 +136,7 @@ PROPOSAL_STRUCTURE = [
             "7.4 Testimoni"
         ],
         "keywords": "portfolio profile credibility Inixindo",
-        "length_intent": "Persuasive and credential-focused. Write confidently about the firm's experience (approx. 250 words)."
+        "length_intent": "Persuasive and credential-focused. Write confidently about the firm's experience. (Target: 250-300 words)."
     },
     {
         "id": "chap_8", "title": "BAB VIII – SKEMA BIAYA & INVESTASI",
@@ -136,7 +147,7 @@ PROPOSAL_STRUCTURE = [
             "8.4 Ketentuan Pembayaran"
         ],
         "keywords": "investment cost pricing ROI",
-        "length_intent": "Highly concise. Use strict Markdown tables for cost breakdowns and bullet points for terms. Do not write filler text (approx. 200 words)."
+        "length_intent": "Clear and detailed. Use Markdown tables for cost breakdowns and explain the value and payment terms thoroughly. (Target: 200-250 words)."
     },
     {
         "id": "chap_9", "title": "BAB IX – PENUTUP",
@@ -146,7 +157,7 @@ PROPOSAL_STRUCTURE = [
             "9.3 Kontak & Tindak Lanjut"
         ],
         "keywords": "closing contact commitment",
-        "length_intent": "Brief and impactful. Direct to the point (under 100 words)."
+        "length_intent": "Professional and impactful closing statement. (Target: 100-150 words)."
     }
 ]
 
