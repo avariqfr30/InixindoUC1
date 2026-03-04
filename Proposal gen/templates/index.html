@@ -1,233 +1,301 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Proposal Generator</title>
+    <title>Strategic Proposal System</title>
     <style>
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            background-color: #f4f7f6; 
-            color: #333; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            padding: 50px; 
-        }
-        h1 { color: #003366; }
-        .form-container { 
-            background: #fff; 
-            padding: 30px; 
-            border-radius: 8px; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
-            width: 100%; 
-            max-width: 500px; 
-        }
-        .form-group { margin-bottom: 20px; }
-        label { 
-            display: block; 
-            font-weight: bold; 
-            margin-bottom: 8px; 
-            color: #555; 
-        }
-        select { 
-            width: 100%; 
-            padding: 10px; 
-            border: 1px solid #ccc; 
-            border-radius: 4px; 
-            font-size: 16px; 
-            background-color: #fafafa; 
-        }
-        button { 
-            width: 100%; 
-            padding: 12px; 
-            background-color: #003366; 
-            color: white; 
-            border: none; 
-            border-radius: 4px; 
-            font-size: 16px; 
-            cursor: pointer; 
-            transition: background 0.3s; 
-            margin-top: 10px;
-        }
-        button:hover:not(:disabled) { background-color: #002244; }
-        button:disabled { background-color: #999; cursor: not-allowed; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f1f5f9; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; color: #334155; }
+        .card { background: white; padding: 50px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); width: 640px; }
+        .hidden { display: none; }
+        h2 { color: #0f172a; margin: 0 0 10px 0; font-size: 1.8rem; }
+        p.sub { color: #64748b; margin: 0 0 30px 0; font-size: 1rem; }
+        label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.95rem; }
+        select, button { width: 100%; padding: 14px; margin-bottom: 20px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 1.05rem; background: white; }
+        select:focus { border-color: #3b82f6; outline: none; }
+        button { background: #2563eb; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background: #1d4ed8; }
+        button:disabled { background: #94a3b8; cursor: not-allowed; }
+        button.secondary { background: white; color: #475569; border: 1px solid #cbd5e1; }
+        button.secondary:hover { background: #f8fafc; }
+        .review-box { background: #f8fafc; padding: 25px; border-radius: 12px; margin-bottom: 25px; border: 1px solid #e2e8f0; }
+        .review-row { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 1rem; }
+        .review-row span:last-child { font-weight: 600; color: #0f172a; }
+        .spinner { width: 24px; height: 24px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; display: none; vertical-align: middle; margin-left: 10px; }
+        .spinner.active { display: inline-block; }
+        .error-text { color: #ef4444; font-weight: 600; margin-bottom: 15px; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-    <h1>Proposal Generator</h1>
-    <div class="form-container">
-        <form onsubmit="generateProposal(event)">
+    <div class="card">
+        <div id="loader" style="text-align:center; padding: 40px;">
+            <div style="border:4px solid #e2e8f0; border-top:4px solid #3b82f6; border-radius:50%; width:40px; height:40px; animation:spin 1s linear infinite; margin:0 auto 20px auto;"></div>
+            <p id="loader-text">Memuat Sistem...</p>
+        </div>
+
+        <div id="step-config" class="hidden">
+            <h2>Inixindo Strategic Proposal System</h2>
+            <p class="sub">AI-Powered Consultant Workspace</p>
             
-            <div class="form-group">
-                <label id="label-entity" for="entity">Client Entity</label>
-                <select id="entity" onchange="updateTopics()" required>
-                    <option value="" disabled selected>Loading data...</option>
-                </select>
+            <label id="label-entity">Klien / Entitas</label>
+            <select id="select-entity"></select>
+            
+            <div id="container-topic" class="hidden">
+                <label id="label-topic">Inisiatif Strategis</label>
+                <select id="select-topic"></select>
             </div>
 
-            <div class="form-group">
-                <label id="label-topic" for="topic">Strategic Initiative</label>
-                <select id="topic" onchange="updateBudgets()" disabled required>
-                    <option value="" disabled selected>Select an entity first...</option>
-                </select>
+            <div id="container-budget" class="hidden">
+                <label id="label-budget">Estimasi Investasi</label>
+                <select id="select-budget"></select>
             </div>
 
-            <div class="form-group">
-                <label id="label-budget" for="budget">Investment Estimation</label>
-                <select id="budget" disabled required>
-                    <option value="" disabled selected>Select a topic first...</option>
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label for="service_type">Service Type</label>
-                <select id="service_type" required>
-                    <option value="Consulting" selected>Consulting Engagement</option>
+            <div id="container-service" class="hidden">
+                <label id="label-service">Tipe Layanan</label>
+                <select id="select-service">
+                    <option value="" disabled selected>Pilih Layanan...</option>
+                    <option value="Consulting">Consulting Engagement</option>
                     <option value="Training">Training Program</option>
                 </select>
             </div>
+            
+            <button id="btn-review" disabled>Lanjut Tinjau Data</button>
+            <button id="btn-refresh" class="secondary" style="font-size:0.9rem; padding:10px;">🔄 Refresh Database (CSV)</button>
+        </div>
 
-            <button type="submit" id="generate-btn">Generate Proposal</button>
-        </form>
+        <div id="step-review" class="hidden">
+            <h2>Konfirmasi Detail</h2>
+            <p class="sub">Pastikan data berikut sudah benar.</p>
+            <div class="review-box" id="review-text"></div>
+            <div style="display:flex; gap:15px;">
+                <button id="btn-back" class="secondary" style="width:35%">Kembali</button>
+                <button id="btn-generate" style="width:65%">Generate Dokumen <span id="spinner" class="spinner"></span></button>
+            </div>
+        </div>
+
+        <div id="step-success" class="hidden" style="text-align:center; padding: 20px;">
+            <div style="font-size: 60px; margin-bottom: 20px;">✅</div>
+            <h2>Selesai!</h2>
+            <p class="sub">Dokumen telah berhasil disusun dan diunduh.</p>
+            <button onclick="location.reload()" class="secondary">Buat Proposal Baru</button>
+        </div>
     </div>
 
     <script>
-        let dbStructure = {};
+        let databaseStructure = {}; 
+        
+        // Map all UI elements
+        const ui = {
+            loader: document.getElementById('loader'),
+            loaderText: document.getElementById('loader-text'),
+            configStep: document.getElementById('step-config'),
+            reviewStep: document.getElementById('step-review'),
+            successStep: document.getElementById('step-success'),
+            
+            selectEntity: document.getElementById('select-entity'),
+            selectTopic: document.getElementById('select-topic'),
+            selectBudget: document.getElementById('select-budget'),
+            selectService: document.getElementById('select-service'),
+            
+            containerTopic: document.getElementById('container-topic'),
+            containerBudget: document.getElementById('container-budget'),
+            containerService: document.getElementById('container-service'),
+            
+            labelEntity: document.getElementById('label-entity'),
+            labelTopic: document.getElementById('label-topic'),
+            labelBudget: document.getElementById('label-budget'),
+            reviewText: document.getElementById('review-text'),
+            
+            btnReview: document.getElementById('btn-review'),
+            btnGenerate: document.getElementById('btn-generate'),
+            btnRefresh: document.getElementById('btn-refresh'),
+            btnBack: document.getElementById('btn-back'),
+            spinner: document.getElementById('spinner')
+        };
+        
+        // Load configurations from backend
+        function loadConfig() {
+            fetch('/get-config')
+                .then(response => {
+                    if (!response.ok) throw new Error("Database Load Failed. Is db.csv missing?");
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) throw new Error(data.error);
+                    
+                    databaseStructure = data.structure; 
+                    
+                    // Assign dynamic labels based on python mappings
+                    ui.labelEntity.innerText = data.labels[0] || "Client Entity"; 
+                    ui.labelTopic.innerText = data.labels[1] || "Strategic Initiative";
+                    ui.labelBudget.innerText = data.labels[2] || "Investment Estimation";
+                    
+                    // Populate first level (Entity)
+                    ui.selectEntity.innerHTML = '<option value="" disabled selected>Pilih Opsi...</option>';
+                    Object.keys(databaseStructure).forEach(key => { 
+                        let option = document.createElement('option'); 
+                        option.value = key; 
+                        option.text = key; 
+                        ui.selectEntity.add(option); 
+                    });
+                    
+                    ui.loader.classList.add('hidden'); 
+                    ui.configStep.classList.remove('hidden');
+                })
+                .catch(err => {
+                    console.error("Initialization error:", err);
+                    ui.loaderText.innerHTML = `<span class="error-text">${err.message}</span>`;
+                });
+        }
+        
+        loadConfig();
 
-        window.onload = async function() {
-            try {
-                const response = await fetch('/get-config');
-                const data = await response.json();
+        // Database Refresh
+        ui.btnRefresh.onclick = () => {
+            ui.btnRefresh.innerText = "Refreshing..."; 
+            ui.btnRefresh.disabled = true;
+            fetch('/refresh-knowledge', {method: 'POST'})
+                .then(response => response.json())
+                .then(res => { 
+                    alert("Database Refreshed"); 
+                    location.reload(); 
+                })
+                .catch(err => {
+                    console.error("Failed to refresh:", err);
+                    ui.btnRefresh.innerText = "🔄 Refresh Database (CSV)";
+                    ui.btnRefresh.disabled = false;
+                });
+        };
+
+        // CASCADE 1: Entity changes -> Load Topics
+        ui.selectEntity.onchange = () => { 
+            ui.selectTopic.innerHTML = '<option value="" disabled selected>Pilih Opsi...</option>'; 
+            ui.selectBudget.innerHTML = ''; 
+            ui.selectService.value = ""; // Reset service
+            
+            const selectedEntity = ui.selectEntity.value;
+            
+            if (selectedEntity && databaseStructure[selectedEntity]) {
+                const topics = databaseStructure[selectedEntity].topics;
+                Object.keys(topics).forEach(topic => { 
+                    let option = document.createElement('option'); 
+                    option.value = topic; 
+                    option.text = topic; 
+                    ui.selectTopic.add(option); 
+                }); 
                 
-                dbStructure = data.structure;
-                
-                document.getElementById('label-entity').innerText = data.labels[0];
-                document.getElementById('label-topic').innerText = data.labels[1];
-                document.getElementById('label-budget').innerText = data.labels[2];
-                
-                const entitySelect = document.getElementById('entity');
-                entitySelect.innerHTML = '<option value="" disabled selected>Select an option...</option>'; 
-                
-                for (const entityName in dbStructure) {
-                    let opt = document.createElement('option');
-                    opt.value = entityName;
-                    opt.innerHTML = entityName;
-                    entitySelect.appendChild(opt);
-                }
-            } catch (error) {
-                console.error("Error loading config:", error);
-                document.getElementById('entity').innerHTML = '<option value="" disabled>Error loading data</option>';
+                ui.containerTopic.classList.remove('hidden'); 
+                ui.containerBudget.classList.add('hidden');
+                ui.containerService.classList.add('hidden');
+                ui.btnReview.disabled = true; 
             }
         };
 
-        function updateTopics() {
-            const entitySelect = document.getElementById('entity');
-            const topicSelect = document.getElementById('topic');
-            const budgetSelect = document.getElementById('budget');
+        // CASCADE 2: Topic changes -> Load Budgets
+        ui.selectTopic.onchange = () => {
+            ui.selectBudget.innerHTML = '<option value="" disabled selected>Pilih Opsi...</option>';
+            ui.selectService.value = ""; // Reset service
             
-            topicSelect.innerHTML = '<option value="" disabled selected>Select an option...</option>';
-            budgetSelect.innerHTML = '<option value="" disabled selected>Select a topic first...</option>';
-            budgetSelect.disabled = true;
+            const selectedEntity = ui.selectEntity.value;
+            const selectedTopic = ui.selectTopic.value;
             
-            const selectedEntity = entitySelect.value;
-            
-            if (selectedEntity && dbStructure[selectedEntity]) {
-                topicSelect.disabled = false;
-                const topics = dbStructure[selectedEntity].topics;
-                
-                for (const topicName in topics) {
-                    let opt = document.createElement('option');
-                    opt.value = topicName;
-                    opt.innerHTML = topicName;
-                    topicSelect.appendChild(opt);
-                }
-            } else {
-                topicSelect.disabled = true;
-            }
-        }
-
-        function updateBudgets() {
-            const entitySelect = document.getElementById('entity');
-            const topicSelect = document.getElementById('topic');
-            const budgetSelect = document.getElementById('budget');
-            
-            budgetSelect.innerHTML = '<option value="" disabled selected>Select an option...</option>';
-            
-            const selectedEntity = entitySelect.value;
-            const selectedTopic = topicSelect.value;
-            
-            if (selectedEntity && selectedTopic && dbStructure[selectedEntity].topics[selectedTopic]) {
-                budgetSelect.disabled = false;
-                const budgets = dbStructure[selectedEntity].topics[selectedTopic].budgets;
-                
-                budgets.forEach(budgetVal => {
-                    let opt = document.createElement('option');
-                    opt.value = budgetVal;
-                    opt.innerHTML = budgetVal;
-                    budgetSelect.appendChild(opt);
-                });
-            } else {
-                budgetSelect.disabled = true;
-            }
-        }
-
-        async function generateProposal(event) {
-            event.preventDefault();
-            const btn = document.getElementById('generate-btn');
-            const originalText = btn.innerText;
-            
-            const entity = document.getElementById('entity').value;
-            const topic = document.getElementById('topic').value;
-            const budget = document.getElementById('budget').value;
-            const service_type = document.getElementById('service_type').value;
-            
-            if (!entity || !topic || !budget || !service_type) {
-                alert("Please select all options before generating.");
-                return;
-            }
-            
-            // PAYLOAD UPDATED WITH SERVICE TYPE
-            const payload = { entity, topic, budget, service_type };
-            
-            try {
-                btn.innerText = "Generating... (This may take a minute)";
-                btn.disabled = true;
-                
-                const response = await fetch('/generate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+            if (selectedEntity && selectedTopic && databaseStructure[selectedEntity].topics[selectedTopic]) {
+                const budgets = databaseStructure[selectedEntity].topics[selectedTopic].budgets;
+                budgets.forEach(budget => {
+                    let option = document.createElement('option'); 
+                    option.value = budget; 
+                    option.text = budget; 
+                    ui.selectBudget.add(option);
                 });
                 
-                if (!response.ok) throw new Error("Generation failed");
-                
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                
-                const disposition = response.headers.get('Content-Disposition');
-                let filename = "Proposal.docx";
-                if (disposition && disposition.indexOf('attachment') !== -1) {
-                    const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
-                    if (matches != null && matches[1]) filename = matches[1].replace(/['"]/g, '');
-                }
-                
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
+                ui.containerBudget.classList.remove('hidden');
+                ui.containerService.classList.add('hidden');
+                ui.btnReview.disabled = true;
+            }
+        };
+
+        // CASCADE 3: Budget selected -> Show Service options
+        ui.selectBudget.onchange = () => {
+            ui.containerService.classList.remove('hidden');
+            checkReviewReady();
+        };
+
+        // Final check: Enable button when everything is selected
+        ui.selectService.onchange = () => {
+            checkReviewReady();
+        };
+
+        function checkReviewReady() {
+            if (ui.selectEntity.value && ui.selectTopic.value && ui.selectBudget.value && ui.selectService.value) {
+                ui.btnReview.disabled = false;
+            } else {
+                ui.btnReview.disabled = true;
+            }
+        }
+        
+        // Review Screen Data Transfer
+        ui.btnReview.onclick = () => { 
+            const html = `
+                <div class="review-row"><span>Klien</span><span>${ui.selectEntity.value}</span></div>
+                <div class="review-row"><span>Inisiatif</span><span>${ui.selectTopic.value}</span></div>
+                <div class="review-row"><span>Anggaran</span><span>${ui.selectBudget.value}</span></div>
+                <div class="review-row"><span>Tipe Layanan</span><span>${ui.selectService.options[ui.selectService.selectedIndex].text}</span></div>
+                <div class="review-row"><span>Konsultan</span><span style="color:#2563eb">Inixindo Jogja</span></div>
+            `;
+            ui.reviewText.innerHTML = html; 
+            ui.configStep.classList.add('hidden'); 
+            ui.reviewStep.classList.remove('hidden'); 
+        };
+        
+        ui.btnBack.onclick = () => { 
+            ui.reviewStep.classList.add('hidden'); 
+            ui.configStep.classList.remove('hidden'); 
+        };
+        
+        // Generate Call with new payload
+        ui.btnGenerate.onclick = () => {
+            ui.btnGenerate.disabled = true; 
+            ui.spinner.classList.add('active');
+            
+            const payload = {
+                entity: ui.selectEntity.value,
+                topic: ui.selectTopic.value,
+                budget: ui.selectBudget.value,
+                service_type: ui.selectService.value
+            };
+
+            fetch('/generate', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify(payload) 
+            })
+            .then(response => {
+                if (!response.ok) throw new Error("Document generation failed on server.");
+                return response.blob();
+            })
+            .then(blob => {
+                let url = window.URL.createObjectURL(blob);
+                let a = document.createElement('a'); 
+                a.href = url; 
+                // Format file name safely
+                const safeEntity = ui.selectEntity.value.replace(/\s+/g, '_');
+                const safeTopic = ui.selectTopic.value.replace(/\s+/g, '_');
+                a.download = `Proposal_${safeEntity}_${safeTopic}.docx`; 
                 a.click();
-                window.URL.revokeObjectURL(url);
-                a.remove();
                 
-            } catch (error) {
-                console.error("Error generating document:", error);
-                alert("An error occurred while generating the proposal.");
-            } finally {
-                btn.innerText = originalText;
-                btn.disabled = false;
-            }
-        }
+                window.URL.revokeObjectURL(url);
+                
+                ui.reviewStep.classList.add('hidden'); 
+                ui.successStep.classList.remove('hidden');
+            })
+            .catch(err => {
+                console.error("Document generation failed:", err);
+                alert("Failed to generate document. Check server logs.");
+                ui.btnGenerate.disabled = false;
+                ui.spinner.classList.remove('active');
+            });
+        };
     </script>
 </body>
 </html>
