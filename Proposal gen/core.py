@@ -192,13 +192,9 @@ class Researcher:
         res = Researcher.search(f"{entity_name} official company profile about us", limit=2)
         if not res or 'items' not in res: 
             return f"{entity_name} (Contact info lookup failed)"
-        
         top_url = res['items'][0]['link']
         page_content = Researcher.fetch_page_content(top_url)
-        
-        if page_content:
-            return f"Profile data from {top_url}:\n{page_content}"
-        
+        if page_content: return f"Profile data from {top_url}:\n{page_content}"
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
     @staticmethod
@@ -207,6 +203,25 @@ class Researcher:
         res = Researcher.search(query, limit=3)
         if not res or 'items' not in res: 
             return f"{entity_name} (Details unavailable in search)"
+        return "\n".join([i.get('snippet', '') for i in res['items']])
+
+    # --- NEW: Focused Historical & Collaboration Research ---
+    @staticmethod
+    def get_collaboration_data(client, firm):
+        res = Researcher.search(f"\"{client}\" \"{firm}\" partnership OR project OR kerjasama", limit=2)
+        if not res or 'items' not in res: return f"No public records of prior collaboration found."
+        return "\n".join([i.get('snippet', '') for i in res['items']])
+
+    @staticmethod
+    def get_firm_experience(firm, project):
+        res = Researcher.search(f"\"{firm}\" {project} portfolio OR case study OR experience", limit=2)
+        if not res or 'items' not in res: return f"Rely on general firm capabilities."
+        return "\n".join([i.get('snippet', '') for i in res['items']])
+
+    @staticmethod
+    def get_client_initiative_context(client, project):
+        res = Researcher.search(f"\"{client}\" {project} strategy OR news OR initiative history", limit=2)
+        if not res or 'items' not in res: return f"No specific news found for this initiative."
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
 class LogoManager:
@@ -221,28 +236,43 @@ class LogoManager:
                 'q': f"{client_name} logo png transparent", 
                 'key': GOOGLE_API_KEY, 
                 'cx': GOOGLE_CX_ID, 
-                'num': 1, 
+                'num': 3, 
                 'searchType': 'image'
             }
-            res = requests.get("https://www.googleapis.com/customsearch/v1", params=params, timeout=4).json()
+            res = requests.get("https://www.googleapis.com/customsearch/v1", params=params, timeout=5).json()
             
             if 'items' in res:
-                img_resp = requests.get(res['items'][0]['link'], timeout=5)
-                if img_resp.status_code == 200:
-                    stream = io.BytesIO(img_resp.content)
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+                
+                for item in res['items']:
                     try:
-                        img = Image.open(stream).convert('RGB')
-                        img.thumbnail((150, 150))
-                        dom_color = tuple(map(int, ImageStat.Stat(img).mean[:3]))
-                        stream.seek(0)
-                        return stream, dom_color
-                    except Exception as e:
-                        logger.error(f"Failed to process image colors: {e}")
-                        stream.seek(0)
-                        return stream, DEFAULT_COLOR
+                        img_url = item['link']
+                        img_resp = requests.get(img_url, headers=headers, timeout=5)
+                        
+                        if img_resp.status_code == 200:
+                            stream = io.BytesIO(img_resp.content)
+                            try:
+                                # Test if Pillow can actually open it (catches corrupt/SVG files)
+                                img = Image.open(stream).convert('RGB')
+                                img.thumbnail((150, 150))
+                                dom_color = tuple(map(int, ImageStat.Stat(img).mean[:3]))
+                                stream.seek(0)
+                                return stream, dom_color # Return immediately on success
+                                
+                            except Exception as img_err:
+                                logger.warning(f"Image processing failed for {img_url}: {img_err}")
+                                continue # Try the next image in the loop
+                                
+                    except Exception as req_err:
+                        logger.warning(f"Download timeout/error for {item.get('link')}: {req_err}")
+                        continue # Try the next image in the loop
+                        
         except Exception as e: 
-            logger.error(f"Failed to fetch logo for {client_name}: {e}")
+            logger.error(f"Google Search API failed for logo lookup: {e}")
             
+        # If all loop attempts fail, return the default
         return None, DEFAULT_COLOR
 
 class StyleEngine:
@@ -251,8 +281,8 @@ class StyleEngine:
     def apply_document_styles(doc):
         style = doc.styles['Normal']
         font = style.font
-        font.name = 'Times New Roman'
-        font.size = Pt(12)
+        font.name = 'Calibri'
+        font.size = Pt(11)
         
         pf = style.paragraph_format
         pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
@@ -455,13 +485,19 @@ class DocumentBuilder:
         for element in soup.children:
             if element.name is None: continue
             
-            if element.name in ['h1', 'h2', 'h3']:
+            if element.name in ['h1', 'h2', 'h3', 'h4']:
                 level = int(element.name[1])
                 p = doc.add_heading(element.get_text().strip(), level=level)
+                
+                p.paragraph_format.space_before = Pt(24 if level == 2 else 16)
+                p.paragraph_format.space_after = Pt(8)
+                p.paragraph_format.keep_with_next = True 
+                
                 for run in p.runs:
                     run.font.color.rgb = RGBColor(*theme_color)
-                    run.font.name = 'Times New Roman'
+                    run.font.name = 'Arial'
                     run.font.size = Pt(14 if level == 2 else 12)
+                    run.bold = True
             
             elif element.name == 'p':
                 text = element.get_text().strip()
@@ -555,16 +591,13 @@ class DocumentBuilder:
                     p.add_run().add_picture(img, width=Inches(2.5))
                 continue
             
-            # --- START FIX: Markdown Table Spacing Tracker ---
             if line.startswith('|'):
                 if not in_table:
-                    # If we are starting a table, ensure the previous line was totally blank
                     if clean_lines and clean_lines[-1] != "":
                         clean_lines.append("")
                     in_table = True
             else:
                 in_table = False
-            # --- END FIX ---
                 
             clean_lines.append(line)
         
@@ -617,13 +650,33 @@ class ProposalGenerator:
         self.kb = kb_instance
         self.io_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
-    def _fetch_chapter_context(self, chap, client, project, budget, service_type, global_future, writer_future):
+    def _fetch_chapter_context(self, chap, client, project, budget, service_type, research_futures):
         try:
-            try: global_data = global_future.result(timeout=10)
+            # Resolve all the deeply targeted futures
+            try: global_data = research_futures['profile'].result(timeout=10)
             except Exception: global_data = ""
             
-            try: writer_data = writer_future.result(timeout=10)
+            try: writer_data = research_futures['contact'].result(timeout=10)
             except Exception: writer_data = "Unavailable"
+            
+            try: collab_data = research_futures['collab'].result(timeout=10)
+            except Exception: collab_data = "Unavailable"
+            
+            try: firm_exp_data = research_futures['firm_exp'].result(timeout=10)
+            except Exception: firm_exp_data = "Unavailable"
+            
+            try: client_init_data = research_futures['client_init'].result(timeout=10)
+            except Exception: client_init_data = "Unavailable"
+
+            # Package into unified Web Data variable for the LLM
+            compiled_web_data = f"""
+            === EXTRACTED INTELLIGENCE ===
+            Client Profile: {global_data}
+            Client & Initiative News: {client_init_data}
+            Past Collaboration ({client} & {WRITER_FIRM_NAME}): {collab_data}
+            Writer Firm Contact: {writer_data}
+            Writer Firm Specific Experience ({project}): {firm_exp_data}
+            """
 
             structured_row_data = self.kb.get_exact_context(client, project, budget)
             rag_data = self.kb.query(client, project, chap['keywords'])
@@ -638,7 +691,6 @@ class ProposalGenerator:
                 elif service_type == 'Consulting' and 'sub_consulting' in chap:
                     subs_list.append(chap['sub_consulting'])
                 else:
-                    # Default fallback just in case
                     subs_list.append(chap['sub_consulting'])
                     
             subs = "\n".join([f"- {s}" for s in subs_list])
@@ -652,8 +704,23 @@ class ProposalGenerator:
                 elif chap['visual_intent'] == "flowchart": 
                     visual_prompt = "Process visual: [[FLOW: Step 1 -> Step 2 -> Step 3]]."
 
+            # --- DYNAMIC SURGICAL INSTRUCTION INJECTION ---
             extra = ""
-            if chap['id'] == 'chap_9':
+            if chap['id'] == 'chap_1':
+                extra = f"""
+                [MANDATORY FOR CHAPTER 1]
+                - You MUST integrate historical evidence of {client} from the Extracted Intelligence.
+                - You MUST include supporting details about {client} regarding the '{project}' initiative.
+                - You MUST address past collaborations between {client} and {WRITER_FIRM_NAME} using the Past Collaboration data. If no data exists, clearly state that this is a new strategic partnership.
+                """
+            elif chap['id'] == 'chap_7':
+                extra = f"""
+                [MANDATORY FOR CHAPTER 7]
+                - You MUST detail factual historical evidence of {WRITER_FIRM_NAME}.
+                - You MUST emphasize {WRITER_FIRM_NAME}'s experience dealing with cases/initiatives similar to '{project}', heavily utilizing the 'Writer Firm Specific Experience' data provided.
+                - Combine this with the Historical Vector Context.
+                """
+            elif chap['id'] == 'chap_9':
                 extra = f"""
                 [MANDATORY]
                 Create a Markdown Table for Contact Information.
@@ -665,7 +732,7 @@ class ProposalGenerator:
                 client=client,
                 writer_firm=WRITER_FIRM_NAME,
                 persona=persona,
-                web_data=f"Client Web Data:\n{global_data}\nFirm Details:\n{writer_data}",
+                web_data=compiled_web_data,
                 structured_row_data=structured_row_data,
                 rag_data=rag_data,
                 visual_prompt=visual_prompt,
@@ -684,14 +751,20 @@ class ProposalGenerator:
     def run(self, client, project, budget=None, service_type="Consulting"):
         logger.info(f"Starting Proposal Generation: Client={client}, Project={project}, Service={service_type}")
         
-        global_future = self.io_pool.submit(Researcher.get_entity_profile, client)
-        writer_future = self.io_pool.submit(Researcher.get_contact_details, WRITER_FIRM_NAME)
+        # --- NEW: Enhanced OSINT Future Dictionary ---
+        research_futures = {
+            'profile': self.io_pool.submit(Researcher.get_entity_profile, client),
+            'contact': self.io_pool.submit(Researcher.get_contact_details, WRITER_FIRM_NAME),
+            'collab': self.io_pool.submit(Researcher.get_collaboration_data, client, WRITER_FIRM_NAME),
+            'firm_exp': self.io_pool.submit(Researcher.get_firm_experience, WRITER_FIRM_NAME, project),
+            'client_init': self.io_pool.submit(Researcher.get_client_initiative_context, client, project)
+        }
         logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, client)
         
         context_futures = {}
         for chap in PROPOSAL_STRUCTURE:
             context_futures[chap['id']] = self.io_pool.submit(
-                self._fetch_chapter_context, chap, client, project, budget, service_type, global_future, writer_future
+                self._fetch_chapter_context, chap, client, project, budget, service_type, research_futures
             )
 
         try: logo_stream, theme_color = logo_future.result(timeout=8)
@@ -702,7 +775,7 @@ class ProposalGenerator:
         doc = Document()
         DocumentBuilder.create_cover(doc, client, project, logo_stream, theme_color)
         
-        for chap in PROPOSAL_STRUCTURE:
+        for i, chap in enumerate(PROPOSAL_STRUCTURE):
             logger.info(f"Generating content for: {chap['title']}")
             ctx = context_futures[chap['id']].result()
             
@@ -720,9 +793,14 @@ class ProposalGenerator:
                     h = doc.add_heading(chap['title'], level=1)
                     h.runs[0].font.color.rgb = RGBColor(*theme_color)
                     h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    h.paragraph_format.space_before = Pt(0)
+                    h.paragraph_format.space_after = Pt(18)
+                    h.paragraph_format.keep_with_next = True 
                     
                     DocumentBuilder.process_content(doc, res['message']['content'], theme_color, chap['title'])
-                    doc.add_page_break()
+                    
+                    if i < len(PROPOSAL_STRUCTURE) - 1:
+                        doc.add_page_break()
                     
                 except Exception as e:
                     logger.error(f"LLM Generation Error for {chap['title']}: {e}")
