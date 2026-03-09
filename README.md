@@ -1,25 +1,30 @@
-# Inixindo Use Case 1
-# AI Proposal Generator 📄🤖
+# Inixindo Enterprise Proposal Engine 📄🏢
 
-Aplikasi ini adalah sistem pembuat dokumen proposal strategis otomatis berbasis web. Dibangun menggunakan **Flask**, aplikasi ini memanfaatkan model bahasa lokal (LLM) melalui **Ollama** dan sistem *Retrieval-Augmented Generation* (RAG) menggunakan **ChromaDB**. Aplikasi ini juga diperkaya dengan fitur pencarian web *real-time* untuk melengkapi profil klien secara otomatis.
+Aplikasi ini adalah sistem *enterprise* berbasis web untuk mengotomatiskan penyusunan dokumen proposal strategis IT. Dibangun menggunakan arsitektur modular **Flask**, sistem ini memadukan kekuatan *Large Language Models* (LLM) via **Ollama**, *Retrieval-Augmented Generation* (RAG) via **ChromaDB**, dan mesin *Open Source Intelligence* (OSINT) untuk menyusun proposal yang sangat presisi, lengkap dengan visualisasi data otomatis.
+
+Pada versi ini (V1.0), aplikasi telah mendukung pola arsitektur *Adapter* untuk integrasi API internal perusahaan dan telah di-*containerize* (Docker) untuk kemudahan *deployment* ke ekosistem *cloud* seperti AWS.
+
+## ✨ Fitur Utama
+
+* **Smart Discovery UI**: Antarmuka dinamis dengan *Intelligent Autocomplete* yang otomatis menyesuaikan saran *pain points* dan regulasi berdasarkan sektor industri klien.
+* **Firm API Adapter**: Memiliki fitur `DEMO_MODE` untuk presentasi (*mock data*), yang dapat dimatikan (`False`) untuk beralih mengambil standar metodologi dan struktur tim secara langsung dari API internal perusahaan.
+* **OSINT Engine**: Modul *researcher* yang otomatis mencari berita terbaru klien, mandat regulasi terkini, dan mengekstrak warna serta logo korporat (berbasis regex pintar) secara *real-time*.
+* **Auto-Migration DB**: Tidak lagi bergantung murni pada *flat file*. Sistem akan otomatis mengonversi `db.csv` menjadi basis data relasional SQLite (`projects.db`) pada saat pertama kali dijalankan.
+* **Production Ready**: Dilengkapi dengan konfigurasi Gunicorn dan Docker Compose untuk *deployment* tanpa hambatan.
 
 ## 📋 Prasyarat Sistem
 
-Sebelum menjalankan aplikasi, pastikan sistem Anda memiliki komponen berikut:
+* **Python 3.9+** (Jika menjalankan secara lokal tanpa Docker).
+* **Ollama**: Menggunakan *Ollama Cloud Endpoint* atau berjalan sebagai *local daemon* di port `11434`.
+* **Google Custom Search API**: Membutuhkan `API_KEY` dan `CX_ID` untuk mengaktifkan fitur riset OSINT dan ekstraksi visual.
+* **Docker & Docker Compose** (Opsional, khusus untuk *deployment* di server *cloud*/AWS).
 
-1. **Python 3.9 atau lebih baru**: Terinstal dan dapat diakses melalui terminal.
-2. **Ollama**: Aplikasi pihak ketiga untuk menjalankan model AI secara lokal pada `http://127.0.0.1:11434`.
-3. **Google API Key & Custom Search Engine ID (CX)**: Untuk fitur ekstraksi data dan logo dari internet.
-4. **File Database (`db.csv`)**: File berisi histori atau data proyek (*Knowledge Base*).
+## 🚀 Instalasi Lokal (Development)
 
-## 🚀 Langkah-langkah Instalasi
+### 1. Persiapan Lingkungan Virtual
+Sangat disarankan menggunakan *virtual environment* untuk mengisolasi dependensi aplikasi.
 
-### 1. Persiapan Direktori dan Virtual Environment
-Sangat disarankan untuk menggunakan *virtual environment* agar dependensi aplikasi ini tidak mengganggu proyek Python Anda yang lain.
-
-Buka terminal dan jalankan perintah berikut:
-
-bash
+```bash
 # Buat virtual environment
 python3 -m venv venv
 
@@ -27,50 +32,49 @@ python3 -m venv venv
 source venv/bin/activate
 # ATAU untuk Windows
 # venv\Scripts\activate
+```
 
+### 2. Instalasi Dependensi
+Instal seluruh *library* yang dibutuhkan dengan perintah berikut:
 
-### 2. Instalasi Dependensi (Library)
-Aplikasi ini membutuhkan beberapa pustaka eksternal. Instal semuanya menggunakan `pip`:
-
-bash
-pip install flask flask-cors pandas chromadb ollama matplotlib python-docx markdown beautifulsoup4 requests Pillow
-
+```bash
+pip install flask flask-cors pandas chromadb ollama matplotlib python-docx markdown beautifulsoup4 requests Pillow sqlalchemy gunicorn
+```
 
 ### 3. Konfigurasi Sistem (`config.py`)
-Buka file `config.py` dan sesuaikan beberapa variabel penting berikut:
+Buka file `config.py` dan perhatikan parameter kunci berikut sebelum menjalankan aplikasi:
 
-* **Kredensial Google**: 
-  Masukkan `GOOGLE_API_KEY` dan `GOOGLE_CX_ID` milik Anda. Jika ini tidak diisi, fitur pencarian web dan pengambilan logo akan dilewati.
-* **Model AI**:
-  Secara default, kode menggunakan `LLM_MODEL = "gpt-oss:120b-cloud"` dan `EMBED_MODEL = "bge-m3:latest"`. Sesuaikan model LLM dengan kapasitas spesifikasi komputer keras Anda (misalnya ubah ke `llama3:8b` atau `phi3:mini` jika mengalami kendala memori yang terbatas).
+* **Mode Operasi**: Set `DEMO_MODE = True` untuk pengujian lokal. Saat diserahkan ke tim IT, ubah menjadi `False` dan masukkan URL API perusahaan di variabel `FIRM_API_URL`.
+* **Kredensial API**: Masukkan `GOOGLE_API_KEY` dan `GOOGLE_CX_ID`.
+* **Routing AI**: Pastikan variabel `OLLAMA_HOST` mengarah ke *endpoint* yang tepat (lokal `http://127.0.0.1:11434` atau URL Ollama Cloud Anda).
 
-### 4. Menyiapkan Ollama (Lokal AI)
-Pastikan aplikasi Ollama sudah berjalan di latar belakang. Buka terminal baru dan jalankan perintah berikut untuk mengunduh model yang dibutuhkan oleh sistem:
+### 4. Inisialisasi Basis Data
+Aplikasi beroperasi menggunakan SQLite. Jika file `projects.db` belum ada, cukup letakkan file `db.csv` Anda di *root directory*. Pada saat *startup*, sistem akan otomatis membersihkan data, melakukan pemformatan (seperti format Rupiah), dan memigrasikannya secara permanen ke dalam SQLite.
 
-bash
-# Mengunduh model embedding untuk ChromaDB
-ollama pull bge-m3:latest
+### 5. Menjalankan Aplikasi
+```bash
+python app.py
+```
+Aplikasi dapat diakses melalui browser di `http://127.0.0.1:5000`.
 
-# Mengunduh model LLM utama (sesuaikan dengan yang Anda tulis di config.py)
-ollama pull gpt-oss:120b-cloud
+---
 
+## ☁️ Deployment ke Production (AWS / Cloud)
 
-### 5. Menyiapkan File Database
-Pastikan Anda menempatkan file bernama `db.csv` di folder yang sama dengan `app.py`. File ini setidaknya harus memiliki dua kolom (contoh di kode: entitas utama dan sub-entitas) agar dapat dimuat oleh `KnowledgeBase`.
+Untuk tahap serah terima (*handover*) ke tim infrastruktur/IT, aplikasi ini telah dikonfigurasi menggunakan Docker untuk metode *Lift and Shift* ke server seperti AWS EC2.
 
-## ▶️ Cara Menjalankan Aplikasi
+1.  Siapkan VM/Instance (contoh: AWS EC2 `t3.medium` jika komputasi AI sudah di-*offload* ke Ollama Cloud).
+2.  Salin seluruh *source code* ke dalam server.
+3.  Jalankan perintah berikut di terminal server:
 
-Setelah semua langkah di atas selesai, Anda siap untuk menyalakan server lokal Flask:
+```bash
+docker-compose up -d --build
+```
 
-1. Pastikan Anda masih berada di dalam *virtual environment*.
-2. Jalankan aplikasi menggunakan Python:
-   bash
-   python app.py
-   
-3. Terminal akan menampilkan log bahwa server berjalan di `port=5000` (biasanya di `http://127.0.0.1:5000`).
-4. Buka *web browser* Anda dan kunjungi alamat tersebut untuk memuat halaman `index.html`.
-5. Masukkan topik dan sub-topik proposal, lalu klik tombol *Generate*. Sistem akan memproses data dan otomatis mengunduh file berekstensi `.docx` ke perangkat Anda dengan tipe MIME `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
+Arsitektur ini akan:
+* Membangun *image* Python menggunakan server WSGI tangguh (Gunicorn) dengan 4 *worker*.
+* Menjaga persistensi data SQLite dan *Vector Database* ChromaDB menggunakan *Docker Volumes*.
+* Memetakan aplikasi langsung ke port 80 (HTTP) server Anda.
 
-## 🛠️ Catatan Tambahan
-* Output *chart* dan visual (seperti Gantt chart, bar chart, dan flowchart) dihasilkan menggunakan `matplotlib` secara *in-memory* dan akan disisipkan otomatis ke dalam dokumen Word.
-* Aplikasi dikonfigurasi dengan CORS yang diaktifkan melalui `Flask-CORS`.
+## 🛠️ Arsitektur Output Dokumen
+Dokumen yang dihasilkan di-*render* secara *native* ke dalam format `.docx`. Grafik (Gantt, Bar, Flowchart) dihasilkan secara otomatis oleh *engine* `matplotlib` di *backend* menggunakan palet warna (HEX) yang disesuaikan dengan identitas visual klien hasil riset OSINT.
