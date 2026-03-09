@@ -48,10 +48,21 @@ Buka file `config.py` dan perhatikan parameter kunci berikut sebelum menjalankan
 * **Kredensial API**: Masukkan `GOOGLE_API_KEY` dan `GOOGLE_CX_ID`.
 * **Routing AI**: Pastikan variabel `OLLAMA_HOST` mengarah ke *endpoint* yang tepat (lokal `http://127.0.0.1:11434` atau URL Ollama Cloud Anda).
 
-### 4. Inisialisasi Basis Data
+### 4. Menyiapkan Model AI (Ollama)
+**Langkah ini sangat penting.** Agar sistem dapat melakukan penalaran (LLM) dan memproses *vector database* (Embeddings), Anda harus mengunduh model yang sesuai ke dalam Ollama. Buka terminal baru dan jalankan:
+
+```bash
+# Mengunduh model embedding untuk ChromaDB (Wajib agar tidak error saat load DB)
+ollama pull bge-m3:latest
+
+# Mengunduh model LLM utama (Sesuaikan dengan nama model di config.py)
+ollama pull gpt-oss:120b-cloud
+```
+
+### 5. Inisialisasi Basis Data
 Aplikasi beroperasi menggunakan SQLite. Jika file `projects.db` belum ada, cukup letakkan file `db.csv` Anda di *root directory*. Pada saat *startup*, sistem akan otomatis membersihkan data, melakukan pemformatan (seperti format Rupiah), dan memigrasikannya secara permanen ke dalam SQLite.
 
-### 5. Menjalankan Aplikasi
+### 6. Menjalankan Aplikasi
 ```bash
 python app.py
 ```
@@ -75,6 +86,13 @@ Arsitektur ini akan:
 * Membangun *image* Python menggunakan server WSGI tangguh (Gunicorn) dengan 4 *worker*.
 * Menjaga persistensi data SQLite dan *Vector Database* ChromaDB menggunakan *Docker Volumes*.
 * Memetakan aplikasi langsung ke port 80 (HTTP) server Anda.
+
+**⚠️ Catatan Penting Terkait Model di Lingkungan Docker:**
+Jika arsitektur *deployment* Anda menggunakan *container* Ollama secara lokal di dalam server AWS (bukan *cloud endpoint* pihak ketiga), Anda tetap wajib menarik (*pull*) model-model tersebut ke dalam *container* setelah *startup* awal. IT Anda harus menjalankan perintah ini sekali saja di server:
+```bash
+docker exec -it <nama_container_ollama> ollama pull bge-m3:latest
+docker exec -it <nama_container_ollama> ollama pull gpt-oss:120b-cloud
+```
 
 ## 🛠️ Arsitektur Output Dokumen
 Dokumen yang dihasilkan di-*render* secara *native* ke dalam format `.docx`. Grafik (Gantt, Bar, Flowchart) dihasilkan secara otomatis oleh *engine* `matplotlib` di *backend* menggunakan palet warna (HEX) yang disesuaikan dengan identitas visual klien hasil riset OSINT.
