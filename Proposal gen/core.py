@@ -9,6 +9,7 @@ from chromadb.config import Settings
 import concurrent.futures
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.subplots as plt_subplots
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import textwrap
@@ -185,12 +186,6 @@ class Researcher:
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
     @staticmethod
-    def get_firm_experience(firm, project):
-        res = Researcher.search(f"\"{firm}\" {project} portfolio OR case study", limit=2)
-        if not res or 'items' not in res: return "Gunakan kapabilitas umum perusahaan."
-        return "\n".join([i.get('snippet', '') for i in res['items']])
-
-    @staticmethod
     def get_latest_client_news(client_name):
         res = Researcher.search(f"{client_name} berita teknologi masalah transformasi 2026", limit=2)
         if not res or 'items' not in res: return "Tidak ada berita relevan terbaru."
@@ -208,7 +203,13 @@ class LogoManager:
     def get_logo_and_color(client_name):
         if "YOUR_GOOGLE" in GOOGLE_API_KEY: return None, DEFAULT_COLOR
         try:
-            params = {'q': f"{client_name} logo png transparent", 'key': GOOGLE_API_KEY, 'cx': GOOGLE_CX_ID, 'num': 3, 'searchType': 'image'}
+            params = {
+                'q': f"{client_name} company corporate logo png transparent", 
+                'key': GOOGLE_API_KEY, 
+                'cx': GOOGLE_CX_ID, 
+                'num': 3, 
+                'searchType': 'image'
+            }
             res = requests.get("https://www.googleapis.com/customsearch/v1", params=params, timeout=5).json()
             if 'items' in res:
                 headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'}
@@ -582,8 +583,12 @@ class ProposalGenerator:
         active_structure = CONSULTING_STRUCTURE if service_type == "Consulting" else TRAINING_STRUCTURE
         firm_data = self.firm_api.get_project_standards(project_type)
         
-        base_client = re.sub(r'\s+(Jogja|Jakarta|Surabaya|Cabang|Branch|Region|Indonesia).*$', '', client, flags=re.IGNORECASE).strip()
-        base_firm = re.sub(r'\s+(Jogja|Jakarta|Surabaya|Cabang|Branch|Region|Indonesia).*$', '', WRITER_FIRM_NAME, flags=re.IGNORECASE).strip()
+        # Regex yang lebih cerdas: Menghapus Legal Entitas (PT/CV/Tbk) dan Indikator Cabang
+        # Tapi TETAP menyisakan nama wilayah jika itu bagian dari nama perusahaan (seperti Garuda Indonesia)
+        clean_regex = r'\b(Cabang|Branch|Region|Area|Tbk)\b.*$|^(PT\.|PT\s+|CV\.|CV\s+)'
+        
+        base_client = re.sub(clean_regex, '', client, flags=re.IGNORECASE).strip()
+        base_firm = re.sub(clean_regex, '', WRITER_FIRM_NAME, flags=re.IGNORECASE).strip()
 
         research_futures = {
             'profile': self.io_pool.submit(Researcher.get_entity_profile, base_client),
