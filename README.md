@@ -1,10 +1,10 @@
-# Inixindo Enterprise Proposal Engine 📄🏢
+# Enterprise Proposal Engine
 
 Aplikasi ini adalah sistem *enterprise* berbasis web untuk mengotomatiskan penyusunan dokumen proposal strategis IT. Dibangun menggunakan arsitektur modular **Flask**, sistem ini memadukan kekuatan *Large Language Models* (LLM) via **Ollama**, *Retrieval-Augmented Generation* (RAG) via **ChromaDB**, dan mesin *Open Source Intelligence* (OSINT) untuk menyusun proposal yang sangat presisi, lengkap dengan visualisasi data otomatis.
 
-Pada versi ini (V1.0), aplikasi telah mendukung pola arsitektur *Adapter* untuk integrasi API internal perusahaan dan telah di-*containerize* (Docker) untuk kemudahan *deployment* ke ekosistem *cloud* seperti AWS.
+Aplikasi ini mendukung pola arsitektur *Adapter* untuk integrasi API internal perusahaan dan akan mendukung sistem yang bisa di-*containerize* (Docker) untuk kemudahan *deployment* ke ekosistem *cloud* seperti AWS.
 
-## ✨ Fitur Utama
+## Fitur Utama
 
 * **Smart Discovery UI**: Antarmuka dinamis dengan *Intelligent Autocomplete* yang otomatis menyesuaikan saran *pain points* dan regulasi berdasarkan sektor industri klien.
 * **Firm API Adapter**: Memiliki fitur `DEMO_MODE` untuk presentasi (*mock data*), yang dapat dimatikan (`False`) untuk beralih mengambil standar metodologi dan struktur tim secara langsung dari API internal perusahaan.
@@ -12,14 +12,14 @@ Pada versi ini (V1.0), aplikasi telah mendukung pola arsitektur *Adapter* untuk 
 * **Auto-Migration DB**: Tidak lagi bergantung murni pada *flat file*. Sistem akan otomatis mengonversi `db.csv` menjadi basis data relasional SQLite (`projects.db`) pada saat pertama kali dijalankan.
 * **Production Ready**: Dilengkapi dengan konfigurasi Gunicorn dan Docker Compose untuk *deployment* tanpa hambatan.
 
-## 📋 Prasyarat Sistem
+## Prasyarat Sistem
 
 * **Python 3.9+** (Jika menjalankan secara lokal tanpa Docker).
 * **Ollama**: Menggunakan *Ollama Cloud Endpoint* atau berjalan sebagai *local daemon* di port `11434`.
 * **Google Custom Search API**: Membutuhkan `API_KEY` dan `CX_ID` untuk mengaktifkan fitur riset OSINT dan ekstraksi visual.
 * **Docker & Docker Compose** (Opsional, khusus untuk *deployment* di server *cloud*/AWS).
 
-## 🚀 Instalasi Lokal (Development)
+## Instalasi Lokal (Development)
 
 ### 1. Persiapan Lingkungan Virtual
 Sangat disarankan menggunakan *virtual environment* untuk mengisolasi dependensi aplikasi.
@@ -70,7 +70,7 @@ Aplikasi dapat diakses melalui browser di `http://127.0.0.1:5000`.
 
 ---
 
-## ☁️ Deployment ke Production (AWS / Cloud)
+## Deployment ke Production (AWS / Cloud)
 
 Untuk tahap serah terima (*handover*) ke tim infrastruktur/IT, aplikasi ini telah dikonfigurasi menggunakan Docker untuk metode *Lift and Shift* ke server seperti AWS EC2.
 
@@ -87,12 +87,12 @@ Arsitektur ini akan:
 * Menjaga persistensi data SQLite dan *Vector Database* ChromaDB menggunakan *Docker Volumes*.
 * Memetakan aplikasi langsung ke port 80 (HTTP) server Anda.
 
-**⚠️ Catatan Penting Terkait Model di Lingkungan Docker:**
+## Catatan Penting Terkait Model di Lingkungan Docker:
 Jika arsitektur *deployment* Anda menggunakan *container* Ollama secara lokal di dalam server AWS (bukan *cloud endpoint* pihak ketiga), Anda tetap wajib menarik (*pull*) model-model tersebut ke dalam *container* setelah *startup* awal. IT Anda harus menjalankan perintah ini sekali saja di server:
 ```bash
 docker exec -it <nama_container_ollama> ollama pull bge-m3:latest
 docker exec -it <nama_container_ollama> ollama pull gpt-oss:120b-cloud
 ```
 
-## 🛠️ Arsitektur Output Dokumen
+## Arsitektur Output Dokumen
 Dokumen yang dihasilkan di-*render* secara *native* ke dalam format `.docx`. Grafik (Gantt, Bar, Flowchart) dihasilkan secara otomatis oleh *engine* `matplotlib` di *backend* menggunakan palet warna (HEX) yang disesuaikan dengan identitas visual klien hasil riset OSINT.
