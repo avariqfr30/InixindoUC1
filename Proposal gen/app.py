@@ -49,10 +49,10 @@ def generate_doc():
     service_type = data.get('jenis_proposal')
     
     project_goal = "Improvement" # Default assumption
-    project_type = data.get('klasifikasi_kebutuhan', 'Problem') # This will now be a string like "Problem, Directive"
+    project_type = data.get('klasifikasi_kebutuhan', 'Problem') 
     timeline = data.get('estimasi_waktu', 'TBD')
     notes = data.get('permasalahan', '')
-    regulations = data.get('potensi_framework', '')
+    regulations = data.get('potensi_framework', '') # Accepts string from predefined option OR custom textbox
     
     doc, filename = generator.run(entity, topic, budget, service_type, project_goal, project_type, timeline, notes, regulations)
     

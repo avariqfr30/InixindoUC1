@@ -226,6 +226,7 @@ class Researcher:
     @lru_cache(maxsize=128)
     def get_regulatory_data(regulation_name):
         if not regulation_name: return "Tidak ada regulasi spesifik."
+        # This dynamic query gracefully handles arbitrary user string inputs
         res = Researcher.search(f"Ringkasan kepatuhan mandat {regulation_name}", limit=2)
         if not res or 'items' not in res: return f"Merujuk pada standar umum {regulation_name}."
         return "\n".join([i.get('snippet', '') for i in res['items']])

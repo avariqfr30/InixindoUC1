@@ -7,7 +7,7 @@
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #f1f5f9; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; color: #334155; }
         .card { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); width: 680px; max-height: 95vh; overflow-y: auto;}
-        .hidden { display: none; }
+        .hidden { display: none !important; }
         h2 { color: #0f172a; margin: 0 0 10px 0; font-size: 1.8rem; }
         p.sub { color: #64748b; margin: 0 0 25px 0; font-size: 1rem; }
         label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.95rem; }
@@ -91,7 +91,9 @@
                     <option value="Teori">Teori</option>
                     <option value="Regulasi">Regulasi</option>
                     <option value="Best Practise">Best Practise</option>
+                    <option value="Lainnya">Lainnya (Custom)...</option>
                 </select>
+                <input type="text" id="input-framework" class="hidden" placeholder="Masukkan Framework Custom..." />
             </div>
             
             <button type="button" id="btn-review" disabled>Lanjut Tinjau Data</button>
@@ -132,6 +134,7 @@
             inpWaktu: document.getElementById('input-waktu'),
             inpBiaya: document.getElementById('input-biaya'),
             selFramework: document.getElementById('select-framework'),
+            inpFramework: document.getElementById('input-framework'),
             
             containerDynamic: document.getElementById('container-dynamic'),
             reviewText: document.getElementById('review-text'),
@@ -148,15 +151,21 @@
             items.forEach(item => element.add(new Option(item, item)));
         };
 
-        // Function to extract multiple checked values into a string
         const getSelectedKebutuhan = () => {
             const checked = Array.from(ui.groupKebutuhan.querySelectorAll('input:checked'));
             return checked.map(cb => cb.value).join(', ');
         };
 
+        // Resolves whether to use the dropdown's predefined value or the custom text box value
+        const getFinalFramework = () => {
+            if (ui.selFramework.value === 'Lainnya') {
+                return ui.inpFramework.value.trim();
+            }
+            return ui.selFramework.value;
+        };
+
         async function initializeSystem() {
             try {
-                // Fetch just the company names
                 const companiesRes = await fetch('/api/companies');
                 const companies = await companiesRes.json();
                 
@@ -184,16 +193,34 @@
             checkReviewReady();
         };
 
-        // Attach listeners to Checkboxes
+        // Logic to toggle the custom input box for "Lainnya"
+        ui.selFramework.addEventListener('change', () => {
+            if (ui.selFramework.value === 'Lainnya') {
+                ui.inpFramework.classList.remove('hidden');
+            } else {
+                ui.inpFramework.classList.add('hidden');
+                ui.inpFramework.value = ''; // clear it so it doesn't linger
+            }
+            checkReviewReady();
+        });
+
         ui.groupKebutuhan.addEventListener('change', checkReviewReady);
 
-        // Attach listeners to Dropdowns & Inputs
-        [ui.selProposal, ui.inpKonteks, ui.inpPermasalahan, ui.inpBiaya, ui.inpWaktu, ui.selFramework].forEach(el => {
+        [ui.selProposal, ui.inpKonteks, ui.inpPermasalahan, ui.inpBiaya, ui.inpWaktu, ui.inpFramework].forEach(el => {
             el.addEventListener('input', checkReviewReady);
         });
 
         function checkReviewReady() {
             const hasKebutuhan = ui.groupKebutuhan.querySelectorAll('input:checked').length > 0;
+            
+            // Framework validation: If 'Lainnya', ensure the text box isn't empty. Else, ensure dropdown is selected.
+            let isFrameworkReady = false;
+            if (ui.selFramework.value === 'Lainnya') {
+                isFrameworkReady = ui.inpFramework.value.trim().length > 0;
+            } else if (ui.selFramework.value) {
+                isFrameworkReady = true;
+            }
+
             const isReady = ui.selPerusahaan.value && 
                             ui.selProposal.value && 
                             ui.inpKonteks.value.trim() && 
@@ -201,22 +228,20 @@
                             ui.inpBiaya.value.trim() && 
                             ui.inpWaktu.value.trim() &&
                             hasKebutuhan &&
-                            ui.selFramework.value;
+                            isFrameworkReady;
             ui.btnReview.disabled = !isReady;
         }
 
         ui.btnReview.onclick = () => { 
-            const stringKebutuhan = getSelectedKebutuhan();
-
             ui.reviewText.innerHTML = `
                 <div class="review-row"><span>Perusahaan</span><span>${ui.selPerusahaan.value}</span></div>
                 <div class="review-row"><span>Jenis Proposal</span><span>${ui.selProposal.value}</span></div>
                 <div class="review-row"><span>Konteks Organisasi</span><span>${ui.inpKonteks.value}</span></div>
                 <div class="review-row"><span>Permasalahan</span><span>${ui.inpPermasalahan.value}</span></div>
-                <div class="review-row"><span>Kebutuhan</span><span>${stringKebutuhan}</span></div>
+                <div class="review-row"><span>Kebutuhan</span><span>${getSelectedKebutuhan()}</span></div>
                 <div class="review-row"><span>Estimasi Waktu</span><span>${ui.inpWaktu.value}</span></div>
                 <div class="review-row"><span>Estimasi Biaya</span><span>${ui.inpBiaya.value}</span></div>
-                <div class="review-row"><span>Framework</span><span>${ui.selFramework.value}</span></div>
+                <div class="review-row"><span>Framework</span><span>${getFinalFramework()}</span></div>
             `;
             ui.configStep.classList.add('hidden'); 
             ui.reviewStep.classList.remove('hidden'); 
@@ -236,10 +261,10 @@
                 jenis_proposal: ui.selProposal.value,
                 konteks_organisasi: ui.inpKonteks.value,
                 permasalahan: ui.inpPermasalahan.value,
-                klasifikasi_kebutuhan: getSelectedKebutuhan(), // Combines checked boxes
+                klasifikasi_kebutuhan: getSelectedKebutuhan(), 
                 estimasi_waktu: ui.inpWaktu.value,
                 estimasi_biaya: ui.inpBiaya.value,
-                potensi_framework: ui.selFramework.value
+                potensi_framework: getFinalFramework() // Dynamically injects predefined OR custom
             };
 
             fetch('/generate', { 
