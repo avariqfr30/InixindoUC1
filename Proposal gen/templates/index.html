@@ -26,25 +26,6 @@
         .spinner.active { display: inline-block; }
         textarea { resize: vertical; min-height: 70px; margin-bottom: 10px; }
         
-        /* Intelligent Autocomplete Styles */
-        .suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
-        .chip { 
-            background: #e2e8f0; 
-            color: #475569; 
-            padding: 6px 12px; 
-            border-radius: 16px; 
-            font-size: 0.85rem; 
-            cursor: pointer; 
-            transition: 0.2s; 
-            border: 1px solid transparent;
-            -webkit-user-select: none; 
-            -moz-user-select: none;    
-            -ms-user-select: none;     
-            user-select: none;         
-        }
-        .chip:hover { background: #cbd5e1; color: #0f172a; border-color: #94a3b8; }
-        .chip:active { transform: scale(0.95); }
-        
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
 </head>
@@ -124,8 +105,8 @@
     </div>
 
     <script>
-        let databaseStructure = {}; 
         let smartLibrary = {}; 
+        let currentProjects = {}; // Holds the projects for the currently selected company
         
         const ui = {
             loader: document.getElementById('loader'),
@@ -152,33 +133,33 @@
             btnBack: document.getElementById('btn-back'),
             spinner: document.getElementById('spinner')
         };
-        
-        function loadConfig() {
-            fetch('/get-config')
-                .then(response => {
-                    if (!response.ok) throw new Error("Database Load Failed.");
-                    return response.json();
-                })
-                .then(data => {
-                    if (data.error) throw new Error(data.error);
-                    
-                    databaseStructure = data.structure; 
-                    smartLibrary = data.suggestions; 
-                    
-                    ui.selPerusahaan.innerHTML = '<option value="" disabled selected>Pilih Perusahaan...</option>';
-                    Object.keys(databaseStructure).forEach(company => { 
-                        ui.selPerusahaan.add(new Option(company, company)); 
-                    });
-                    
-                    ui.loader.classList.add('hidden'); 
-                    ui.configStep.classList.remove('hidden');
-                })
-                .catch(err => {
-                    ui.loaderText.innerHTML = `<span class="error-text">${err.message}</span>`;
-                });
+
+        const populateSelect = (element, items, placeholder) => {
+            element.innerHTML = `<option value="" disabled selected>${placeholder}</option>`;
+            items.forEach(item => element.add(new Option(item, item)));
+        };
+
+        async function initializeSystem() {
+            try {
+                // Fetch smart suggestions config
+                const configRes = await fetch('/api/config');
+                const configData = await configRes.json();
+                smartLibrary = configData.suggestions;
+
+                // Fetch just the company names
+                const companiesRes = await fetch('/api/companies');
+                const companies = await companiesRes.json();
+                
+                populateSelect(ui.selPerusahaan, companies, "Pilih Perusahaan...");
+                
+                ui.loader.classList.add('hidden'); 
+                ui.configStep.classList.remove('hidden');
+            } catch (err) {
+                ui.loaderText.innerHTML = `<span class="error-text">Gagal memuat database server.</span>`;
+            }
         }
         
-        loadConfig();
+        initializeSystem();
 
         ui.btnRefresh.onclick = () => {
             ui.btnRefresh.innerText = "Refreshing..."; ui.btnRefresh.disabled = true;
@@ -188,7 +169,6 @@
                 .catch(err => { ui.btnRefresh.innerText = "🔄 Refresh Database"; ui.btnRefresh.disabled = false; });
         };
 
-        // Populates the options based on SMART_SUGGESTIONS logic
         function updateIntelligentSuggestions() {
             const combinedContext = (ui.selPerusahaan.value + " " + ui.selKonteks.value).toLowerCase();
             let matchedRegs = new Set();
@@ -201,7 +181,6 @@
                 });
             }
 
-            // Fallback defaults
             if (matchedRegs.size === 0) {
                 ["ISO 9001", "ISO 27001", "UU PDP"].forEach(r => matchedRegs.add(r));
             }
@@ -215,29 +194,48 @@
             });
         }
 
-        ui.selPerusahaan.onchange = () => {
+        ui.selPerusahaan.onchange = async () => {
             const company = ui.selPerusahaan.value;
-            const data = databaseStructure[company];
-            
-            const populateSelect = (element, items, placeholder) => {
-                element.innerHTML = `<option value="" disabled selected>${placeholder}</option>`;
-                items.forEach(item => element.add(new Option(item, item)));
-            };
-
-            populateSelect(ui.selKonteks, data.konteks, "Pilih Konteks...");
-            populateSelect(ui.selPermasalahan, data.permasalahan, "Pilih Permasalahan...");
-            populateSelect(ui.selBiaya, data.biaya, "Pilih Estimasi Biaya...");
-            
+            ui.selKonteks.innerHTML = `<option value="" disabled selected>Memuat data...</option>`;
             ui.containerDynamic.classList.remove('hidden');
-            updateIntelligentSuggestions();
+            
+            try {
+                // Fetch specific projects for the selected company
+                const response = await fetch(`/api/projects?entity=${encodeURIComponent(company)}`);
+                currentProjects = await response.json();
+                
+                const topics = Object.keys(currentProjects);
+                populateSelect(ui.selKonteks, topics, "Pilih Konteks Organisasi...");
+                
+                ui.selPermasalahan.innerHTML = '<option value="" disabled selected>Menunggu Konteks...</option>';
+                ui.selBiaya.innerHTML = '<option value="" disabled selected>Menunggu Konteks...</option>';
+                
+            } catch (err) {
+                console.error("Error fetching projects", err);
+                ui.selKonteks.innerHTML = `<option value="" disabled selected>Gagal memuat proyek.</option>`;
+            }
+            
             checkReviewReady();
         };
 
-        [ui.selProposal, ui.selKonteks, ui.selPermasalahan, ui.selBiaya, ui.inpWaktu].forEach(el => {
-            el.addEventListener('input', () => {
-                if (el === ui.selKonteks) updateIntelligentSuggestions();
-                checkReviewReady();
-            });
+        ui.selKonteks.onchange = () => {
+            const konteks = ui.selKonteks.value;
+            const projectData = currentProjects[konteks];
+
+            if (projectData) {
+                populateSelect(ui.selPermasalahan, [projectData.permasalahan], "Pilih Permasalahan...");
+                populateSelect(ui.selBiaya, [projectData.biaya], "Pilih Estimasi Biaya...");
+                
+                ui.selPermasalahan.selectedIndex = 1;
+                ui.selBiaya.selectedIndex = 1;
+                
+                updateIntelligentSuggestions();
+            }
+            checkReviewReady();
+        };
+
+        [ui.selProposal, ui.inpWaktu].forEach(el => {
+            el.addEventListener('input', checkReviewReady);
         });
 
         function checkReviewReady() {

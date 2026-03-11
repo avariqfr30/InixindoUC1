@@ -20,40 +20,45 @@ generator = ProposalGenerator(kb)
 def home(): 
     return render_template('index.html')
 
-@app.route('/get-config')
-def get_config():
-    if kb.df is None: 
-        return jsonify({"error": "DB Load Failed"}), 500
-        
-    tree = {}
-    # Dynamically build the options based on the dataset
-    for _, row in kb.df.iterrows():
-        entity = str(row.get('entity', '')).strip()
-        if not entity or entity == 'nan': continue
-        
-        if entity not in tree:
-            tree[entity] = {
-                "konteks": set(),
-                "permasalahan": set(),
-                "biaya": set()
+@app.route('/api/config')
+def get_base_config():
+    """Returns static configurations and intelligent suggestions."""
+    return jsonify({
+        "suggestions": SMART_SUGGESTIONS
+    })
+
+@app.route('/api/companies')
+def get_companies():
+    """Scalable: Only extracts and returns unique company names."""
+    if kb.df is None or kb.df.empty: 
+        return jsonify([])
+    
+    # Fast pandas extraction for 30k+ rows
+    companies = kb.df['entity'].dropna().astype(str).str.strip().unique().tolist()
+    companies = [c for c in companies if c.lower() != 'nan' and c]
+    return jsonify(sorted(companies))
+
+@app.route('/api/projects')
+def get_projects():
+    """Scalable: Only returns projects for the specifically requested company."""
+    entity = request.args.get('entity')
+    if not entity or kb.df is None or kb.df.empty: 
+        return jsonify({})
+    
+    # Vectorized filtering for high performance
+    subset = kb.df[kb.df['entity'].astype(str).str.strip() == entity]
+    
+    projects = {}
+    # to_dict('records') is much faster than iterrows()
+    for row in subset.to_dict('records'):
+        topic = str(row.get('topic', '')).strip()
+        if topic and topic.lower() != 'nan':
+            projects[topic] = {
+                "permasalahan": str(row.get('Strategic Context & Pain Points', '')).strip(),
+                "biaya": str(row.get('budget', '')).strip()
             }
             
-        # Mapping DB columns to the new UI categories
-        topic = str(row.get('topic', '')).strip()
-        problem = str(row.get('Strategic Context & Pain Points', '')).strip() # Using db.csv column
-        budget = str(row.get('budget', '')).strip()
-        
-        if topic and topic != 'nan': tree[entity]["konteks"].add(topic)
-        if problem and problem != 'nan': tree[entity]["permasalahan"].add(problem)
-        if budget and budget != 'nan': tree[entity]["biaya"].add(budget)
-            
-    # Convert sets to lists for JSON serialization
-    for e in tree:
-        tree[e]["konteks"] = list(tree[e]["konteks"])
-        tree[e]["permasalahan"] = list(tree[e]["permasalahan"])
-        tree[e]["biaya"] = list(tree[e]["biaya"])
-            
-    return jsonify({"structure": tree, "suggestions": SMART_SUGGESTIONS})
+    return jsonify(projects)
 
 @app.route('/generate', methods=['POST'])
 def generate_doc():
@@ -65,7 +70,7 @@ def generate_doc():
     budget = data.get('estimasi_biaya')
     service_type = data.get('jenis_proposal')
     
-    project_goal = "Improvement" # Default assumption or can be added back to UI
+    project_goal = "Improvement" # Default assumption
     project_type = data.get('klasifikasi_kebutuhan', 'Implementation')
     timeline = data.get('estimasi_waktu', 'TBD')
     notes = data.get('permasalahan', '')

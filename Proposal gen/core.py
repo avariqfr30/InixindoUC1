@@ -7,6 +7,7 @@ import pandas as pd
 import chromadb
 from chromadb.config import Settings
 import concurrent.futures
+from functools import lru_cache
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -94,6 +95,7 @@ class KnowledgeBase:
                 rename_dict = {v: k for k, v in DATA_MAPPING.items()}
                 raw_df.rename(columns=rename_dict, inplace=True)
                 
+                # Currencies must be in Indonesian Rupiah
                 def format_rupiah_range(val):
                     try:
                         clean_str = re.sub(r'[^\d]', '', str(val))
@@ -113,19 +115,40 @@ class KnowledgeBase:
             else:
                 return False
             
-        existing = self.collection.get()['ids']
-        if existing: self.collection.delete(existing)
+        # ==========================================
+        # SCALABILITY FIX: Delta Sync & Batching
+        # ==========================================
+        existing_ids = set(self.collection.get()['ids'])
         
-        ids, docs, metas = [], [], []
-        for idx, row in self.df.iterrows():
-            client = row.get('entity', f'Client_{idx}') 
-            project = row.get('topic', f'Project_{idx}')
-            text_rep = " | ".join([f"{col}: {val}" for col, val in row.items()])
-            ids.append(str(idx))
-            docs.append(text_rep)
-            metas.append(row.astype(str).to_dict())
+        # Create a map of what the DB currently holds
+        new_ids_map = {str(idx): row for idx, row in self.df.iterrows()}
+        new_ids_set = set(new_ids_map.keys())
+        
+        # Find exactly what needs to be deleted and what needs to be added
+        ids_to_delete = list(existing_ids - new_ids_set)
+        ids_to_add = list(new_ids_set - existing_ids)
+        
+        if ids_to_delete: 
+            logger.info(f"Removing {len(ids_to_delete)} obsolete records from vector DB...")
+            self.collection.delete(ids_to_delete)
             
-        if ids: self.collection.add(documents=docs, metadatas=metas, ids=ids)
+        if ids_to_add:
+            logger.info(f"Adding {len(ids_to_add)} new records to vector DB. This may take a moment...")
+            batch_size = 500 # Prevent Ollama payload timeouts for 30k+ rows
+            
+            for i in range(0, len(ids_to_add), batch_size):
+                batch_ids = ids_to_add[i:i + batch_size]
+                docs, metas = [], []
+                
+                for b_id in batch_ids:
+                    row = new_ids_map[b_id]
+                    text_rep = " | ".join([f"{col}: {val}" for col, val in row.items()])
+                    docs.append(text_rep)
+                    metas.append(row.astype(str).to_dict())
+                    
+                self.collection.add(documents=docs, metadatas=metas, ids=batch_ids)
+                logger.info(f"Indexed batch {i + len(batch_ids)} / {len(ids_to_add)}")
+                
         return True
 
     def get_exact_context(self, entity, topic, budget=None):
@@ -146,6 +169,7 @@ class KnowledgeBase:
 
 class Researcher:
     @staticmethod
+    @lru_cache(maxsize=256)
     def search(query, limit=2):
         if "YOUR_GOOGLE" in GOOGLE_API_KEY: return None
         try:
@@ -153,9 +177,12 @@ class Researcher:
             response = requests.get("https://www.googleapis.com/customsearch/v1", params=params, timeout=5)
             response.raise_for_status()
             return response.json()
-        except Exception: return None
+        except Exception as e: 
+            logger.warning(f"Search API Error: {e}")
+            return None
 
     @staticmethod
+    @lru_cache(maxsize=128)
     def fetch_page_content(url):
         try:
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -166,12 +193,14 @@ class Researcher:
         except Exception: return ""
 
     @staticmethod
+    @lru_cache(maxsize=128)
     def get_entity_profile(entity_name):
         res = Researcher.search(f"{entity_name} profil perusahaan indonesia", limit=1)
         if not res or 'items' not in res: return f"{entity_name}"
         return res['items'][0].get('snippet', '')
         
     @staticmethod
+    @lru_cache(maxsize=128)
     def get_contact_details(entity_name):
         query = f"{entity_name} alamat nomor telepon email contact details"
         res = Researcher.search(query, limit=2)
@@ -179,22 +208,32 @@ class Researcher:
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
     @staticmethod
+    @lru_cache(maxsize=128)
     def get_collaboration_data(client, firm):
         res = Researcher.search(f"\"{client}\" \"{firm}\" partnership OR project", limit=2)
         if not res or 'items' not in res: return "Tidak ada rekam jejak kolaborasi publik."
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
     @staticmethod
+    @lru_cache(maxsize=128)
     def get_latest_client_news(client_name):
         res = Researcher.search(f"{client_name} berita teknologi masalah transformasi 2026", limit=2)
         if not res or 'items' not in res: return "Tidak ada berita relevan terbaru."
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
     @staticmethod
+    @lru_cache(maxsize=128)
     def get_regulatory_data(regulation_name):
         if not regulation_name: return "Tidak ada regulasi spesifik."
         res = Researcher.search(f"Ringkasan kepatuhan mandat {regulation_name}", limit=2)
         if not res or 'items' not in res: return f"Merujuk pada standar umum {regulation_name}."
+        return "\n".join([i.get('snippet', '') for i in res['items']])
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def get_firm_experience(firm_name, project_topic):
+        res = Researcher.search(f"\"{firm_name}\" experience portfolio \"{project_topic}\"", limit=2)
+        if not res or 'items' not in res: return "Tidak ada portofolio publik yang ditemukan."
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
 class LogoManager:
