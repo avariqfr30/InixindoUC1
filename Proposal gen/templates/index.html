@@ -57,80 +57,48 @@
 
         <div id="step-config" class="hidden">
             <h2>Inixindo Proposal Engine</h2>
-            <p class="sub">Client Discovery &amp; Requirement Layer</p>
+            <p class="sub">Requirement & Discovery Layer</p>
             
-            <label id="label-entity" for="select-entity">Klien / Entitas</label>
-            <select id="select-entity"></select>
+            <label for="select-perusahaan">Nama Perusahaan</label>
+            <select id="select-perusahaan"></select>
             
-            <div id="container-topic" class="hidden">
-                <label id="label-topic" for="select-topic">Inisiatif Strategis</label>
-                <select id="select-topic"></select>
-            </div>
-
-            <div id="container-budget" class="hidden">
-                <label id="label-budget" for="select-budget">Estimasi Investasi</label>
-                <select id="select-budget"></select>
-            </div>
-
-            <div id="container-service" class="hidden">
-                <label id="label-service" for="select-service">Tipe Layanan</label>
-                <select id="select-service">
-                    <option value="" disabled selected>Pilih Layanan...</option>
+            <div id="container-dynamic" class="hidden">
+                <label for="select-proposal">Jenis Proposal</label>
+                <select id="select-proposal">
+                    <option value="" disabled selected>Pilih Jenis Proposal...</option>
                     <option value="Consulting">Consulting Engagement</option>
                     <option value="Training">Training Program</option>
+                    <option value="Consulting dan Training">Consulting & Training Program</option>
                 </select>
-                
-                <div id="container-discovery" class="hidden" style="margin-top: 10px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
-                    <h3 style="font-size:1.1rem; margin-top:0;">Parameter Proyek (Blueprint)</h3>
-                    
-                    <div class="grid-2">
-                        <div>
-                            <label for="select-goal">Tujuan Utama</label>
-                            <select id="select-goal">
-                                <option value="Compliance">Compliance (Kepatuhan)</option>
-                                <option value="Improvement" selected>Improvement (Peningkatan)</option>
-                                <option value="Transformation">Transformation (Transformasi)</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label for="select-type">Jenis Proyek</label>
-                            <select id="select-type">
-                                <option value="Diagnostic">Diagnostic</option>
-                                <option value="Strategic">Strategic</option>
-                                <option value="Implementation" selected>Implementation</option>
-                                <option value="Transformation">Transformation</option>
-                            </select>
-                        </div>
+
+                <label for="select-konteks">Konteks Organisasi</label>
+                <select id="select-konteks"></select>
+
+                <label for="select-permasalahan">Permasalahan</label>
+                <select id="select-permasalahan"></select>
+
+                <label for="select-kebutuhan">Klasifikasi Kebutuhan</label>
+                <select id="select-kebutuhan">
+                    <option value="Diagnostic">Diagnostic</option>
+                    <option value="Strategic">Strategic</option>
+                    <option value="Implementation" selected>Implementation</option>
+                    <option value="Transformation">Transformation</option>
+                </select>
+
+                <div class="grid-2">
+                    <div>
+                        <label for="input-waktu">Estimasi Waktu</label>
+                        <input type="text" id="input-waktu" placeholder="Cth: 3 Bulan..." />
                     </div>
-                    
-                    <div class="grid-2">
-                        <div>
-                            <label for="input-timeline">Timeline yang Diinginkan</label>
-                            <input type="text" id="input-timeline" list="timeline-options" placeholder="Cth: 3 Bulan, 6 Minggu..." />
-                            <datalist id="timeline-options">
-                                <option value="2 Minggu"></option>
-                                <option value="4 Minggu"></option>
-                                <option value="6 Minggu"></option>
-                                <option value="2 Bulan"></option>
-                                <option value="3 Bulan"></option>
-                                <option value="6 Bulan"></option>
-                                <option value="1 Tahun"></option>
-                            </datalist>
-                        </div>
-                        <div>
-                            <label for="input-regulations">Standar / Regulasi</label>
-                            <input type="text" id="input-regulations" list="regulation-options" placeholder="Cth: ISO 27001, SPBE..." />
-                            <datalist id="regulation-options">
-                                <option value="Otomatis terisi dari AI..."></option>
-                            </datalist>
-                        </div>
+                    <div>
+                        <label for="select-biaya">Estimasi Biaya</label>
+                        <select id="select-biaya"></select>
                     </div>
-            
-                    <label for="input-notes">Pain Points &amp; Catatan Klien</label>
-                    <textarea id="input-notes" placeholder="Deskripsikan masalah utama yang dibahas saat discovery meeting..."></textarea>
-                    
-                    <div class="suggestions" id="notes-suggestions"></div>
                 </div>
+
+                <label for="input-framework">Potensi Framework</label>
+                <input type="text" id="input-framework" list="framework-options" placeholder="Cth: ISO 27001, SPBE..." />
+                <datalist id="framework-options"></datalist>
             </div>
             
             <button type="button" id="btn-review" disabled>Lanjut Tinjau Data</button>
@@ -166,25 +134,16 @@
             reviewStep: document.getElementById('step-review'),
             successStep: document.getElementById('step-success'),
             
-            selectEntity: document.getElementById('select-entity'),
-            selectTopic: document.getElementById('select-topic'),
-            selectBudget: document.getElementById('select-budget'),
-            selectService: document.getElementById('select-service'),
+            selPerusahaan: document.getElementById('select-perusahaan'),
+            selProposal: document.getElementById('select-proposal'),
+            selKonteks: document.getElementById('select-konteks'),
+            selPermasalahan: document.getElementById('select-permasalahan'),
+            selKebutuhan: document.getElementById('select-kebutuhan'),
+            inpWaktu: document.getElementById('input-waktu'),
+            selBiaya: document.getElementById('select-biaya'),
+            inpFramework: document.getElementById('input-framework'),
             
-            selectGoal: document.getElementById('select-goal'),
-            selectType: document.getElementById('select-type'),
-            inputTimeline: document.getElementById('input-timeline'),
-            inputRegulations: document.getElementById('input-regulations'),
-            inputNotes: document.getElementById('input-notes'),
-            
-            containerTopic: document.getElementById('container-topic'),
-            containerBudget: document.getElementById('container-budget'),
-            containerService: document.getElementById('container-service'),
-            containerDiscovery: document.getElementById('container-discovery'),
-            
-            labelEntity: document.getElementById('label-entity'),
-            labelTopic: document.getElementById('label-topic'),
-            labelBudget: document.getElementById('label-budget'),
+            containerDynamic: document.getElementById('container-dynamic'),
             reviewText: document.getElementById('review-text'),
             
             btnReview: document.getElementById('btn-review'),
@@ -206,15 +165,9 @@
                     databaseStructure = data.structure; 
                     smartLibrary = data.suggestions; 
                     
-                    ui.labelEntity.innerText = data.labels[0] || "Client Entity"; 
-                    ui.labelTopic.innerText = data.labels[1] || "Strategic Initiative";
-                    ui.labelBudget.innerText = data.labels[2] || "Investment Estimation";
-                    
-                    ui.selectEntity.innerHTML = '<option value="" disabled selected>Pilih Opsi...</option>';
-                    Object.keys(databaseStructure).forEach(key => { 
-                        let option = document.createElement('option'); 
-                        option.value = key; option.text = key; 
-                        ui.selectEntity.add(option); 
+                    ui.selPerusahaan.innerHTML = '<option value="" disabled selected>Pilih Perusahaan...</option>';
+                    Object.keys(databaseStructure).forEach(company => { 
+                        ui.selPerusahaan.add(new Option(company, company)); 
                     });
                     
                     ui.loader.classList.add('hidden'); 
@@ -227,57 +180,6 @@
         
         loadConfig();
 
-        function updateIntelligentSuggestions() {
-            const entityText = ui.selectEntity.value || "";
-            const topicText = ui.selectTopic.value || "";
-            const combinedContext = (entityText + " " + topicText).toLowerCase();
-
-            let matchedRegs = new Set();
-            let matchedPains = new Set();
-
-            if(smartLibrary) {
-                Object.values(smartLibrary).forEach(category => {
-                    if (category.keywords && category.keywords.some(kw => combinedContext.includes(kw))) {
-                        category.regulations.forEach(r => matchedRegs.add(r));
-                        category.pain_points.forEach(p => matchedPains.add(p));
-                    }
-                });
-            }
-
-            if (matchedRegs.size === 0) {
-                ["ISO 9001", "ISO 27001", "UU PDP"].forEach(r => matchedRegs.add(r));
-                ["Proses operasional masih manual", "Kurangnya integrasi sistem", "Keterbatasan kapabilitas SDM", "Sulit mengambil keputusan berbasis data"].forEach(p => matchedPains.add(p));
-            }
-
-            const regDatalist = document.getElementById('regulation-options');
-            regDatalist.innerHTML = '';
-            matchedRegs.forEach(reg => {
-                let opt = document.createElement('option');
-                opt.value = reg;
-                regDatalist.appendChild(opt);
-            });
-
-            const chipContainer = document.getElementById('notes-suggestions');
-            chipContainer.innerHTML = '';
-            matchedPains.forEach(pain => {
-                let span = document.createElement('span');
-                span.className = 'chip';
-                span.innerText = '+ ' + pain;
-                span.onclick = () => appendNote(pain);
-                chipContainer.appendChild(span);
-            });
-        }
-
-        function appendNote(text) {
-            const textarea = ui.inputNotes;
-            if (textarea.value.trim() !== "") {
-                textarea.value += '\n- ' + text;
-            } else {
-                textarea.value = '- ' + text;
-            }
-            textarea.focus();
-        }
-
         ui.btnRefresh.onclick = () => {
             ui.btnRefresh.innerText = "Refreshing..."; ui.btnRefresh.disabled = true;
             fetch('/refresh-knowledge', {method: 'POST'})
@@ -286,106 +188,96 @@
                 .catch(err => { ui.btnRefresh.innerText = "🔄 Refresh Database"; ui.btnRefresh.disabled = false; });
         };
 
-        ui.selectEntity.onchange = () => { 
-            ui.selectTopic.innerHTML = '<option value="" disabled selected>Pilih Opsi...</option>'; 
-            ui.selectBudget.innerHTML = ''; 
-            ui.selectService.value = ""; 
-            ui.containerDiscovery.classList.add('hidden');
-            
-            if (ui.selectEntity.value && databaseStructure[ui.selectEntity.value]) {
-                const topics = databaseStructure[ui.selectEntity.value].topics;
-                Object.keys(topics).forEach(topic => { 
-                    let option = document.createElement('option'); 
-                    option.value = topic; option.text = topic; 
-                    ui.selectTopic.add(option); 
-                }); 
-                ui.containerTopic.classList.remove('hidden'); 
-                ui.containerBudget.classList.add('hidden');
-                ui.containerService.classList.add('hidden');
-                ui.btnReview.disabled = true; 
-                updateIntelligentSuggestions(); 
-            }
-        };
+        // Populates the options based on SMART_SUGGESTIONS logic
+        function updateIntelligentSuggestions() {
+            const combinedContext = (ui.selPerusahaan.value + " " + ui.selKonteks.value).toLowerCase();
+            let matchedRegs = new Set();
 
-        ui.selectTopic.onchange = () => {
-            ui.selectBudget.innerHTML = '<option value="" disabled selected>Pilih Opsi...</option>';
-            ui.selectService.value = ""; 
-            ui.containerDiscovery.classList.add('hidden');
-            
-            if (ui.selectEntity.value && ui.selectTopic.value && databaseStructure[ui.selectEntity.value].topics[ui.selectTopic.value]) {
-                const budgets = databaseStructure[ui.selectEntity.value].topics[ui.selectTopic.value].budgets;
-                budgets.forEach(budget => {
-                    let option = document.createElement('option'); 
-                    option.value = budget; option.text = budget; 
-                    ui.selectBudget.add(option);
+            if(smartLibrary) {
+                Object.values(smartLibrary).forEach(category => {
+                    if (category.keywords && category.keywords.some(kw => combinedContext.includes(kw))) {
+                        category.regulations.forEach(r => matchedRegs.add(r));
+                    }
                 });
-                ui.containerBudget.classList.remove('hidden');
-                ui.containerService.classList.add('hidden');
-                ui.btnReview.disabled = true;
-                updateIntelligentSuggestions(); 
             }
-        };
 
-        ui.selectBudget.onchange = () => {
-            ui.containerService.classList.remove('hidden');
+            // Fallback defaults
+            if (matchedRegs.size === 0) {
+                ["ISO 9001", "ISO 27001", "UU PDP"].forEach(r => matchedRegs.add(r));
+            }
+
+            const regDatalist = document.getElementById('framework-options');
+            regDatalist.innerHTML = '';
+            matchedRegs.forEach(reg => {
+                let opt = document.createElement('option');
+                opt.value = reg;
+                regDatalist.appendChild(opt);
+            });
+        }
+
+        ui.selPerusahaan.onchange = () => {
+            const company = ui.selPerusahaan.value;
+            const data = databaseStructure[company];
+            
+            const populateSelect = (element, items, placeholder) => {
+                element.innerHTML = `<option value="" disabled selected>${placeholder}</option>`;
+                items.forEach(item => element.add(new Option(item, item)));
+            };
+
+            populateSelect(ui.selKonteks, data.konteks, "Pilih Konteks...");
+            populateSelect(ui.selPermasalahan, data.permasalahan, "Pilih Permasalahan...");
+            populateSelect(ui.selBiaya, data.biaya, "Pilih Estimasi Biaya...");
+            
+            ui.containerDynamic.classList.remove('hidden');
+            updateIntelligentSuggestions();
             checkReviewReady();
         };
 
-        ui.selectService.onchange = () => {
-            ui.containerDiscovery.classList.remove('hidden');
-            checkReviewReady();
-        };
-
-        ui.inputTimeline.oninput = checkReviewReady;
+        [ui.selProposal, ui.selKonteks, ui.selPermasalahan, ui.selBiaya, ui.inpWaktu].forEach(el => {
+            el.addEventListener('input', () => {
+                if (el === ui.selKonteks) updateIntelligentSuggestions();
+                checkReviewReady();
+            });
+        });
 
         function checkReviewReady() {
-            if (ui.selectEntity.value && ui.selectTopic.value && ui.selectBudget.value && ui.selectService.value && ui.inputTimeline.value.trim()) {
-                ui.btnReview.disabled = false;
-            } else {
-                ui.btnReview.disabled = true;
-            }
+            const isReady = ui.selPerusahaan.value && ui.selProposal.value && ui.selKonteks.value && ui.selPermasalahan.value && ui.selBiaya.value && ui.inpWaktu.value.trim();
+            ui.btnReview.disabled = !isReady;
         }
-        
-        ui.btnReview.onclick = () => { 
-            let html = `
-                <div class="review-row"><span>Klien</span><span>${ui.selectEntity.value}</span></div>
-                <div class="review-row"><span>Inisiatif</span><span>${ui.selectTopic.value}</span></div>
-                <div class="review-row"><span>Anggaran</span><span>${ui.selectBudget.value}</span></div>
-                <div class="review-row"><span>Tipe Layanan</span><span>${ui.selectService.options[ui.selectService.selectedIndex].text}</span></div>
-                <div class="review-row"><span>Tujuan &amp; Jenis</span><span>${ui.selectGoal.value} / ${ui.selectType.value}</span></div>
-                <div class="review-row"><span>Timeline</span><span>${ui.inputTimeline.value}</span></div>
-            `;
-            
-            if (ui.inputRegulations.value.trim()) html += `<div class="review-row"><span>Regulasi</span><span>${ui.inputRegulations.value}</span></div>`;
-            if (ui.inputNotes.value.trim()) {
-                let shortNotes = ui.inputNotes.value.length > 40 ? ui.inputNotes.value.substring(0, 40) + '...' : ui.inputNotes.value;
-                html += `<div class="review-row"><span>Catatan Tambahan</span><span>${shortNotes}</span></div>`;
-            }
 
-            ui.reviewText.innerHTML = html; 
+        ui.btnReview.onclick = () => { 
+            ui.reviewText.innerHTML = `
+                <div class="review-row"><span>Perusahaan</span><span>${ui.selPerusahaan.value}</span></div>
+                <div class="review-row"><span>Jenis Proposal</span><span>${ui.selProposal.value}</span></div>
+                <div class="review-row"><span>Konteks Organisasi</span><span>${ui.selKonteks.value}</span></div>
+                <div class="review-row"><span>Permasalahan</span><span>${ui.selPermasalahan.value}</span></div>
+                <div class="review-row"><span>Kebutuhan</span><span>${ui.selKebutuhan.value}</span></div>
+                <div class="review-row"><span>Estimasi Waktu</span><span>${ui.inpWaktu.value}</span></div>
+                <div class="review-row"><span>Estimasi Biaya</span><span>${ui.selBiaya.value}</span></div>
+                <div class="review-row"><span>Framework</span><span>${ui.inpFramework.value || '-'}</span></div>
+            `;
             ui.configStep.classList.add('hidden'); 
             ui.reviewStep.classList.remove('hidden'); 
         };
-        
+
         ui.btnBack.onclick = () => { 
             ui.reviewStep.classList.add('hidden'); 
             ui.configStep.classList.remove('hidden'); 
         };
-        
+
         ui.btnGenerate.onclick = () => {
             ui.btnGenerate.disabled = true; 
             ui.spinner.classList.add('active');
             
             const payload = {
-                entity: ui.selectEntity.value,
-                topic: ui.selectTopic.value,
-                budget: ui.selectBudget.value,
-                service_type: ui.selectService.value,
-                project_goal: ui.selectGoal.value,
-                project_type: ui.selectType.value,
-                timeline: ui.inputTimeline.value,
-                notes: ui.inputNotes.value,
-                regulations: ui.inputRegulations.value
+                nama_perusahaan: ui.selPerusahaan.value,
+                jenis_proposal: ui.selProposal.value,
+                konteks_organisasi: ui.selKonteks.value,
+                permasalahan: ui.selPermasalahan.value,
+                klasifikasi_kebutuhan: ui.selKebutuhan.value,
+                estimasi_waktu: ui.inpWaktu.value,
+                estimasi_biaya: ui.selBiaya.value,
+                potensi_framework: ui.inpFramework.value
             };
 
             fetch('/generate', { 
@@ -401,9 +293,7 @@
                 let url = window.URL.createObjectURL(blob);
                 let a = document.createElement('a'); 
                 a.href = url; 
-                const safeEntity = ui.selectEntity.value.replace(/\s+/g, '_');
-                const safeTopic = ui.selectTopic.value.replace(/\s+/g, '_');
-                a.download = `Proposal_${safeEntity}_${safeTopic}.docx`; 
+                a.download = `Proposal_${ui.selPerusahaan.value.replace(/\\s+/g, '_')}.docx`; 
                 a.click();
                 
                 window.URL.revokeObjectURL(url);

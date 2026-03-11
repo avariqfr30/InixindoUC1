@@ -9,7 +9,6 @@ from chromadb.config import Settings
 import concurrent.futures
 import matplotlib
 matplotlib.use('Agg')
-import matplotlib.subplots as plt_subplots
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import textwrap

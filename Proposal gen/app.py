@@ -26,35 +26,50 @@ def get_config():
         return jsonify({"error": "DB Load Failed"}), 500
         
     tree = {}
-    for entity in kb.df['entity'].dropna().unique():
-        tree[entity] = {"label": entity, "topics": {}}
-        entity_df = kb.df[kb.df['entity'] == entity]
-        for topic in entity_df['topic'].dropna().unique():
-            topic_df = entity_df[entity_df['topic'] == topic]
-            budgets = topic_df['budget'].dropna().unique().tolist()
-            tree[entity]["topics"][topic] = {"label": topic, "budgets": budgets}
+    # Dynamically build the options based on the dataset
+    for _, row in kb.df.iterrows():
+        entity = str(row.get('entity', '')).strip()
+        if not entity or entity == 'nan': continue
+        
+        if entity not in tree:
+            tree[entity] = {
+                "konteks": set(),
+                "permasalahan": set(),
+                "biaya": set()
+            }
             
-    # Melemparkan library cerdas ke Frontend untuk Autocomplete
-    return jsonify({
-        "structure": tree, 
-        "labels": [DATA_MAPPING["entity"], DATA_MAPPING["topic"], DATA_MAPPING["budget"]],
-        "suggestions": SMART_SUGGESTIONS
-    })
+        # Mapping DB columns to the new UI categories
+        topic = str(row.get('topic', '')).strip()
+        problem = str(row.get('Strategic Context & Pain Points', '')).strip() # Using db.csv column
+        budget = str(row.get('budget', '')).strip()
+        
+        if topic and topic != 'nan': tree[entity]["konteks"].add(topic)
+        if problem and problem != 'nan': tree[entity]["permasalahan"].add(problem)
+        if budget and budget != 'nan': tree[entity]["biaya"].add(budget)
+            
+    # Convert sets to lists for JSON serialization
+    for e in tree:
+        tree[e]["konteks"] = list(tree[e]["konteks"])
+        tree[e]["permasalahan"] = list(tree[e]["permasalahan"])
+        tree[e]["biaya"] = list(tree[e]["biaya"])
+            
+    return jsonify({"structure": tree, "suggestions": SMART_SUGGESTIONS})
 
 @app.route('/generate', methods=['POST'])
 def generate_doc():
     data = request.json
     
-    entity = data.get('entity')
-    topic = data.get('topic')
-    budget = data.get('budget')
-    service_type = data.get('service_type')
+    # Map the new frontend payload back to the core generator variables
+    entity = data.get('nama_perusahaan')
+    topic = data.get('konteks_organisasi')
+    budget = data.get('estimasi_biaya')
+    service_type = data.get('jenis_proposal')
     
-    project_goal = data.get('project_goal', 'Improvement')
-    project_type = data.get('project_type', 'Implementation')
-    timeline = data.get('timeline', 'TBD')
-    notes = data.get('notes', '')
-    regulations = data.get('regulations', '')
+    project_goal = "Improvement" # Default assumption or can be added back to UI
+    project_type = data.get('klasifikasi_kebutuhan', 'Implementation')
+    timeline = data.get('estimasi_waktu', 'TBD')
+    notes = data.get('permasalahan', '')
+    regulations = data.get('potensi_framework', '')
     
     doc, filename = generator.run(entity, topic, budget, service_type, project_goal, project_type, timeline, notes, regulations)
     
