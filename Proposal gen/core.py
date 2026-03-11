@@ -58,7 +58,6 @@ class FirmAPIClient:
         """Menarik Metodologi, Tim, dan Harga berdasarkan tipe proyek"""
         if self.demo_mode:
             logger.info(f"[DEMO MODE] Menggunakan Mock Data Internal untuk tipe: {project_type}")
-            # Fallback to Implementation if multiple checkboxes produce a complex string
             return MOCK_FIRM_STANDARDS.get(project_type, MOCK_FIRM_STANDARDS.get("Implementation"))
         else:
             logger.info(f"[PROD MODE] Mengambil standar dari API Perusahaan: {self.base_url}")
@@ -226,7 +225,7 @@ class Researcher:
     @lru_cache(maxsize=128)
     def get_regulatory_data(regulation_name):
         if not regulation_name: return "Tidak ada regulasi spesifik."
-        # This dynamic query gracefully handles arbitrary user string inputs
+        # This dynamic query gracefully handles arbitrary user string inputs like "ISO, COBIT, OJK No.4"
         res = Researcher.search(f"Ringkasan kepatuhan mandat {regulation_name}", limit=2)
         if not res or 'items' not in res: return f"Merujuk pada standar umum {regulation_name}."
         return "\n".join([i.get('snippet', '') for i in res['items']])

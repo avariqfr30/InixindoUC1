@@ -27,8 +27,8 @@
         textarea { resize: vertical; min-height: 70px; margin-bottom: 10px; }
 
         /* Custom Checkbox Group Styling */
-        .checkbox-group { display: flex; gap: 15px; margin-bottom: 15px; }
-        .checkbox-group label { display: flex; align-items: center; font-weight: normal; margin: 0; font-size: 1rem; cursor: pointer; }
+        .checkbox-group { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
+        .checkbox-group label { display: flex; align-items: center; font-weight: normal; margin: 0; font-size: 0.95rem; cursor: pointer; }
         .checkbox-group input[type="checkbox"] { width: auto; margin-right: 8px; margin-bottom: 0; transform: scale(1.1); cursor: pointer; }
         
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -49,13 +49,27 @@
             <select id="select-perusahaan"></select>
             
             <div id="container-dynamic" class="hidden">
-                <label for="select-proposal">Jenis Proposal</label>
-                <select id="select-proposal">
-                    <option value="" disabled selected>Pilih Jenis Proposal...</option>
-                    <option value="Training">Training</option>
-                    <option value="Konsultan">Konsultan</option>
-                    <option value="Training dan Konsultan">Training dan Konsultan</option>
-                </select>
+                <div class="grid-2">
+                    <div>
+                        <label for="select-proposal">Jenis Proposal</label>
+                        <select id="select-proposal">
+                            <option value="" disabled selected>Pilih Jenis Proposal...</option>
+                            <option value="Training">Training</option>
+                            <option value="Konsultan">Konsultan</option>
+                            <option value="Training dan Konsultan">Training dan Konsultan</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="select-proyek">Jenis Proyek</label>
+                        <select id="select-proyek">
+                            <option value="" disabled selected>Pilih Jenis Proyek...</option>
+                            <option value="Diagnostic">Diagnostic</option>
+                            <option value="Strategic">Strategic</option>
+                            <option value="Transformation">Transformation</option>
+                            <option value="Implementation">Implementation</option>
+                        </select>
+                    </div>
+                </div>
 
                 <label for="input-konteks">Konteks Organisasi</label>
                 <textarea id="input-konteks" placeholder="Deskripsikan konteks organisasi klien..."></textarea>
@@ -81,18 +95,17 @@
                     </div>
                 </div>
 
-                <label for="select-framework">Potensi Framework</label>
-                <select id="select-framework">
-                    <option value="" disabled selected>Pilih Framework...</option>
-                    <option value="Itil">Itil</option>
-                    <option value="Togaf">Togaf</option>
-                    <option value="Cobit">Cobit</option>
-                    <option value="ISO">ISO</option>
-                    <option value="Teori">Teori</option>
-                    <option value="Regulasi">Regulasi</option>
-                    <option value="Best Practise">Best Practise</option>
-                    <option value="Lainnya">Lainnya (Custom)...</option>
-                </select>
+                <label>Potensi Framework (Pilih lebih dari satu)</label>
+                <div class="checkbox-group" id="group-framework">
+                    <label><input type="checkbox" value="Itil"> Itil</label>
+                    <label><input type="checkbox" value="Togaf"> Togaf</label>
+                    <label><input type="checkbox" value="Cobit"> Cobit</label>
+                    <label><input type="checkbox" value="ISO"> ISO</label>
+                    <label><input type="checkbox" value="Teori"> Teori</label>
+                    <label><input type="checkbox" value="Regulasi"> Regulasi</label>
+                    <label><input type="checkbox" value="Best Practise"> Best Practise</label>
+                    <label><input type="checkbox" value="Lainnya" id="cb-framework-lainnya"> Lainnya (Custom)...</label>
+                </div>
                 <input type="text" id="input-framework" class="hidden" placeholder="Masukkan Framework Custom..." />
             </div>
             
@@ -128,12 +141,14 @@
             
             selPerusahaan: document.getElementById('select-perusahaan'),
             selProposal: document.getElementById('select-proposal'),
+            selProyek: document.getElementById('select-proyek'),
             inpKonteks: document.getElementById('input-konteks'),
             inpPermasalahan: document.getElementById('input-permasalahan'),
             groupKebutuhan: document.getElementById('group-kebutuhan'),
             inpWaktu: document.getElementById('input-waktu'),
             inpBiaya: document.getElementById('input-biaya'),
-            selFramework: document.getElementById('select-framework'),
+            groupFramework: document.getElementById('group-framework'),
+            cbFrameworkLainnya: document.getElementById('cb-framework-lainnya'),
             inpFramework: document.getElementById('input-framework'),
             
             containerDynamic: document.getElementById('container-dynamic'),
@@ -156,12 +171,15 @@
             return checked.map(cb => cb.value).join(', ');
         };
 
-        // Resolves whether to use the dropdown's predefined value or the custom text box value
+        // Combines all checked standard frameworks + custom text if "Lainnya" is checked
         const getFinalFramework = () => {
-            if (ui.selFramework.value === 'Lainnya') {
-                return ui.inpFramework.value.trim();
+            const checkedBoxes = Array.from(ui.groupFramework.querySelectorAll('input:checked:not(#cb-framework-lainnya)'));
+            const frameworkNames = checkedBoxes.map(cb => cb.value);
+            
+            if (ui.cbFrameworkLainnya.checked && ui.inpFramework.value.trim()) {
+                frameworkNames.push(ui.inpFramework.value.trim());
             }
-            return ui.selFramework.value;
+            return frameworkNames.join(', ');
         };
 
         async function initializeSystem() {
@@ -193,42 +211,39 @@
             checkReviewReady();
         };
 
-        // Logic to toggle the custom input box for "Lainnya"
-        ui.selFramework.addEventListener('change', () => {
-            if (ui.selFramework.value === 'Lainnya') {
+        // Logic to toggle the custom input box for "Lainnya" checkbox
+        ui.cbFrameworkLainnya.addEventListener('change', () => {
+            if (ui.cbFrameworkLainnya.checked) {
                 ui.inpFramework.classList.remove('hidden');
             } else {
                 ui.inpFramework.classList.add('hidden');
-                ui.inpFramework.value = ''; // clear it so it doesn't linger
+                ui.inpFramework.value = ''; // clear it
             }
             checkReviewReady();
         });
 
+        // Event listeners for groups
         ui.groupKebutuhan.addEventListener('change', checkReviewReady);
+        ui.groupFramework.addEventListener('change', checkReviewReady);
 
-        [ui.selProposal, ui.inpKonteks, ui.inpPermasalahan, ui.inpBiaya, ui.inpWaktu, ui.inpFramework].forEach(el => {
+        // Attach listeners to Dropdowns & Inputs
+        [ui.selProposal, ui.selProyek, ui.inpKonteks, ui.inpPermasalahan, ui.inpBiaya, ui.inpWaktu, ui.inpFramework].forEach(el => {
             el.addEventListener('input', checkReviewReady);
         });
 
         function checkReviewReady() {
             const hasKebutuhan = ui.groupKebutuhan.querySelectorAll('input:checked').length > 0;
-            
-            // Framework validation: If 'Lainnya', ensure the text box isn't empty. Else, ensure dropdown is selected.
-            let isFrameworkReady = false;
-            if (ui.selFramework.value === 'Lainnya') {
-                isFrameworkReady = ui.inpFramework.value.trim().length > 0;
-            } else if (ui.selFramework.value) {
-                isFrameworkReady = true;
-            }
+            const hasFramework = getFinalFramework().length > 0;
 
             const isReady = ui.selPerusahaan.value && 
                             ui.selProposal.value && 
+                            ui.selProyek.value &&
                             ui.inpKonteks.value.trim() && 
                             ui.inpPermasalahan.value.trim() && 
                             ui.inpBiaya.value.trim() && 
                             ui.inpWaktu.value.trim() &&
                             hasKebutuhan &&
-                            isFrameworkReady;
+                            hasFramework;
             ui.btnReview.disabled = !isReady;
         }
 
@@ -236,6 +251,7 @@
             ui.reviewText.innerHTML = `
                 <div class="review-row"><span>Perusahaan</span><span>${ui.selPerusahaan.value}</span></div>
                 <div class="review-row"><span>Jenis Proposal</span><span>${ui.selProposal.value}</span></div>
+                <div class="review-row"><span>Jenis Proyek</span><span>${ui.selProyek.value}</span></div>
                 <div class="review-row"><span>Konteks Organisasi</span><span>${ui.inpKonteks.value}</span></div>
                 <div class="review-row"><span>Permasalahan</span><span>${ui.inpPermasalahan.value}</span></div>
                 <div class="review-row"><span>Kebutuhan</span><span>${getSelectedKebutuhan()}</span></div>
@@ -259,12 +275,13 @@
             const payload = {
                 nama_perusahaan: ui.selPerusahaan.value,
                 jenis_proposal: ui.selProposal.value,
+                jenis_proyek: ui.selProyek.value,
                 konteks_organisasi: ui.inpKonteks.value,
                 permasalahan: ui.inpPermasalahan.value,
                 klasifikasi_kebutuhan: getSelectedKebutuhan(), 
                 estimasi_waktu: ui.inpWaktu.value,
                 estimasi_biaya: ui.inpBiaya.value,
-                potensi_framework: getFinalFramework() // Dynamically injects predefined OR custom
+                potensi_framework: getFinalFramework() 
             };
 
             fetch('/generate', { 

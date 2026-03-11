@@ -48,11 +48,13 @@ def generate_doc():
     budget = data.get('estimasi_biaya')
     service_type = data.get('jenis_proposal')
     
-    project_goal = "Improvement" # Default assumption
-    project_type = data.get('klasifikasi_kebutuhan', 'Problem') 
+    # New Mapping Strategy Based on UI Updates
+    project_goal = data.get('klasifikasi_kebutuhan', 'Problem') # e.g. "Problem, Opportunity"
+    project_type = data.get('jenis_proyek', 'Implementation')   # e.g. "Diagnostic", "Strategic"
+    
     timeline = data.get('estimasi_waktu', 'TBD')
     notes = data.get('permasalahan', '')
-    regulations = data.get('potensi_framework', '') # Accepts string from predefined option OR custom textbox
+    regulations = data.get('potensi_framework', '') # e.g. "ITIL, ISO, Custom Framework Name"
     
     doc, filename = generator.run(entity, topic, budget, service_type, project_goal, project_type, timeline, notes, regulations)
     
