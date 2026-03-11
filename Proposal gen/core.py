@@ -58,6 +58,7 @@ class FirmAPIClient:
         """Menarik Metodologi, Tim, dan Harga berdasarkan tipe proyek"""
         if self.demo_mode:
             logger.info(f"[DEMO MODE] Menggunakan Mock Data Internal untuk tipe: {project_type}")
+            # Fallback to Implementation if multiple checkboxes produce a complex string
             return MOCK_FIRM_STANDARDS.get(project_type, MOCK_FIRM_STANDARDS.get("Implementation"))
         else:
             logger.info(f"[PROD MODE] Mengambil standar dari API Perusahaan: {self.base_url}")
@@ -615,10 +616,11 @@ class ProposalGenerator:
         except Exception as e:
             return {"prompt": "", "success": False, "error": str(e)}
 
-    def run(self, client, project, budget=None, service_type="Consulting", project_goal="Improvement", project_type="Implementation", timeline="TBD", notes="", regulations=""):
+    def run(self, client, project, budget=None, service_type="Konsultan", project_goal="Improvement", project_type="Implementation", timeline="TBD", notes="", regulations=""):
         logger.info(f"Starting Generation: {client} | Mode Demo: {DEMO_MODE}")
         
-        active_structure = CONSULTING_STRUCTURE if service_type == "Consulting" else TRAINING_STRUCTURE
+        # Determine structure based on the new service types
+        active_structure = CONSULTING_STRUCTURE if "Konsultan" in service_type else TRAINING_STRUCTURE
         firm_data = self.firm_api.get_project_standards(project_type)
         
         # Regex yang lebih cerdas: Menghapus Legal Entitas (PT/CV/Tbk) dan Indikator Cabang

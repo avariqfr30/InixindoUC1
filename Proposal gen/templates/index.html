@@ -25,6 +25,11 @@
         .spinner { width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; display: none; vertical-align: middle; margin-left: 10px; }
         .spinner.active { display: inline-block; }
         textarea { resize: vertical; min-height: 70px; margin-bottom: 10px; }
+
+        /* Custom Checkbox Group Styling */
+        .checkbox-group { display: flex; gap: 15px; margin-bottom: 15px; }
+        .checkbox-group label { display: flex; align-items: center; font-weight: normal; margin: 0; font-size: 1rem; cursor: pointer; }
+        .checkbox-group input[type="checkbox"] { width: auto; margin-right: 8px; margin-bottom: 0; transform: scale(1.1); cursor: pointer; }
         
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
@@ -47,24 +52,23 @@
                 <label for="select-proposal">Jenis Proposal</label>
                 <select id="select-proposal">
                     <option value="" disabled selected>Pilih Jenis Proposal...</option>
-                    <option value="Consulting">Consulting Engagement</option>
-                    <option value="Training">Training Program</option>
-                    <option value="Consulting dan Training">Consulting & Training Program</option>
+                    <option value="Training">Training</option>
+                    <option value="Konsultan">Konsultan</option>
+                    <option value="Training dan Konsultan">Training dan Konsultan</option>
                 </select>
 
-                <label for="select-konteks">Konteks Organisasi</label>
-                <select id="select-konteks"></select>
+                <label for="input-konteks">Konteks Organisasi</label>
+                <textarea id="input-konteks" placeholder="Deskripsikan konteks organisasi klien..."></textarea>
 
-                <label for="select-permasalahan">Permasalahan</label>
-                <select id="select-permasalahan"></select>
+                <label for="input-permasalahan">Permasalahan</label>
+                <textarea id="input-permasalahan" placeholder="Deskripsikan masalah utama yang dihadapi klien..."></textarea>
 
-                <label for="select-kebutuhan">Klasifikasi Kebutuhan</label>
-                <select id="select-kebutuhan">
-                    <option value="Diagnostic">Diagnostic</option>
-                    <option value="Strategic">Strategic</option>
-                    <option value="Implementation" selected>Implementation</option>
-                    <option value="Transformation">Transformation</option>
-                </select>
+                <label>Klasifikasi Kebutuhan (Pilih lebih dari satu)</label>
+                <div class="checkbox-group" id="group-kebutuhan">
+                    <label><input type="checkbox" value="Problem"> Problem</label>
+                    <label><input type="checkbox" value="Opportunity"> Opportunity</label>
+                    <label><input type="checkbox" value="Directive"> Directive</label>
+                </div>
 
                 <div class="grid-2">
                     <div>
@@ -72,14 +76,22 @@
                         <input type="text" id="input-waktu" placeholder="Cth: 3 Bulan..." />
                     </div>
                     <div>
-                        <label for="select-biaya">Estimasi Biaya</label>
-                        <select id="select-biaya"></select>
+                        <label for="input-biaya">Estimasi Biaya</label>
+                        <input type="text" id="input-biaya" placeholder="Cth: Rp. 150.000.000" />
                     </div>
                 </div>
 
-                <label for="input-framework">Potensi Framework</label>
-                <input type="text" id="input-framework" list="framework-options" placeholder="Cth: ISO 27001, SPBE..." />
-                <datalist id="framework-options"></datalist>
+                <label for="select-framework">Potensi Framework</label>
+                <select id="select-framework">
+                    <option value="" disabled selected>Pilih Framework...</option>
+                    <option value="Itil">Itil</option>
+                    <option value="Togaf">Togaf</option>
+                    <option value="Cobit">Cobit</option>
+                    <option value="ISO">ISO</option>
+                    <option value="Teori">Teori</option>
+                    <option value="Regulasi">Regulasi</option>
+                    <option value="Best Practise">Best Practise</option>
+                </select>
             </div>
             
             <button type="button" id="btn-review" disabled>Lanjut Tinjau Data</button>
@@ -105,9 +117,6 @@
     </div>
 
     <script>
-        let smartLibrary = {}; 
-        let currentProjects = {}; // Holds the projects for the currently selected company
-        
         const ui = {
             loader: document.getElementById('loader'),
             loaderText: document.getElementById('loader-text'),
@@ -117,12 +126,12 @@
             
             selPerusahaan: document.getElementById('select-perusahaan'),
             selProposal: document.getElementById('select-proposal'),
-            selKonteks: document.getElementById('select-konteks'),
-            selPermasalahan: document.getElementById('select-permasalahan'),
-            selKebutuhan: document.getElementById('select-kebutuhan'),
+            inpKonteks: document.getElementById('input-konteks'),
+            inpPermasalahan: document.getElementById('input-permasalahan'),
+            groupKebutuhan: document.getElementById('group-kebutuhan'),
             inpWaktu: document.getElementById('input-waktu'),
-            selBiaya: document.getElementById('select-biaya'),
-            inpFramework: document.getElementById('input-framework'),
+            inpBiaya: document.getElementById('input-biaya'),
+            selFramework: document.getElementById('select-framework'),
             
             containerDynamic: document.getElementById('container-dynamic'),
             reviewText: document.getElementById('review-text'),
@@ -139,13 +148,14 @@
             items.forEach(item => element.add(new Option(item, item)));
         };
 
+        // Function to extract multiple checked values into a string
+        const getSelectedKebutuhan = () => {
+            const checked = Array.from(ui.groupKebutuhan.querySelectorAll('input:checked'));
+            return checked.map(cb => cb.value).join(', ');
+        };
+
         async function initializeSystem() {
             try {
-                // Fetch smart suggestions config
-                const configRes = await fetch('/api/config');
-                const configData = await configRes.json();
-                smartLibrary = configData.suggestions;
-
                 // Fetch just the company names
                 const companiesRes = await fetch('/api/companies');
                 const companies = await companiesRes.json();
@@ -169,90 +179,44 @@
                 .catch(err => { ui.btnRefresh.innerText = "🔄 Refresh Database"; ui.btnRefresh.disabled = false; });
         };
 
-        function updateIntelligentSuggestions() {
-            const combinedContext = (ui.selPerusahaan.value + " " + ui.selKonteks.value).toLowerCase();
-            let matchedRegs = new Set();
-
-            if(smartLibrary) {
-                Object.values(smartLibrary).forEach(category => {
-                    if (category.keywords && category.keywords.some(kw => combinedContext.includes(kw))) {
-                        category.regulations.forEach(r => matchedRegs.add(r));
-                    }
-                });
-            }
-
-            if (matchedRegs.size === 0) {
-                ["ISO 9001", "ISO 27001", "UU PDP"].forEach(r => matchedRegs.add(r));
-            }
-
-            const regDatalist = document.getElementById('framework-options');
-            regDatalist.innerHTML = '';
-            matchedRegs.forEach(reg => {
-                let opt = document.createElement('option');
-                opt.value = reg;
-                regDatalist.appendChild(opt);
-            });
-        }
-
-        ui.selPerusahaan.onchange = async () => {
-            const company = ui.selPerusahaan.value;
-            ui.selKonteks.innerHTML = `<option value="" disabled selected>Memuat data...</option>`;
+        ui.selPerusahaan.onchange = () => {
             ui.containerDynamic.classList.remove('hidden');
-            
-            try {
-                // Fetch specific projects for the selected company
-                const response = await fetch(`/api/projects?entity=${encodeURIComponent(company)}`);
-                currentProjects = await response.json();
-                
-                const topics = Object.keys(currentProjects);
-                populateSelect(ui.selKonteks, topics, "Pilih Konteks Organisasi...");
-                
-                ui.selPermasalahan.innerHTML = '<option value="" disabled selected>Menunggu Konteks...</option>';
-                ui.selBiaya.innerHTML = '<option value="" disabled selected>Menunggu Konteks...</option>';
-                
-            } catch (err) {
-                console.error("Error fetching projects", err);
-                ui.selKonteks.innerHTML = `<option value="" disabled selected>Gagal memuat proyek.</option>`;
-            }
-            
             checkReviewReady();
         };
 
-        ui.selKonteks.onchange = () => {
-            const konteks = ui.selKonteks.value;
-            const projectData = currentProjects[konteks];
+        // Attach listeners to Checkboxes
+        ui.groupKebutuhan.addEventListener('change', checkReviewReady);
 
-            if (projectData) {
-                populateSelect(ui.selPermasalahan, [projectData.permasalahan], "Pilih Permasalahan...");
-                populateSelect(ui.selBiaya, [projectData.biaya], "Pilih Estimasi Biaya...");
-                
-                ui.selPermasalahan.selectedIndex = 1;
-                ui.selBiaya.selectedIndex = 1;
-                
-                updateIntelligentSuggestions();
-            }
-            checkReviewReady();
-        };
-
-        [ui.selProposal, ui.inpWaktu].forEach(el => {
+        // Attach listeners to Dropdowns & Inputs
+        [ui.selProposal, ui.inpKonteks, ui.inpPermasalahan, ui.inpBiaya, ui.inpWaktu, ui.selFramework].forEach(el => {
             el.addEventListener('input', checkReviewReady);
         });
 
         function checkReviewReady() {
-            const isReady = ui.selPerusahaan.value && ui.selProposal.value && ui.selKonteks.value && ui.selPermasalahan.value && ui.selBiaya.value && ui.inpWaktu.value.trim();
+            const hasKebutuhan = ui.groupKebutuhan.querySelectorAll('input:checked').length > 0;
+            const isReady = ui.selPerusahaan.value && 
+                            ui.selProposal.value && 
+                            ui.inpKonteks.value.trim() && 
+                            ui.inpPermasalahan.value.trim() && 
+                            ui.inpBiaya.value.trim() && 
+                            ui.inpWaktu.value.trim() &&
+                            hasKebutuhan &&
+                            ui.selFramework.value;
             ui.btnReview.disabled = !isReady;
         }
 
         ui.btnReview.onclick = () => { 
+            const stringKebutuhan = getSelectedKebutuhan();
+
             ui.reviewText.innerHTML = `
                 <div class="review-row"><span>Perusahaan</span><span>${ui.selPerusahaan.value}</span></div>
                 <div class="review-row"><span>Jenis Proposal</span><span>${ui.selProposal.value}</span></div>
-                <div class="review-row"><span>Konteks Organisasi</span><span>${ui.selKonteks.value}</span></div>
-                <div class="review-row"><span>Permasalahan</span><span>${ui.selPermasalahan.value}</span></div>
-                <div class="review-row"><span>Kebutuhan</span><span>${ui.selKebutuhan.value}</span></div>
+                <div class="review-row"><span>Konteks Organisasi</span><span>${ui.inpKonteks.value}</span></div>
+                <div class="review-row"><span>Permasalahan</span><span>${ui.inpPermasalahan.value}</span></div>
+                <div class="review-row"><span>Kebutuhan</span><span>${stringKebutuhan}</span></div>
                 <div class="review-row"><span>Estimasi Waktu</span><span>${ui.inpWaktu.value}</span></div>
-                <div class="review-row"><span>Estimasi Biaya</span><span>${ui.selBiaya.value}</span></div>
-                <div class="review-row"><span>Framework</span><span>${ui.inpFramework.value || '-'}</span></div>
+                <div class="review-row"><span>Estimasi Biaya</span><span>${ui.inpBiaya.value}</span></div>
+                <div class="review-row"><span>Framework</span><span>${ui.selFramework.value}</span></div>
             `;
             ui.configStep.classList.add('hidden'); 
             ui.reviewStep.classList.remove('hidden'); 
@@ -270,12 +234,12 @@
             const payload = {
                 nama_perusahaan: ui.selPerusahaan.value,
                 jenis_proposal: ui.selProposal.value,
-                konteks_organisasi: ui.selKonteks.value,
-                permasalahan: ui.selPermasalahan.value,
-                klasifikasi_kebutuhan: ui.selKebutuhan.value,
+                konteks_organisasi: ui.inpKonteks.value,
+                permasalahan: ui.inpPermasalahan.value,
+                klasifikasi_kebutuhan: getSelectedKebutuhan(), // Combines checked boxes
                 estimasi_waktu: ui.inpWaktu.value,
-                estimasi_biaya: ui.selBiaya.value,
-                potensi_framework: ui.inpFramework.value
+                estimasi_biaya: ui.inpBiaya.value,
+                potensi_framework: ui.selFramework.value
             };
 
             fetch('/generate', { 

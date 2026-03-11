@@ -22,7 +22,7 @@ def home():
 
 @app.route('/api/config')
 def get_base_config():
-    """Returns static configurations and intelligent suggestions."""
+    """Returns static configurations."""
     return jsonify({
         "suggestions": SMART_SUGGESTIONS
     })
@@ -38,28 +38,6 @@ def get_companies():
     companies = [c for c in companies if c.lower() != 'nan' and c]
     return jsonify(sorted(companies))
 
-@app.route('/api/projects')
-def get_projects():
-    """Scalable: Only returns projects for the specifically requested company."""
-    entity = request.args.get('entity')
-    if not entity or kb.df is None or kb.df.empty: 
-        return jsonify({})
-    
-    # Vectorized filtering for high performance
-    subset = kb.df[kb.df['entity'].astype(str).str.strip() == entity]
-    
-    projects = {}
-    # to_dict('records') is much faster than iterrows()
-    for row in subset.to_dict('records'):
-        topic = str(row.get('topic', '')).strip()
-        if topic and topic.lower() != 'nan':
-            projects[topic] = {
-                "permasalahan": str(row.get('Strategic Context & Pain Points', '')).strip(),
-                "biaya": str(row.get('budget', '')).strip()
-            }
-            
-    return jsonify(projects)
-
 @app.route('/generate', methods=['POST'])
 def generate_doc():
     data = request.json
@@ -71,7 +49,7 @@ def generate_doc():
     service_type = data.get('jenis_proposal')
     
     project_goal = "Improvement" # Default assumption
-    project_type = data.get('klasifikasi_kebutuhan', 'Implementation')
+    project_type = data.get('klasifikasi_kebutuhan', 'Problem') # This will now be a string like "Problem, Directive"
     timeline = data.get('estimasi_waktu', 'TBD')
     notes = data.get('permasalahan', '')
     regulations = data.get('potensi_framework', '')
