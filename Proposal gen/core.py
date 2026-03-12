@@ -34,10 +34,10 @@ from docx.oxml import OxmlElement
 from ollama import Client 
 from chromadb.utils import embedding_functions
 
-# Import dari config
+# Import dari config baru
 from config import (
     GOOGLE_API_KEY, GOOGLE_CX_ID, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL, DB_URI,
-    WRITER_FIRM_NAME, DEFAULT_COLOR, TRAINING_STRUCTURE, CONSULTING_STRUCTURE, 
+    WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE, 
     PERSONAS, PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING, 
     DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, MOCK_FIRM_STANDARDS
 )
@@ -45,22 +45,19 @@ from config import (
 logger = logging.getLogger(__name__)
 
 # =====================================================================
-# FIRM API ADAPTER (Siap untuk Handover)
+# FIRM API ADAPTER
 # =====================================================================
 class FirmAPIClient:
-    """Mengambil standar Hak Kekayaan Intelektual perusahaan (Methodology, Team, Pricing)"""
     def __init__(self):
         self.demo_mode = DEMO_MODE
         self.base_url = FIRM_API_URL
         self.headers = {"Authorization": f"Bearer {API_AUTH_TOKEN}"}
 
     def get_project_standards(self, project_type):
-        """Menarik Metodologi, Tim, dan Harga berdasarkan tipe proyek"""
         if self.demo_mode:
             logger.info(f"[DEMO MODE] Menggunakan Mock Data Internal untuk tipe: {project_type}")
             return MOCK_FIRM_STANDARDS.get(project_type, MOCK_FIRM_STANDARDS.get("Implementation"))
         else:
-            logger.info(f"[PROD MODE] Mengambil standar dari API Perusahaan: {self.base_url}")
             try:
                 response = requests.get(f"{self.base_url}/standards/{project_type}", headers=self.headers, timeout=5)
                 response.raise_for_status()
@@ -115,39 +112,27 @@ class KnowledgeBase:
             else:
                 return False
             
-        # ==========================================
-        # SCALABILITY FIX: Delta Sync & Batching
-        # ==========================================
         existing_ids = set(self.collection.get()['ids'])
-        
-        # Create a map of what the DB currently holds
         new_ids_map = {str(idx): row for idx, row in self.df.iterrows()}
         new_ids_set = set(new_ids_map.keys())
         
-        # Find exactly what needs to be deleted and what needs to be added
         ids_to_delete = list(existing_ids - new_ids_set)
         ids_to_add = list(new_ids_set - existing_ids)
         
         if ids_to_delete: 
-            logger.info(f"Removing {len(ids_to_delete)} obsolete records from vector DB...")
             self.collection.delete(ids_to_delete)
             
         if ids_to_add:
-            logger.info(f"Adding {len(ids_to_add)} new records to vector DB. This may take a moment...")
-            batch_size = 500 # Prevent Ollama payload timeouts for 30k+ rows
-            
+            batch_size = 500 
             for i in range(0, len(ids_to_add), batch_size):
                 batch_ids = ids_to_add[i:i + batch_size]
                 docs, metas = [], []
-                
                 for b_id in batch_ids:
                     row = new_ids_map[b_id]
                     text_rep = " | ".join([f"{col}: {val}" for col, val in row.items()])
                     docs.append(text_rep)
                     metas.append(row.astype(str).to_dict())
-                    
                 self.collection.add(documents=docs, metadatas=metas, ids=batch_ids)
-                logger.info(f"Indexed batch {i + len(batch_ids)} / {len(ids_to_add)}")
                 
         return True
 
@@ -170,7 +155,7 @@ class KnowledgeBase:
 class Researcher:
     @staticmethod
     @lru_cache(maxsize=256)
-    def search(query, limit=2):
+    def search(query, limit=5):
         if "YOUR_GOOGLE" in GOOGLE_API_KEY: return None
         try:
             params = {'q': query, 'key': GOOGLE_API_KEY, 'cx': GOOGLE_CX_ID, 'num': limit, 'gl': 'id'}
@@ -195,29 +180,29 @@ class Researcher:
     @staticmethod
     @lru_cache(maxsize=128)
     def get_entity_profile(entity_name):
-        res = Researcher.search(f"{entity_name} profil perusahaan indonesia", limit=1)
+        res = Researcher.search(f'"{entity_name}" profil perusahaan OR "tentang kami" -saham -loker -lowongan', limit=3)
         if not res or 'items' not in res: return f"{entity_name}"
-        return res['items'][0].get('snippet', '')
-        
+        return "\n".join([i.get('snippet', '') for i in res['items']])
+
     @staticmethod
     @lru_cache(maxsize=128)
     def get_contact_details(entity_name):
-        query = f"{entity_name} alamat nomor telepon email contact details"
-        res = Researcher.search(query, limit=2)
-        if not res or 'items' not in res: return ""
+        query = f'"{entity_name}" "alamat kantor" OR "telepon kantor" OR "hubungi kami" indonesia -linkedin -direktur -ceo -manager -loker -lowongan'
+        res = Researcher.search(query, limit=5)
+        if not res or 'items' not in res: return f"Kantor Pusat {entity_name}, Indonesia."
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
     @staticmethod
     @lru_cache(maxsize=128)
     def get_collaboration_data(client, firm):
-        res = Researcher.search(f"\"{client}\" \"{firm}\" partnership OR project", limit=2)
-        if not res or 'items' not in res: return "Tidak ada rekam jejak kolaborasi publik."
+        res = Researcher.search(f'"{client}" AND "{firm}" kerjasama OR proyek OR "telah mempercayakan"', limit=4)
+        if not res or 'items' not in res: return "Data kolaborasi spesifik tidak dipublikasikan secara terbuka."
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
     @staticmethod
     @lru_cache(maxsize=128)
     def get_latest_client_news(client_name):
-        res = Researcher.search(f"{client_name} berita teknologi masalah transformasi 2026", limit=2)
+        res = Researcher.search(f'"{client_name}" berita teknologi inovasi 2026', limit=3)
         if not res or 'items' not in res: return "Tidak ada berita relevan terbaru."
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
@@ -225,16 +210,15 @@ class Researcher:
     @lru_cache(maxsize=128)
     def get_regulatory_data(regulation_name):
         if not regulation_name: return "Tidak ada regulasi spesifik."
-        # This dynamic query gracefully handles arbitrary user string inputs like "ISO, COBIT, OJK No.4"
-        res = Researcher.search(f"Ringkasan kepatuhan mandat {regulation_name}", limit=2)
+        res = Researcher.search(f'Ringkasan kepatuhan mandat {regulation_name}', limit=3)
         if not res or 'items' not in res: return f"Merujuk pada standar umum {regulation_name}."
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
     @staticmethod
     @lru_cache(maxsize=128)
     def get_firm_experience(firm_name, project_topic):
-        res = Researcher.search(f"\"{firm_name}\" experience portfolio \"{project_topic}\"", limit=2)
-        if not res or 'items' not in res: return "Tidak ada portofolio publik yang ditemukan."
+        res = Researcher.search(f'"{firm_name}" "portofolio" OR "klien kami" OR "berpengalaman" -loker -lowongan', limit=5)
+        if not res or 'items' not in res: return f"{firm_name} adalah penyedia solusi IT terkemuka dengan rekam jejak panjang di sektor enterprise Indonesia."
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
 class LogoManager:
@@ -251,7 +235,7 @@ class LogoManager:
             }
             res = requests.get("https://www.googleapis.com/customsearch/v1", params=params, timeout=5).json()
             if 'items' in res:
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'}
+                headers = {'User-Agent': 'Mozilla/5.0'}
                 for item in res['items']:
                     try:
                         img_resp = requests.get(item['link'], headers=headers, timeout=5)
@@ -588,27 +572,49 @@ class ProposalGenerator:
                 elif chap['visual_intent'] == "flowchart": visual_prompt = "Process visual: [[FLOW: Step 1 -> Step 2 -> Step 3]]."
 
             extra = ""
-            if chap['id'] in ['chap_1', 'c_chap_1', 'c_chap_2']:
-                extra = f"[MANDATORY] Integrate historical evidence of {client} and {WRITER_FIRM_NAME} using: \nCollaboration: {collab_data}"
-            elif chap['id'] in ['chap_7', 'c_chap_10']:
-                extra = f"[MANDATORY] Detail factual historical evidence of {WRITER_FIRM_NAME}'s experience: {firm_exp_data}"
-            elif chap['id'] in ['chap_9', 'c_chap_12']:
-                extra = f"[MANDATORY] Create a Markdown Table for Contact Information using: {writer_data}"
-            elif chap['id'] == 'c_chap_6':
-                extra = f"[MANDATORY] You MUST base your phases EXACTLY on this Firm Methodology: {firm_data['methodology']}."
-            elif chap['id'] == 'c_chap_10':
-                extra = f"[MANDATORY] You MUST use this exact Team Structure: {firm_data['team']}."
-            elif chap['id'] == 'c_chap_11':
-                extra = f"[MANDATORY] You MUST state these exact Commercial Rules: {firm_data['commercial']}."
+            if chap['id'] == 'c_1':
+                extra = f"[MANDATORY] Base the organizational context HEAVILY on this explicit client context provided by the user: '{project}'. Integrate global profile data: {global_data}"
+            elif chap['id'] == 'c_2':
+                extra = f"[MANDATORY] Focus strictly on these explicit problems faced by the client: '{notes}'. Do not invent unrelated problems. Perform Deep Root Cause Analysis."
+            elif chap['id'] == 'c_3':
+                extra = f"[MANDATORY] The solution must be framed as a '{service_type}' engagement. Project Type: '{project_type}'. Client's Core Needs/Goals: '{project_goal}'. Adapt the approach to solve the previously stated problems."
+            elif chap['id'] == 'c_4':
+                extra = f"[MANDATORY] You MUST integrate and detail these specific frameworks/regulations: '{regulations}'. Use this OSINT data to explain their compliance mandates: {regulation_data}."
+            elif chap['id'] == 'c_6':
+                extra = f"[MANDATORY] You MUST base your methodology EXACTLY on this internal Firm Methodology for {project_type}: {firm_data['methodology']}."
+            elif chap['id'] == 'c_7':
+                extra = f"[MANDATORY] The total estimated timeline for this project is '{timeline}'. Detail the phases to logically fit within this duration."
+            elif chap['id'] == 'c_8':
+                extra = f"[MANDATORY] You MUST use this exact Team Structure required for {project_type}: {firm_data['team']}. Expand heavily on each role."
+            elif chap['id'] == 'c_9':
+                extra = f"[MANDATORY] The estimated budget/cost provided by the user is: '{budget}'. You MUST strictly state these exact Commercial Rules: {firm_data['commercial']}. Create a highly detailed pricing breakdown table."
+            elif chap['id'] == 'c_10':
+                extra = f"[MANDATORY] Create a structured closing."
 
             prompt = PROPOSAL_SYSTEM_PROMPT.format(
-                client=client, writer_firm=WRITER_FIRM_NAME, persona=persona,
-                global_data=global_data, client_news=client_news, regulation_data=regulation_data,
+                client=client, 
+                writer_firm=WRITER_FIRM_NAME, 
+                persona=persona,
+                global_data=global_data, 
+                client_news=client_news, 
+                regulation_data=regulation_data,
+                writer_data=writer_data,
+                firm_exp_data=firm_exp_data,
+                collab_data=collab_data,
                 structured_row_data=structured_row_data,
-                project_goal=project_goal, project_type=project_type, timeline=timeline, discovery_notes=discovery_notes,
-                firm_methodology=firm_data['methodology'], firm_team=firm_data['team'], firm_commercial=firm_data['commercial'],
-                rag_data=rag_data, visual_prompt=visual_prompt, extra_instructions=extra,
-                chapter_title=chap['title'], sub_chapters=subs, length_intent=chap.get('length_intent', 'Be very concise.')
+                project_goal=project_goal, 
+                project_type=project_type, 
+                timeline=timeline, 
+                discovery_notes=discovery_notes,
+                firm_methodology=firm_data['methodology'], 
+                firm_team=firm_data['team'], 
+                firm_commercial=firm_data['commercial'],
+                rag_data=rag_data, 
+                visual_prompt=visual_prompt, 
+                extra_instructions=extra,
+                chapter_title=chap['title'], 
+                sub_chapters=subs, 
+                length_intent=chap.get('length_intent', 'Expand heavily.')
             )
 
             return {"prompt": prompt, "success": True}
@@ -619,14 +625,10 @@ class ProposalGenerator:
     def run(self, client, project, budget=None, service_type="Konsultan", project_goal="Improvement", project_type="Implementation", timeline="TBD", notes="", regulations=""):
         logger.info(f"Starting Generation: {client} | Mode Demo: {DEMO_MODE}")
         
-        # Determine structure based on the new service types
-        active_structure = CONSULTING_STRUCTURE if "Konsultan" in service_type else TRAINING_STRUCTURE
+        active_structure = UNIVERSAL_STRUCTURE
         firm_data = self.firm_api.get_project_standards(project_type)
         
-        # Regex yang lebih cerdas: Menghapus Legal Entitas (PT/CV/Tbk) dan Indikator Cabang
-        # Tapi TETAP menyisakan nama wilayah jika itu bagian dari nama perusahaan (seperti Garuda Indonesia)
         clean_regex = r'\b(Cabang|Branch|Region|Area|Tbk)\b.*$|^(PT\.|PT\s+|CV\.|CV\s+)'
-        
         base_client = re.sub(clean_regex, '', client, flags=re.IGNORECASE).strip()
         base_firm = re.sub(clean_regex, '', WRITER_FIRM_NAME, flags=re.IGNORECASE).strip()
 
@@ -659,7 +661,7 @@ class ProposalGenerator:
                     res = self.ollama.chat(
                         model=LLM_MODEL, 
                         messages=[{'role': 'system', 'content': ctx['prompt']}, {'role': 'user', 'content': f"Write content for {chap['title']}."}],
-                        options={'num_ctx': 4096}  
+                        options={'num_ctx': 6144, 'num_predict': 2048}  
                     )
                     h = doc.add_heading(chap['title'], level=1)
                     h.runs[0].font.color.rgb = RGBColor(*theme_color)
