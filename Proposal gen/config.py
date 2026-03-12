@@ -1,9 +1,9 @@
 # config.py
 import os
 
-
+# =====================================================================
 # SYSTEM MODE & API ADAPTER (HANDOVER SETTINGS)
-
+# =====================================================================
 DEMO_MODE = True 
 FIRM_API_URL = "https://api.perusahaan-anda.com/v1" 
 API_AUTH_TOKEN = "isi_token_disini_nanti"
@@ -28,9 +28,9 @@ DATA_MAPPING = {
     "budget": "Investment Estimation"
 }
 
-
+# =====================================================================
 # KNOWLEDGE PATTERN LIBRARY (Intelligent Autocomplete di UI)
-
+# =====================================================================
 SMART_SUGGESTIONS = {
     "banking": {
         "keywords": ["bank", "bca", "bri", "mandiri", "finance", "fintech", "payment", "kredit"],
@@ -50,8 +50,13 @@ SMART_SUGGESTIONS = {
     }
 }
 
-
-# MOCK API DATA (Internal Firm Standards)
+# =====================================================================
+# MOCK API DATA (Internal Firm Database Simulation)
+# =====================================================================
+MOCK_FIRM_PROFILE = {
+    "contact_info": "Kantor Pusat Inixindo Jogja\nJl. Kenari No. 69, Muja Muju, Kec. Umbulharjo, Kota Yogyakarta, DIY 55165\nEmail: info@inixindo.id\nTelp: (0274) 515448",
+    "portfolio_highlights": "Inixindo Jogja memiliki pengalaman dalam Transformasi TI, Konsultasi, dan Pelatihan Enterprise. Termasuk IT Master Plan, DevSecOps, dan ISO/POJK."
+}
 
 MOCK_FIRM_STANDARDS = {
     "Diagnostic": {
@@ -76,9 +81,9 @@ MOCK_FIRM_STANDARDS = {
     }
 }
 
-
+# =====================================================================
 # PROPOSAL STRUCTURE (TARGET: 20-25 PAGES TOTAL)
-
+# =====================================================================
 UNIVERSAL_STRUCTURE = [
     {
         "id": "c_1", "title": "BAB I – KONTEKS ORGANISASI",
@@ -128,7 +133,7 @@ UNIVERSAL_STRUCTURE = [
         "id": "c_8", "title": "BAB VIII – TIM DAN KAPABILITAS",
         "subs": ["8.1 Struktur Organisasi Tata Kelola Proyek", "8.2 Profil Peran dan Rekam Jejak Firm"],
         "keywords": "team expert role structure director manager portfolio",
-        "length_intent": "Detail the governance structure. Base the firm's historical excellence entirely on the retrieved OSINT data. (Target: 500 words)."
+        "length_intent": "Detail the governance structure. Firmly assert the firm's historical excellence using the dynamically provided API and OSINT data. (Target: 500 words)."
     },
     {
         "id": "c_9", "title": "BAB IX – ESTIMASI BIAYA",
@@ -140,7 +145,7 @@ UNIVERSAL_STRUCTURE = [
         "id": "c_10", "title": "BAB X – PENUTUP",
         "subs": ["10.1 Kesimpulan Eksekutif", "10.2 Rencana Tindak Lanjut (Next Steps)"],
         "keywords": "closing commitment next steps",
-        "length_intent": "Write a strong executive conclusion. End with a call to action and the firm's contact details sourced from OSINT. (Target: 200 words)."
+        "length_intent": "Write a strong executive conclusion. End with a call to action and the exact firm contact details provided in the dynamic instructions. (Target: 200 words)."
     }
 ]
 
@@ -162,13 +167,11 @@ PROPOSAL_SYSTEM_PROMPT = """
 You are an elite Principal Consultant and Technical Writer at {writer_firm}.
 Your target audience is the Executive Board of {client}. Adopt this persona: {persona}.
 
---- SYSTEM CONTEXT ---
+--- EXTERNAL OSINT CONTEXT (CLIENT DATA) ---
 Global Client Data: {global_data}
 Latest Client News: {client_news}
 Regulatory/Framework Context: {regulation_data}
-Writer Firm Contact Info: {writer_data}
-Writer Firm Portfolio/Experience: {firm_exp_data}
-Writer Firm Collaboration with Client: {collab_data}
+Client Collaboration History: {collab_data}
 Historical Vector Data: {structured_row_data}
 Semantic DB Matches: {rag_data}
 
@@ -179,10 +182,9 @@ Semantic DB Matches: {rag_data}
 You are writing a professional consulting proposal. Ensure high technical detail and deep analytical thought, but remain structured.
 Read the length intent carefully: {length_intent}
 
---- STRICT ACCURACY & RAW DATA SYNTHESIS RULE ---
-1. You must use the 'Writer Firm Contact Info' and 'Writer Firm Portfolio/Experience' provided in the OSINT system context. 
-2. CRITICAL: The OSINT data is provided as raw Google snippets containing fragmented sentences and ellipses (...). DO NOT output these fragments raw. You MUST synthesize these fragmented facts into smooth, professional, and highly confident sentences.
-3. If the OSINT data for the firm is sparse or unclear, confidently extrapolate using general enterprise best practices. NEVER state or admit that your firm lacks experience, lacks a public portfolio, or that information is unavailable. Frame all capabilities with supreme confidence.
+--- SYNTHESIS RULES ---
+1. RAW DATA HANDLING: The OSINT data is provided as raw Google snippets. DO NOT output fragmented sentences. Synthesize the facts smoothly.
+2. CONFIDENCE: Frame all capabilities with supreme confidence. 
 
 --- TASK ---
 Write "{chapter_title}".
