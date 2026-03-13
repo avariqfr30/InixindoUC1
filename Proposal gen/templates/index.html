@@ -3,34 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Strategic Proposal System</title>
+    <title>Inixindo Strategic Proposal Engine</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #f1f5f9; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; color: #334155; }
-        .card { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); width: 680px; max-height: 95vh; overflow-y: auto;}
+        body { font-family: 'Segoe UI', sans-serif; background: #f1f5f9; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; color: #334155; padding: 20px 0; }
+        .card { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); width: 800px; max-height: 90vh; overflow-y: auto;}
         .hidden { display: none !important; }
-        h2 { color: #0f172a; margin: 0 0 10px 0; font-size: 1.8rem; }
+        h2 { color: #0f172a; margin: 0 0 5px 0; font-size: 1.8rem; }
         p.sub { color: #64748b; margin: 0 0 25px 0; font-size: 1rem; }
-        label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.95rem; }
-        select, input, textarea, button { width: 100%; padding: 12px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 1rem; background: white; box-sizing: border-box; font-family: 'Segoe UI', sans-serif;}
-        select:focus, input:focus, textarea:focus { border-color: #3b82f6; outline: none; }
-        button { background: #2563eb; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; margin-top: 10px; }
+        label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; color: #1e293b; }
+        select, input, textarea, button { width: 100%; padding: 10px 12px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 0.95rem; background: white; box-sizing: border-box; font-family: 'Segoe UI', sans-serif;}
+        select:focus, input:focus, textarea:focus { border-color: #3b82f6; outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+        textarea { resize: vertical; min-height: 80px; }
+        button { background: #2563eb; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; margin-top: 10px; font-size: 1rem; padding: 14px;}
         button:hover { background: #1d4ed8; }
         button:disabled { background: #94a3b8; cursor: not-allowed; }
         button.secondary { background: white; color: #475569; border: 1px solid #cbd5e1; }
         button.secondary:hover { background: #f8fafc; }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-        .review-box { background: #f8fafc; padding: 25px; border-radius: 12px; margin-bottom: 25px; border: 1px solid #e2e8f0; font-size: 0.95rem; }
-        .review-row { display: flex; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px dashed #e2e8f0; padding-bottom: 5px;}
-        .review-row span:last-child { font-weight: 600; color: #0f172a; text-align: right; max-width: 60%; word-wrap: break-word;}
-        .spinner { width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; display: none; vertical-align: middle; margin-left: 10px; }
-        .spinner.active { display: inline-block; }
-        textarea { resize: vertical; min-height: 70px; margin-bottom: 10px; }
-
-        /* Custom Checkbox Group Styling */
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
+        .section-title { font-size: 1.1rem; font-weight: 700; color: #0f172a; margin: 25px 0 15px 0; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; }
         .checkbox-group { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
         .checkbox-group label { display: flex; align-items: center; font-weight: normal; margin: 0; font-size: 0.95rem; cursor: pointer; }
         .checkbox-group input[type="checkbox"] { width: auto; margin-right: 8px; margin-bottom: 0; transform: scale(1.1); cursor: pointer; }
-        
+        .spinner { width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; display: none; vertical-align: middle; margin-left: 10px; }
+        .spinner.active { display: inline-block; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
 </head>
@@ -42,47 +38,83 @@
         </div>
 
         <div id="step-config" class="hidden">
-            <h2>Inixindo Proposal Engine</h2>
-            <p class="sub">Requirement & Discovery Layer</p>
+            <h2>Parameter Proposal</h2>
+            <p class="sub">Requirement & Discovery Layer (Standar Inixindo)</p>
             
-            <label for="select-perusahaan">Nama Perusahaan</label>
+            <div class="section-title">Konteks Klien</div>
+            <label for="select-perusahaan">Nama Perusahaan Klien</label>
             <select id="select-perusahaan"></select>
             
             <div id="container-dynamic" class="hidden">
+                <div class="grid-3">
+                    <div>
+                        <label for="select-industri">Sektor Industri</label>
+                        <select id="select-industri">
+                            <option value="Perbankan & Keuangan">Perbankan & Keuangan</option>
+                            <option value="Pemerintahan / BUMN">Pemerintahan / BUMN</option>
+                            <option value="Kesehatan / Rumah Sakit">Kesehatan / Rumah Sakit</option>
+                            <option value="Teknologi / Telekomunikasi">Teknologi / Telekomunikasi</option>
+                            <option value="Manufaktur & Retail">Manufaktur & Retail</option>
+                            <option value="Lainnya">Lainnya</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="select-karyawan">Jumlah Karyawan</label>
+                        <select id="select-karyawan">
+                            <option value="< 50 (Small)">< 50 (Small)</option>
+                            <option value="50 - 200 (Medium)">50 - 200 (Medium)</option>
+                            <option value="201 - 1000 (Enterprise)">201 - 1000 (Enterprise)</option>
+                            <option value="> 1000 (Large Enterprise)">> 1000 (Large Enterprise)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="select-usia">Generasi Decision Maker</label>
+                        <select id="select-usia">
+                            <option value="Boomer (>60 Tahun)">Boomer (>60 Tahun)</option>
+                            <option value="Gen X (45 - 60 Tahun)" selected>Gen X (45 - 60 Tahun)</option>
+                            <option value="Millennial (30 - 45 Tahun)">Millennial (30 - 45 Tahun)</option>
+                            <option value="Gen Z (<30 Tahun)">Gen Z (<30 Tahun)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="section-title">Ruang Lingkup & Tujuan</div>
                 <div class="grid-2">
                     <div>
-                        <label for="select-proposal">Jenis Proposal</label>
-                        <select id="select-proposal">
-                            <option value="" disabled selected>Pilih Jenis Proposal...</option>
-                            <option value="Training">Training</option>
-                            <option value="Konsultan">Konsultan</option>
-                            <option value="Training dan Konsultan">Training dan Konsultan</option>
+                        <label for="select-status-proyek">Status Inisiatif</label>
+                        <select id="select-status-proyek">
+                            <option value="Proyek Baru (Implementasi dari awal)">Proyek Baru (Implementasi dari awal)</option>
+                            <option value="Proyek Lanjutan (Enhancement/Optimasi)">Proyek Lanjutan (Enhancement/Optimasi)</option>
                         </select>
                     </div>
                     <div>
-                        <label for="select-proyek">Jenis Proyek</label>
+                        <label for="select-proyek">Jenis Layanan / Proyek</label>
                         <select id="select-proyek">
-                            <option value="" disabled selected>Pilih Jenis Proyek...</option>
-                            <option value="Diagnostic">Diagnostic</option>
-                            <option value="Strategic">Strategic</option>
+                            <option value="Diagnostic">Diagnostic / Audit</option>
+                            <option value="Strategic">Strategic / Masterplan</option>
+                            <option value="Implementation">Implementation / Build</option>
                             <option value="Transformation">Transformation</option>
-                            <option value="Implementation">Implementation</option>
                         </select>
                     </div>
                 </div>
 
-                <label for="input-konteks">Konteks Organisasi</label>
-                <textarea id="input-konteks" placeholder="Deskripsikan konteks organisasi klien..."></textarea>
+                <label for="input-ruang-lingkup">Ruang Lingkup Pekerjaan (Scope)</label>
+                <textarea id="input-ruang-lingkup" placeholder="Detailkan modul, area kerja, atau batas pekerjaan..."></textarea>
 
-                <label for="input-permasalahan">Permasalahan</label>
-                <textarea id="input-permasalahan" placeholder="Deskripsikan masalah utama yang dihadapi klien..."></textarea>
+                <label for="input-outcome">Output / Outcome (Goals)</label>
+                <textarea id="input-outcome" placeholder="Apa dampak nyata atau target yang ingin dicapai klien? (Contoh: Menurunkan downtime 20%)"></textarea>
 
-                <label>Klasifikasi Kebutuhan (Pilih lebih dari satu)</label>
-                <div class="checkbox-group" id="group-kebutuhan">
-                    <label><input type="checkbox" value="Problem"> Problem</label>
-                    <label><input type="checkbox" value="Opportunity"> Opportunity</label>
-                    <label><input type="checkbox" value="Directive"> Directive</label>
+                <div class="section-title">Regulasi & Komersial</div>
+                <label>Regulasi / Kebijakan IT Terkait</label>
+                <div class="checkbox-group" id="group-framework">
+                    <label><input type="checkbox" value="ISO 27001"> ISO 27001</label>
+                    <label><input type="checkbox" value="ITIL v4"> ITIL v4</label>
+                    <label><input type="checkbox" value="COBIT 2019"> COBIT</label>
+                    <label><input type="checkbox" value="POJK Terkait"> POJK</label>
+                    <label><input type="checkbox" value="SPBE / UU PDP"> SPBE / UU PDP</label>
+                    <label><input type="checkbox" value="Lainnya" id="cb-framework-lainnya"> Lainnya...</label>
                 </div>
+                <input type="text" id="input-framework" class="hidden" placeholder="Masukkan Regulasi Custom..." />
 
                 <div class="grid-2">
                     <div>
@@ -90,43 +122,23 @@
                         <input type="text" id="input-waktu" placeholder="Cth: 3 Bulan..." />
                     </div>
                     <div>
-                        <label for="input-biaya">Estimasi Biaya</label>
-                        <input type="text" id="input-biaya" placeholder="Cth: Rp. 150.000.000" />
+                        <label for="input-biaya">Target Budget (Rekomendasi)</label>
+                        <input type="text" id="input-biaya" placeholder="Cth: Rp. 500.000.000" />
                     </div>
                 </div>
 
-                <label>Potensi Framework (Pilih lebih dari satu)</label>
-                <div class="checkbox-group" id="group-framework">
-                    <label><input type="checkbox" value="Itil"> Itil</label>
-                    <label><input type="checkbox" value="Togaf"> Togaf</label>
-                    <label><input type="checkbox" value="Cobit"> Cobit</label>
-                    <label><input type="checkbox" value="ISO"> ISO</label>
-                    <label><input type="checkbox" value="Teori"> Teori</label>
-                    <label><input type="checkbox" value="Regulasi"> Regulasi</label>
-                    <label><input type="checkbox" value="Best Practise"> Best Practise</label>
-                    <label><input type="checkbox" value="Lainnya" id="cb-framework-lainnya"> Lainnya (Custom)...</label>
-                </div>
-                <input type="text" id="input-framework" class="hidden" placeholder="Masukkan Framework Custom..." />
+                <label for="input-catatan">Catatan Tambahan / Data Riset (Opsional)</label>
+                <textarea id="input-catatan" placeholder="Catatan meeting, preferensi klien, referensi spesifik..."></textarea>
             </div>
             
-            <button type="button" id="btn-review" disabled>Lanjut Tinjau Data</button>
-            <button type="button" id="btn-refresh" class="secondary" style="font-size:0.9rem; padding:10px;">🔄 Refresh Database</button>
-        </div>
-
-        <div id="step-review" class="hidden">
-            <h2>Konfirmasi Detail</h2>
-            <p class="sub">Validasi data Discovery sebelum menyusun proposal.</p>
-            <div class="review-box" id="review-text"></div>
-            <div style="display:flex; gap:15px;">
-                <button type="button" id="btn-back" class="secondary" style="width:35%">Kembali</button>
-                <button type="button" id="btn-generate" style="width:65%">Generate Proposal <span id="spinner" class="spinner"></span></button>
-            </div>
+            <button type="button" id="btn-generate" disabled>Generate Smart Proposal <span id="spinner" class="spinner"></span></button>
+            <button type="button" id="btn-refresh" class="secondary" style="font-size:0.85rem; padding:8px;">🔄 Sinkronisasi Database Klien</button>
         </div>
 
         <div id="step-success" class="hidden" style="text-align:center; padding: 20px;">
             <div style="font-size: 60px; margin-bottom: 20px;">✅</div>
-            <h2>Selesai!</h2>
-            <p class="sub">Dokumen telah berhasil disusun dan diunduh.</p>
+            <h2>Dokumen Siap!</h2>
+            <p class="sub">Proposal telah dioptimasi dengan format standar Inixindo.</p>
             <button type="button" onclick="location.reload()" class="secondary">Buat Proposal Baru</button>
         </div>
     </div>
@@ -136,28 +148,28 @@
             loader: document.getElementById('loader'),
             loaderText: document.getElementById('loader-text'),
             configStep: document.getElementById('step-config'),
-            reviewStep: document.getElementById('step-review'),
             successStep: document.getElementById('step-success'),
+            containerDynamic: document.getElementById('container-dynamic'),
             
             selPerusahaan: document.getElementById('select-perusahaan'),
-            selProposal: document.getElementById('select-proposal'),
+            selIndustri: document.getElementById('select-industri'),
+            selKaryawan: document.getElementById('select-karyawan'),
+            selUsia: document.getElementById('select-usia'),
+            selStatusProyek: document.getElementById('select-status-proyek'),
             selProyek: document.getElementById('select-proyek'),
-            inpKonteks: document.getElementById('input-konteks'),
-            inpPermasalahan: document.getElementById('input-permasalahan'),
-            groupKebutuhan: document.getElementById('group-kebutuhan'),
-            inpWaktu: document.getElementById('input-waktu'),
-            inpBiaya: document.getElementById('input-biaya'),
+            inpRuangLingkup: document.getElementById('input-ruang-lingkup'),
+            inpOutcome: document.getElementById('input-outcome'),
+            
             groupFramework: document.getElementById('group-framework'),
             cbFrameworkLainnya: document.getElementById('cb-framework-lainnya'),
             inpFramework: document.getElementById('input-framework'),
             
-            containerDynamic: document.getElementById('container-dynamic'),
-            reviewText: document.getElementById('review-text'),
+            inpWaktu: document.getElementById('input-waktu'),
+            inpBiaya: document.getElementById('input-biaya'),
+            inpCatatan: document.getElementById('input-catatan'),
             
-            btnReview: document.getElementById('btn-review'),
             btnGenerate: document.getElementById('btn-generate'),
             btnRefresh: document.getElementById('btn-refresh'),
-            btnBack: document.getElementById('btn-back'),
             spinner: document.getElementById('spinner')
         };
 
@@ -166,16 +178,9 @@
             items.forEach(item => element.add(new Option(item, item)));
         };
 
-        const getSelectedKebutuhan = () => {
-            const checked = Array.from(ui.groupKebutuhan.querySelectorAll('input:checked'));
-            return checked.map(cb => cb.value).join(', ');
-        };
-
-        // Combines all checked standard frameworks + custom text if "Lainnya" is checked
         const getFinalFramework = () => {
             const checkedBoxes = Array.from(ui.groupFramework.querySelectorAll('input:checked:not(#cb-framework-lainnya)'));
             const frameworkNames = checkedBoxes.map(cb => cb.value);
-            
             if (ui.cbFrameworkLainnya.checked && ui.inpFramework.value.trim()) {
                 frameworkNames.push(ui.inpFramework.value.trim());
             }
@@ -186,87 +191,37 @@
             try {
                 const companiesRes = await fetch('/api/companies');
                 const companies = await companiesRes.json();
-                
                 populateSelect(ui.selPerusahaan, companies, "Pilih Perusahaan...");
-                
                 ui.loader.classList.add('hidden'); 
                 ui.configStep.classList.remove('hidden');
             } catch (err) {
                 ui.loaderText.innerHTML = `<span class="error-text">Gagal memuat database server.</span>`;
             }
         }
-        
         initializeSystem();
 
         ui.btnRefresh.onclick = () => {
             ui.btnRefresh.innerText = "Refreshing..."; ui.btnRefresh.disabled = true;
-            fetch('/refresh-knowledge', {method: 'POST'})
-                .then(response => response.json())
-                .then(res => { alert("Database Synced!"); location.reload(); })
-                .catch(err => { ui.btnRefresh.innerText = "🔄 Refresh Database"; ui.btnRefresh.disabled = false; });
+            fetch('/refresh-knowledge', {method: 'POST'}).then(() => location.reload());
         };
 
         ui.selPerusahaan.onchange = () => {
             ui.containerDynamic.classList.remove('hidden');
-            checkReviewReady();
+            checkReady();
         };
 
-        // Logic to toggle the custom input box for "Lainnya" checkbox
         ui.cbFrameworkLainnya.addEventListener('change', () => {
-            if (ui.cbFrameworkLainnya.checked) {
-                ui.inpFramework.classList.remove('hidden');
-            } else {
-                ui.inpFramework.classList.add('hidden');
-                ui.inpFramework.value = ''; // clear it
-            }
-            checkReviewReady();
+            ui.cbFrameworkLainnya.checked ? ui.inpFramework.classList.remove('hidden') : ui.inpFramework.classList.add('hidden');
+            checkReady();
         });
 
-        // Event listeners for groups
-        ui.groupKebutuhan.addEventListener('change', checkReviewReady);
-        ui.groupFramework.addEventListener('change', checkReviewReady);
+        [ui.inpRuangLingkup, ui.inpOutcome, ui.inpBiaya, ui.inpWaktu, ui.inpFramework].forEach(el => el.addEventListener('input', checkReady));
+        ui.groupFramework.addEventListener('change', checkReady);
 
-        // Attach listeners to Dropdowns & Inputs
-        [ui.selProposal, ui.selProyek, ui.inpKonteks, ui.inpPermasalahan, ui.inpBiaya, ui.inpWaktu, ui.inpFramework].forEach(el => {
-            el.addEventListener('input', checkReviewReady);
-        });
-
-        function checkReviewReady() {
-            const hasKebutuhan = ui.groupKebutuhan.querySelectorAll('input:checked').length > 0;
-            const hasFramework = getFinalFramework().length > 0;
-
-            const isReady = ui.selPerusahaan.value && 
-                            ui.selProposal.value && 
-                            ui.selProyek.value &&
-                            ui.inpKonteks.value.trim() && 
-                            ui.inpPermasalahan.value.trim() && 
-                            ui.inpBiaya.value.trim() && 
-                            ui.inpWaktu.value.trim() &&
-                            hasKebutuhan &&
-                            hasFramework;
-            ui.btnReview.disabled = !isReady;
+        function checkReady() {
+            const isReady = ui.selPerusahaan.value && ui.inpRuangLingkup.value.trim() && ui.inpOutcome.value.trim() && ui.inpBiaya.value.trim() && ui.inpWaktu.value.trim();
+            ui.btnGenerate.disabled = !isReady;
         }
-
-        ui.btnReview.onclick = () => { 
-            ui.reviewText.innerHTML = `
-                <div class="review-row"><span>Perusahaan</span><span>${ui.selPerusahaan.value}</span></div>
-                <div class="review-row"><span>Jenis Proposal</span><span>${ui.selProposal.value}</span></div>
-                <div class="review-row"><span>Jenis Proyek</span><span>${ui.selProyek.value}</span></div>
-                <div class="review-row"><span>Konteks Organisasi</span><span>${ui.inpKonteks.value}</span></div>
-                <div class="review-row"><span>Permasalahan</span><span>${ui.inpPermasalahan.value}</span></div>
-                <div class="review-row"><span>Kebutuhan</span><span>${getSelectedKebutuhan()}</span></div>
-                <div class="review-row"><span>Estimasi Waktu</span><span>${ui.inpWaktu.value}</span></div>
-                <div class="review-row"><span>Estimasi Biaya</span><span>${ui.inpBiaya.value}</span></div>
-                <div class="review-row"><span>Framework</span><span>${getFinalFramework()}</span></div>
-            `;
-            ui.configStep.classList.add('hidden'); 
-            ui.reviewStep.classList.remove('hidden'); 
-        };
-
-        ui.btnBack.onclick = () => { 
-            ui.reviewStep.classList.add('hidden'); 
-            ui.configStep.classList.remove('hidden'); 
-        };
 
         ui.btnGenerate.onclick = () => {
             ui.btnGenerate.disabled = true; 
@@ -274,14 +229,17 @@
             
             const payload = {
                 nama_perusahaan: ui.selPerusahaan.value,
-                jenis_proposal: ui.selProposal.value,
+                sektor_industri: ui.selIndustri.value,
+                jumlah_karyawan: ui.selKaryawan.value,
+                usia_pimpinan: ui.selUsia.value,
+                status_proyek: ui.selStatusProyek.value,
                 jenis_proyek: ui.selProyek.value,
-                konteks_organisasi: ui.inpKonteks.value,
-                permasalahan: ui.inpPermasalahan.value,
-                klasifikasi_kebutuhan: getSelectedKebutuhan(), 
+                ruang_lingkup: ui.inpRuangLingkup.value,
+                outcome: ui.inpOutcome.value,
+                regulasi: getFinalFramework(),
                 estimasi_waktu: ui.inpWaktu.value,
-                estimasi_biaya: ui.inpBiaya.value,
-                potensi_framework: getFinalFramework() 
+                target_budget: ui.inpBiaya.value,
+                catatan_tambahan: ui.inpCatatan.value
             };
 
             fetch('/generate', { 
@@ -289,23 +247,17 @@
                 headers: {'Content-Type': 'application/json'}, 
                 body: JSON.stringify(payload) 
             })
-            .then(response => {
-                if (!response.ok) throw new Error("Document generation failed.");
-                return response.blob();
-            })
+            .then(res => res.blob())
             .then(blob => {
                 let url = window.URL.createObjectURL(blob);
                 let a = document.createElement('a'); 
                 a.href = url; 
-                a.download = `Proposal_${ui.selPerusahaan.value.replace(/\\s+/g, '_')}.docx`; 
+                a.download = `Proposal_${ui.selPerusahaan.value.replace(/\s+/g, '_')}.docx`; 
                 a.click();
-                
-                window.URL.revokeObjectURL(url);
-                ui.reviewStep.classList.add('hidden'); 
+                ui.configStep.classList.add('hidden'); 
                 ui.successStep.classList.remove('hidden');
-            })
-            .catch(err => {
-                alert("Failed to generate document. Check server logs.");
+            }).catch(() => {
+                alert("Generation failed.");
                 ui.btnGenerate.disabled = false;
                 ui.spinner.classList.remove('active');
             });

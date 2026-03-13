@@ -37,8 +37,8 @@ from chromadb.utils import embedding_functions
 # Import dari config baru
 from config import (
     GOOGLE_API_KEY, GOOGLE_CX_ID, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL, DB_URI,
-    WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE, 
-    PERSONAS, PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING, 
+    WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE, TONE_MAPPINGS,
+    PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING, 
     DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, MOCK_FIRM_STANDARDS, MOCK_FIRM_PROFILE
 )
 
@@ -122,6 +122,7 @@ class KnowledgeBase:
                 raw_df.to_sql("projects", self.engine, index=False, if_exists='replace')
                 self.df = raw_df
             else:
+                self.df = pd.DataFrame() # Fallback so the app doesn't crash if no csv
                 return False
             
         existing_ids = set(self.collection.get()['ids'])
@@ -165,7 +166,7 @@ class KnowledgeBase:
         except Exception: return ""
 
 # =====================================================================
-# OSINT RESEARCHER (Dynamic Client & Firm Data)
+# OSINT RESEARCHER
 # =====================================================================
 class Researcher:
     @staticmethod
@@ -180,17 +181,6 @@ class Researcher:
         except Exception as e: 
             logger.warning(f"Search API Error: {e}")
             return None
-
-    @staticmethod
-    @lru_cache(maxsize=128)
-    def fetch_page_content(url):
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            resp = requests.get(url, headers=headers, timeout=5)
-            soup = BeautifulSoup(resp.content, 'html.parser')
-            texts = soup.find_all(['p', 'h1', 'h2', 'h3', 'li'])
-            return ' '.join([t.get_text(strip=True) for t in texts])[:4000]
-        except Exception: return ""
 
     @staticmethod
     @lru_cache(maxsize=128)
@@ -224,7 +214,7 @@ class Researcher:
     @staticmethod
     @lru_cache(maxsize=128)
     def get_latest_client_news(client_name):
-        res = Researcher.search(f'"{client_name}" berita teknologi inovasi 2026', limit=3)
+        res = Researcher.search(f'"{client_name}" berita inovasi 2026', limit=3)
         if not res or 'items' not in res: return "Tidak ada berita relevan terbaru."
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
@@ -280,12 +270,28 @@ class StyleEngine:
         pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
         pf.line_spacing = 1.15
         pf.space_after = Pt(8) 
-        pf.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+        # STANDARD INIXINDO FORMATTING (Headers, Footers, Margins)
         for section in doc.sections:
             section.top_margin = Cm(2.54)
             section.bottom_margin = Cm(2.54)
             section.left_margin = Cm(2.54)
             section.right_margin = Cm(2.54)
+            
+            # Header
+            header = section.header
+            h_par = header.paragraphs[0]
+            h_par.text = f"{WRITER_FIRM_NAME} | Proposal Strategis"
+            h_par.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            h_par.runs[0].font.size = Pt(9)
+            h_par.runs[0].font.color.rgb = RGBColor(100, 100, 100)
+            
+            # Footer (Page Numbers)
+            footer = section.footer
+            f_par = footer.paragraphs[0]
+            f_par.text = "Dokumen ini bersifat Rahasia (Confidential)"
+            f_par.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            f_par.runs[0].font.size = Pt(9)
 
 class ChartEngine:
     @staticmethod
@@ -362,56 +368,7 @@ class ChartEngine:
             return img
         except Exception: return None
 
-    @staticmethod
-    def create_flowchart(data_str, theme_color):
-        try:
-            steps = [s.strip() for s in data_str.split('->')]
-            if len(steps) < 2: return None
-            steps = ["\n".join(textwrap.wrap(s, width=18)) for s in steps]
-            fig, ax = plt.subplots(figsize=(8, 3))
-            ax.axis('off')
-            n_steps = len(steps)
-            x_pos = [i * 2.5 for i in range(n_steps)]
-            y_pos = 0.5
-            for i in range(n_steps - 1):
-                ax.annotate("", xy=(x_pos[i+1]-1.0, y_pos), xytext=(x_pos[i]+1.0, y_pos), arrowprops=dict(arrowstyle="-|>", color="#555555", lw=1.5, mutation_scale=15))
-            for i, step in enumerate(steps):
-                box = patches.FancyBboxPatch((x_pos[i]-1.0, y_pos-0.4), 2.0, 0.8, boxstyle="round,pad=0.1,rounding_size=0.2", fc=ChartEngine._get_plt_color(theme_color), ec="#2c3e50", alpha=0.9, zorder=2)
-                ax.add_patch(box)
-                ax.text(x_pos[i], y_pos, step, ha="center", va="center", size=9, color="white", fontweight='bold', zorder=3)
-            ax.set_xlim(-1.2, (n_steps-1)*2.5 + 1.2)
-            ax.set_ylim(0, 1)
-            img = io.BytesIO()
-            plt.savefig(img, format='png', bbox_inches='tight', dpi=200, transparent=True)
-            plt.close()
-            img.seek(0)
-            return img
-        except Exception: return None
-
-    @staticmethod
-    def create_math_image(latex_str, theme_color):
-        try:
-            fig = plt.figure(figsize=(6, 0.8))
-            clean_tex = latex_str.replace('*', r'\times').replace('=', r'\=').strip()
-            plt.text(0.5, 0.5, f"${clean_tex}$", fontsize=16, ha='center', va='center', color='#222222', fontweight='normal')
-            plt.axis('off')
-            img = io.BytesIO()
-            plt.savefig(img, format='png', bbox_inches='tight', dpi=200, transparent=True)
-            plt.close()
-            img.seek(0)
-            return img
-        except Exception: return None
-
 class DocumentBuilder:
-    @staticmethod
-    def _remove_duplicate_header(raw_text, title):
-        lines = raw_text.strip().split('\n')
-        if not lines: return raw_text
-        first_line = lines[0].strip().replace('#', '').strip()
-        ratio = SequenceMatcher(None, first_line.lower(), title.lower()).ratio()
-        if ratio > 0.6 or first_line.lower() in title.lower(): return "\n".join(lines[1:]).strip()
-        return raw_text
-
     @staticmethod
     def parse_html_to_docx(doc, html_content, theme_color):
         soup = BeautifulSoup(html_content, 'html.parser')
@@ -420,9 +377,6 @@ class DocumentBuilder:
             if element.name in ['h1', 'h2', 'h3', 'h4']:
                 level = int(element.name[1])
                 p = doc.add_heading(element.get_text().strip(), level=level)
-                p.paragraph_format.space_before = Pt(24 if level == 2 else 16)
-                p.paragraph_format.space_after = Pt(8)
-                p.paragraph_format.keep_with_next = True 
                 for run in p.runs:
                     run.font.color.rgb = RGBColor(*theme_color)
                     run.font.name = 'Arial'
@@ -432,7 +386,6 @@ class DocumentBuilder:
                 text = element.get_text().strip()
                 if not text: continue
                 p = doc.add_paragraph()
-                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
                 DocumentBuilder._process_inline_html(p, element)
             elif element.name in ['ul', 'ol']:
                 style = 'List Bullet' if element.name == 'ul' else 'List Number'
@@ -445,15 +398,14 @@ class DocumentBuilder:
                 max_cols = max([len(r.find_all(['td', 'th'])) for r in rows])
                 table = doc.add_table(rows=len(rows), cols=max_cols)
                 table.style = 'Table Grid'
-                table.autofit = True
                 for i, row in enumerate(rows):
                     cols = row.find_all(['td', 'th'])
                     for j, col in enumerate(cols):
                         if j < max_cols:
                             cell = table.cell(i, j)
-                            cell._element.clear_content()
-                            p = cell.add_paragraph()
+                            p = cell.paragraphs[0]
                             DocumentBuilder._process_inline_html(p, col)
+                            # Light grey header row
                             if row.find('th') or i == 0:
                                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 for run in p.runs: run.bold = True
@@ -474,72 +426,31 @@ class DocumentBuilder:
 
     @staticmethod
     def process_content(doc, raw_text, theme_color=DEFAULT_COLOR, chapter_title=""):
-        raw_text = DocumentBuilder._remove_duplicate_header(raw_text, chapter_title)
-        lines = raw_text.split('\n')
-        clean_lines = []
-        in_table = False
-        for line in lines:
-            line = line.strip()
-            if line.startswith('[[CHART:') and line.endswith(']]'):
-                data = line.replace('[[CHART:', '').replace(']]', '').strip()
-                img = ChartEngine.create_bar_chart(data, theme_color)
-                if img: doc.add_paragraph().add_run().add_picture(img, width=Inches(5.5))
-                continue
-            if line.startswith('[[GANTT:') and line.endswith(']]'):
-                data = line.replace('[[GANTT:', '').replace(']]', '').strip()
-                img = ChartEngine.create_gantt_chart(data, theme_color)
-                if img: doc.add_paragraph().add_run().add_picture(img, width=Inches(6))
-                continue
-            if line.startswith('[[FLOW:') and line.endswith(']]'):
-                data = line.replace('[[FLOW:', '').replace(']]', '').strip()
-                img = ChartEngine.create_flowchart(data, theme_color)
-                if img: doc.add_paragraph().add_run().add_picture(img, width=Inches(6.5))
-                continue
-            if line.startswith('[[MATH:') and line.endswith(']]'):
-                data = line.replace('[[MATH:', '').replace(']]', '').strip()
-                img = ChartEngine.create_math_image(data, theme_color)
-                if img: 
-                    p = doc.add_paragraph()
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    p.add_run().add_picture(img, width=Inches(2.5))
-                continue
-            if line.startswith('|'):
-                if not in_table:
-                    if clean_lines and clean_lines[-1] != "": clean_lines.append("")
-                    in_table = True
-            else: in_table = False
-            clean_lines.append(line)
-            
-        md_text = "\n".join(clean_lines)
+        md_text = "\n".join([line.strip() for line in raw_text.split('\n') if line.strip() and not line.strip().startswith('#')])
         html = markdown.markdown(md_text, extensions=['tables'])
         DocumentBuilder.parse_html_to_docx(doc, html, theme_color)
 
     @staticmethod
-    def create_cover(doc, client, project, logo_stream=None, theme_color=DEFAULT_COLOR):
+    def create_cover(doc, client, project_type, theme_color=DEFAULT_COLOR):
         StyleEngine.apply_document_styles(doc)
-        for _ in range(3): doc.add_paragraph()
-        if logo_stream:
-            try:
-                p = doc.add_paragraph()
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                p.add_run().add_picture(logo_stream, width=Inches(3))
-            except Exception: pass
-        doc.add_paragraph()
+        for _ in range(4): doc.add_paragraph()
         t = doc.add_paragraph("PROPOSAL STRATEGIS")
         t.alignment = WD_ALIGN_PARAGRAPH.CENTER
         t.runs[0].font.size = Pt(18)
+        
         c = doc.add_paragraph(client.upper())
         c.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = c.runs[0]
         run.bold = True
         run.font.size = Pt(28)
         run.font.color.rgb = RGBColor(*theme_color)
-        doc.add_paragraph()
-        p_name = doc.add_paragraph(project)
+        
+        p_name = doc.add_paragraph(f"Inisiatif: {project_type}")
         p_name.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p_name.runs[0].font.size = Pt(16)
+        p_name.runs[0].font.size = Pt(14)
         p_name.runs[0].italic = True
-        for _ in range(4): doc.add_paragraph()
+        
+        for _ in range(5): doc.add_paragraph()
         s = doc.add_paragraph(f"Disusun Oleh:\n{WRITER_FIRM_NAME}")
         s.alignment = WD_ALIGN_PARAGRAPH.CENTER
         doc.add_page_break()
@@ -551,143 +462,84 @@ class ProposalGenerator:
         self.io_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
         self.firm_api = FirmAPIClient()
 
-    def _fetch_chapter_context(self, chap, client, project, budget, project_goal, project_type, timeline, notes, regulations, firm_data, firm_profile, research_futures):
-        try:
-            try: global_data = research_futures['profile'].result(timeout=5)
-            except Exception: global_data = ""
-            
-            try: client_news = research_futures['news'].result(timeout=5)
-            except Exception: client_news = "Tidak ada berita spesifik."
-
-            try: regulation_data = research_futures['regulations'].result(timeout=5)
-            except Exception: regulation_data = "Standar umum."
-            
-            try: collab_data = research_futures['collab'].result(timeout=5)
-            except Exception: collab_data = "Unavailable"
-
-            # Dynamic OSINT for the firm (Generated but only selectively applied)
-            try: firm_osint_contact = research_futures['firm_contact'].result(timeout=5)
-            except Exception: firm_osint_contact = "Unavailable"
-
-            try: firm_osint_exp = research_futures['firm_exp'].result(timeout=5)
-            except Exception: firm_osint_exp = "Unavailable"
-
-            structured_row_data = self.kb.get_exact_context(client, project, budget)
-            rag_data = self.kb.query(client, project, chap['keywords'])
-            
-            discovery_notes = "Tidak ada catatan tambahan."
-            if notes: discovery_notes = notes
-            
-            persona = PERSONAS.get(chap.get('id', 'default'), PERSONAS['default'])
-            subs = "\n".join([f"- {s}" for s in chap['subs']])
-            
-            visual_prompt = "Do not force visuals."
-            if "visual_intent" in chap:
-                if chap['visual_intent'] == "bar_chart": visual_prompt = "Mandatory Data Visual: [[CHART: Judul | Label | Kat 1,10; Kat 2,20]]"
-                elif chap['visual_intent'] == "gantt": visual_prompt = f"Mandatory Timeline Visual: [[GANTT: Jadwal Implementasi | Waktu | Task 1,0,2; Task 2,2,4]]. Align with timeline: {timeline}."
-                elif chap['visual_intent'] == "flowchart": visual_prompt = "Process visual: [[FLOW: Step 1 -> Step 2 -> Step 3]]."
-
-            # ==========================================================
-            # DYNAMIC INJECTION: Stopping "Prompt Bleed"
-            # ==========================================================
-            extra = ""
-            if chap['id'] == 'c_1':
-                extra = f"[MANDATORY] Base the organizational context HEAVILY on this explicit client context provided by the user: '{project}'. Integrate global profile data: {global_data}"
-            elif chap['id'] == 'c_2':
-                extra = f"[MANDATORY] Focus strictly on these explicit problems faced by the client: '{notes}'. Do not invent unrelated problems. Perform Deep Root Cause Analysis."
-            elif chap['id'] == 'c_3':
-                extra = f"[MANDATORY] The solution must be framed as a '{service_type}' engagement. Project Type: '{project_type}'. Client's Core Needs/Goals: '{project_goal}'. Adapt the approach to solve the previously stated problems."
-            elif chap['id'] == 'c_4':
-                extra = f"[MANDATORY] You MUST integrate and detail these specific frameworks/regulations: '{regulations}'. Use this OSINT data to explain their compliance mandates: {regulation_data}."
-            elif chap['id'] == 'c_6':
-                extra = f"[MANDATORY] You MUST base your methodology EXACTLY on this internal Firm Methodology for {project_type}: {firm_data['methodology']}."
-            elif chap['id'] == 'c_7':
-                extra = f"[MANDATORY] The total estimated timeline for this project is '{timeline}'. Detail the phases to logically fit within this duration."
-            elif chap['id'] == 'c_8':
-                extra = f"[MANDATORY] You MUST use this exact Team Structure required for {project_type}: {firm_data['team']}. Expand heavily on each role.\n"
-                extra += f"[MANDATORY FIRM DATA] Assert the firm's historical excellence using this data. Merge API and OSINT data smoothly:\n- API Portfolio: {firm_profile.get('portfolio_highlights')}\n- OSINT Mentions: {firm_osint_exp}"
-            elif chap['id'] == 'c_9':
-                extra = f"[MANDATORY] The estimated budget/cost provided by the user is: '{budget}'. You MUST strictly state these exact Commercial Rules: {firm_data['commercial']}. Create a highly detailed pricing breakdown table."
-            elif chap['id'] == 'c_10':
-                extra = f"[MANDATORY] Create a structured closing.\n"
-                extra += f"[MANDATORY FIRM DATA] End with a call to action using these exact contact details. Prioritize API Contact:\n- API Contact: {firm_profile.get('contact_info')}\n- OSINT Contact: {firm_osint_contact}"
-
-            prompt = PROPOSAL_SYSTEM_PROMPT.format(
-                client=client, 
-                writer_firm=WRITER_FIRM_NAME, 
-                persona=persona,
-                global_data=global_data, 
-                client_news=client_news, 
-                regulation_data=regulation_data,
-                collab_data=collab_data,
-                structured_row_data=structured_row_data,
-                rag_data=rag_data, 
-                visual_prompt=visual_prompt, 
-                extra_instructions=extra,
-                chapter_title=chap['title'], 
-                sub_chapters=subs, 
-                length_intent=chap.get('length_intent', 'Expand heavily.')
-            )
-
-            return {"prompt": prompt, "success": True}
-            
-        except Exception as e:
-            return {"prompt": "", "success": False, "error": str(e)}
-
-    def run(self, client, project, budget=None, service_type="Konsultan", project_goal="Improvement", project_type="Implementation", timeline="TBD", notes="", regulations=""):
-        logger.info(f"Starting Generation: {client} | Mode Demo: {DEMO_MODE}")
+    def run(self, client, industry, employee_count, dm_age, project_status, project_type, scope, outcome, regulations, timeline, budget, notes):
+        logger.info(f"Generating optimized proposal for: {client}")
         
-        active_structure = UNIVERSAL_STRUCTURE
-        
-        # Pull Baseline Firm Data from API
         firm_data = self.firm_api.get_project_standards(project_type)
         firm_profile = self.firm_api.get_firm_profile()
+        tone_instruction = TONE_MAPPINGS.get(dm_age, TONE_MAPPINGS["Gen X (45 - 60 Tahun)"])
         
         clean_regex = r'\b(Cabang|Branch|Region|Area|Tbk)\b.*$|^(PT\.|PT\s+|CV\.|CV\s+)'
         base_client = re.sub(clean_regex, '', client, flags=re.IGNORECASE).strip()
-        base_firm = re.sub(clean_regex, '', WRITER_FIRM_NAME, flags=re.IGNORECASE).strip()
 
-        # Execute OSINT for BOTH Client and Firm (Parallel)
+        # Fire OSINT searches concurrently
         research_futures = {
-            'profile': self.io_pool.submit(Researcher.get_entity_profile, base_client),
-            'collab': self.io_pool.submit(Researcher.get_collaboration_data, base_client, base_firm),
-            'news': self.io_pool.submit(Researcher.get_latest_client_news, base_client), 
-            'regulations': self.io_pool.submit(Researcher.get_regulatory_data, regulations),
-            'firm_contact': self.io_pool.submit(Researcher.get_contact_details, WRITER_FIRM_NAME),
-            'firm_exp': self.io_pool.submit(Researcher.get_firm_experience, base_firm, project)
+            'news': self.io_pool.submit(Researcher.get_latest_client_news, base_client)
         }
         logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client) 
-        
-        context_futures = {}
-        for chap in active_structure:
-            context_futures[chap['id']] = self.io_pool.submit(
-                self._fetch_chapter_context, chap, client, project, budget, project_goal, project_type, timeline, notes, regulations, firm_data, firm_profile, research_futures
-            )
 
+        try: client_news = research_futures['news'].result(timeout=5)
+        except Exception: client_news = "Tidak ada berita spesifik terbaru."
+        
         try: logo_stream, theme_color = logo_future.result(timeout=8)
         except Exception: logo_stream, theme_color = None, DEFAULT_COLOR
 
         doc = Document()
-        DocumentBuilder.create_cover(doc, client, project, logo_stream, theme_color)
+        DocumentBuilder.create_cover(doc, client, project_type, theme_color)
         
-        for i, chap in enumerate(active_structure):
-            ctx = context_futures[chap['id']].result()
-            if ctx['success']:
-                try:
-                    res = self.ollama.chat(
-                        model=LLM_MODEL, 
-                        messages=[{'role': 'system', 'content': ctx['prompt']}, {'role': 'user', 'content': f"Write content for {chap['title']}."}],
-                        options={'num_ctx': 6144, 'num_predict': 2048}  
-                    )
-                    h = doc.add_heading(chap['title'], level=1)
-                    h.runs[0].font.color.rgb = RGBColor(*theme_color)
-                    h.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    h.paragraph_format.space_before = Pt(0)
-                    h.paragraph_format.space_after = Pt(18)
-                    h.paragraph_format.keep_with_next = True 
-                    
-                    DocumentBuilder.process_content(doc, res['message']['content'], theme_color, chap['title'])
-                    if i < len(active_structure) - 1: doc.add_page_break()
-                except Exception as e: logger.error(f"Error {chap['title']}: {e}")
+        for chap in UNIVERSAL_STRUCTURE:
+            extra = ""
+            # Stop Prompt Bleeding - Only inject Firm Portfolio in Chapter 6 or 8
+            if "TIM" in chap['title'] or "KAPABILITAS" in chap['title']: 
+                extra = f"[MANDATORY] Synthesize Firm API Portfolio: {firm_profile['portfolio_highlights']}"
+            
+            # Only inject Contact Info at the very end
+            if "PENUTUP" in chap['title']: 
+                extra = f"[MANDATORY] End with this official Firm API Contact exactly as provided: {firm_profile['contact_info']}"
 
-        return doc, f"Proposal_{client}_{project}".replace(" ", "_")
+            # Only inject Firm Pricing Standards in the Cost chapter
+            if "ESTIMASI" in chap['title'] or "BIAYA" in chap['title']:
+                extra = f"[MANDATORY] Build the decoy pricing table. Use these exact commercial rules from the firm: {firm_data['commercial']}"
+
+            prompt = PROPOSAL_SYSTEM_PROMPT.format(
+                writer_firm=WRITER_FIRM_NAME, 
+                client=client, 
+                industry=industry, 
+                employee_count=employee_count, 
+                project_status=project_status, 
+                project_type=project_type,
+                dm_age=dm_age, 
+                tone_instruction=tone_instruction,
+                client_news=client_news, 
+                firm_api_portfolio=firm_profile['portfolio_highlights'], 
+                firm_api_contact=firm_profile['contact_info'],
+                scope=scope, 
+                outcome=outcome, 
+                timeline=timeline, 
+                budget=budget, 
+                notes=notes,
+                extra_instructions=extra, 
+                chapter_title=chap['title'], 
+                sub_chapters="\n".join(chap['subs']), 
+                length_intent=chap['length_intent']
+            )
+
+            try:
+                res = self.ollama.chat(
+                    model=LLM_MODEL, 
+                    messages=[{'role': 'system', 'content': prompt}, {'role': 'user', 'content': f"Write {chap['title']}."}],
+                    options={'num_ctx': 4096, 'num_predict': 1024} # Keep token predict strict to enforce brevity
+                )
+                h = doc.add_heading(chap['title'], level=1)
+                h.runs[0].font.color.rgb = RGBColor(*theme_color)
+                h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                h.paragraph_format.space_before = Pt(0)
+                h.paragraph_format.space_after = Pt(18)
+                h.paragraph_format.keep_with_next = True 
+                
+                DocumentBuilder.process_content(doc, res['message']['content'], theme_color, chap['title'])
+                doc.add_page_break()
+            except Exception as e: 
+                logger.error(f"Error {chap['title']}: {e}")
+
+        return doc, f"Proposal_{client}_{project_type}".replace(" ", "_")
