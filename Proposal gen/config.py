@@ -8,18 +8,28 @@ DEMO_MODE = True
 FIRM_API_URL = "https://api.perusahaan-anda.com/v1" 
 API_AUTH_TOKEN = "isi_token_disini_nanti"
 
-GOOGLE_API_KEY = "API_KEY"
-GOOGLE_CX_ID = "CX_ID"
+# --- CREDENTIALS & HOSTS ---
+SERPER_API_KEY = "API_KEY" # Serper.dev Key
 OLLAMA_HOST = "http://127.0.0.1:11434"
+
+# --- MODELS & DB ---
 LLM_MODEL = "gpt-oss:120b-cloud" 
 EMBED_MODEL = "bge-m3:latest"
 DB_URI = "sqlite:///projects.db" 
 
+# --- FIRM IDENTITY ---
 WRITER_FIRM_NAME = "Inixindo Jogja" 
 DEFAULT_COLOR = (0, 51, 102)
 
-DATA_MAPPING = { "entity": "Client Entity", "topic": "Strategic Initiative", "budget": "Investment Estimation" }
+DATA_MAPPING = {
+    "entity": "Client Entity",
+    "topic": "Strategic Initiative",
+    "budget": "Investment Estimation"
+}
 
+# =====================================================================
+# MOCK API DATA (Internal Firm Database Simulation)
+# =====================================================================
 MOCK_FIRM_PROFILE = {
     "contact_info": "Kantor Pusat Inixindo Jogja\nJl. Kenari No. 69, Muja Muju, Kec. Umbulharjo, Kota Yogyakarta, DIY 55165\nEmail: info@inixindo.id\nTelp: (0274) 515448",
     "portfolio_highlights": "Inixindo Jogja memiliki pengalaman lebih dari 30 tahun dalam Transformasi TI, Audit, dan Pelatihan Enterprise."
@@ -43,55 +53,81 @@ TONE_MAPPINGS = {
 }
 
 # =====================================================================
-# PROPOSAL STRUCTURE (Anti-Bertele-tele & Decoy Pricing)
+# PROPOSAL STRUCTURE (MAPPED STRICTLY TO INIXINDO FLOWCHART)
 # =====================================================================
 UNIVERSAL_STRUCTURE = [
+    # --- PHASE 1: PEMAHAMAN DASAR ---
     {
-        "id": "c_1", "title": "BAB I – KONTEKS ORGANISASI",
-        "subs": ["1.1 Latar Belakang Perusahaan", "1.2 Dinamika dan Kebutuhan Industri"],
+        "id": "c_1", "title": "BAB I – KONTEKS KLIEN",
+        "subs": ["1.1 Latar Belakang Organisasi", "1.2 Alasan Permintaan Konsultasi"],
         "keywords": "context background vision strategy",
-        "length_intent": "Sharp and concise. Maximum 2 short paragraphs per section. Focus on the provided Client Scope and Industry."
+        "length_intent": "Sharp and concise (max 300 words). Memahami latar belakang organisasi klien yang menjadi dasar/alasan meminta jasa konsultasi."
     },
     {
-        "id": "c_2", "title": "BAB II – RUANG LINGKUP & PERMASALAHAN",
-        "subs": ["2.1 Tantangan Utama", "2.2 Ruang Lingkup Pekerjaan (Scope)"],
-        "keywords": "problem pain points bottleneck issue scope",
-        "length_intent": "Use BULLET POINTS exclusively for the Scope. Be extremely clear about what is included. Do not write long paragraphs."
+        "id": "c_2", "title": "BAB II – PERMASALAHAN",
+        "subs": ["2.1 Identifikasi Tantangan Utama", "2.2 Ekspektasi dan Kebutuhan Aktual"],
+        "keywords": "problem pain points bottleneck issue",
+        "length_intent": "Use BULLET POINTS. Menangkap apa yang benar-benar menjadi kebutuhan atau keinginan klien. Jangan bertele-tele."
     },
     {
-        "id": "c_3", "title": "BAB III – OUTCOME DAN SOLUSI",
-        "subs": ["3.1 Target Pencapaian (Goals)", "3.2 Arsitektur Pendekatan Solusi"],
-        "keywords": "solution approach goal outcome objective",
-        "length_intent": "Highlight the Tangible Impact (Outcome) using bold metrics. Connect the solution directly to the goals provided."
+        "id": "c_3", "title": "BAB III – KLASIFIKASI KEBUTUHAN",
+        "subs": ["3.1 Klasifikasi (Problem/Opportunity/Directive)", "3.2 Tujuan dan Jenis Proyek"],
+        "keywords": "classification goals objective opportunity directive",
+        "length_intent": "Mengklasifikasikan kebutuhan dalam problem/opportunity/directive dan menemukan tujuan serta jenis proyek. Gunakan metrik/angka tebal (bold)."
+    },
+
+    # --- PHASE 2: METODOLOGI & SOLUSI ---
+    {
+        "id": "c_4", "title": "BAB IV – PENDEKATAN",
+        "subs": ["4.1 Acuan Framework dan Teori", "4.2 Standar Kepatuhan dan Regulasi"],
+        "keywords": "framework iso cobit itil regulation compliance approach",
+        "length_intent": "Menentukan acuan/prinsip yang digunakan (framework/teori/regulasi/standar) untuk menyelesaikan masalah yang ada. Gunakan list."
     },
     {
-        "id": "c_4", "title": "BAB IV – KEPATUHAN DAN REGULASI",
-        "subs": ["4.1 Framework Utama", "4.2 Pemenuhan Regulasi"],
-        "keywords": "framework iso cobit itil regulation compliance",
-        "length_intent": "List the frameworks using bullet points. Briefly state why they matter for this specific industry."
+        "id": "c_5", "title": "BAB V – METODOLOGI",
+        "subs": ["5.1 Alasan Pemilihan Pendekatan", "5.2 Langkah Kerja Berbasis Framework"],
+        "keywords": "methodology process steps",
+        "length_intent": "Mengapa memilih pendekatan tersebut? Dan bagaimana langkah kerja menggunakan framework tersebut? Gunakan penomoran (numbered lists) yang terstruktur."
     },
     {
-        "id": "c_6", "title": "BAB V – METODOLOGI & JADWAL",
-        "subs": ["5.1 Pendekatan Pelaksanaan", "5.2 Estimasi Waktu (Timeline)"],
-        "keywords": "methodology timeline phase schedule",
-        "length_intent": "Use numbered lists for the methodology phases. Map them strictly to the estimated timeline provided."
+        "id": "c_6", "title": "BAB VI – SOLUTION DESIGN",
+        "subs": ["6.1 Desain Solusi Utama", "6.2 Pencapaian Kebutuhan Klien"],
+        "keywords": "solution design architecture output",
+        "length_intent": "Menjelaskan solusi (output metodologi) apa yang akan dibangun atau diterapkan, agar kebutuhan klien dapat tercapai. Detail namun tajam."
+    },
+
+    # --- PHASE 3: EKSEKUSI ---
+    {
+        "id": "c_7", "title": "BAB VII – TIMELINE PEKERJAAN",
+        "subs": ["7.1 Fase dan Aktivitas Pekerjaan", "7.2 Deliverable Tiap Fase"],
+        "keywords": "timeline phase schedule deliverable",
+        "length_intent": "Menjelaskan apa yang dilakukan, kapan dilakukan, dan dalam fase apa aktivitas tersebut terjadi serta deliverable tiap fase nya."
     },
     {
-        "id": "c_9", "title": "BAB VI – ESTIMASI INVESTASI (PRICING)",
-        "subs": ["6.1 Opsi Investasi Tersedia", "6.2 Ketentuan Komersial"],
-        "keywords": "budget cost commercial investment terms decoy pricing",
+        "id": "c_8", "title": "BAB VIII – TATA KELOLA PROYEK",
+        "subs": ["8.1 Mekanisme Pengambilan Keputusan", "8.2 Pengendalian dan Penjaminan Mutu"],
+        "keywords": "governance quality control decision making",
+        "length_intent": "Menjelaskan mekanisme pengambilan Keputusan dan pengendalian yang digunakan untuk memastikan proyek berjalan."
+    },
+    {
+        "id": "c_9", "title": "BAB IX – STRUKTUR & TEAM PROYEK",
+        "subs": ["9.1 Susunan Tim Eksekusi", "9.2 Kapabilitas, Pengalaman, dan Sertifikasi"],
+        "keywords": "team expert role structure portfolio capability",
+        "length_intent": "Menunjukkan kapabilitas konsultan untuk membangun kepercayaan klien (struktur tim, pengalaman dan sertifikasi). Sintesis data portofolio dengan percaya diri."
+    },
+
+    # --- PHASE 4: KOMERSIAL ---
+    {
+        "id": "c_10", "title": "BAB X – MODEL PEMBIAYAAN",
+        "subs": ["10.1 Model Bisnis dan Opsi Biaya", "10.2 Tahapan Pembayaran dan Batasan Pekerjaan"],
+        "keywords": "budget cost commercial investment terms decoy pricing boundaries",
         "length_intent": """CRITICAL INSTRUCTION - DECOY PRICING:
-Create a Markdown table with EXACTLY 3 Tiers of pricing based on the provided Target Budget:
-1. Opsi Esensial: 20% lower than target budget. Minimum scope, lacks premium support.
-2. Opsi Rekomendasi: Matches Target Budget exactly. Highest perceived value, includes standard support.
-3. Opsi Premium: 60% higher than target budget. Anchoring option with 24/7 VIP Hypercare, extensive warranties.
-Make the 'Rekomendasi' tier look the most logical."""
-    },
-    {
-        "id": "c_10", "title": "BAB VII – PENUTUP",
-        "subs": ["7.1 Kesimpulan", "7.2 Kontak Resmi"],
-        "keywords": "closing commitment next steps contact",
-        "length_intent": "One short paragraph conclusion. End with the official firm contact info."
+Menjelaskan model bisnis proyek (biaya, tahapan pembayaran, batasan pekerjaan). 
+Create a Markdown table with EXACTLY 3 Tiers of pricing based on the Target Budget:
+1. Opsi Esensial: 20% lower than target budget. Minimum scope.
+2. Opsi Rekomendasi: Matches Target Budget exactly. Highest perceived value.
+3. Opsi Premium: 60% higher than target budget. Anchoring option with 24/7 VIP support.
+End this chapter with the official Firm Contact Info for next steps."""
     }
 ]
 
@@ -104,12 +140,16 @@ Project Type: {project_status} - {project_type}
 The Decision Maker is in this age group: {dm_age}.
 Your writing style MUST strictly follow this tone: {tone_instruction}
 
---- ANTI-BERTELE-TELE (CONCISENESS) RULE ---
-1. DO NOT BE LONG-WINDED. Executives hate fluff.
-2. Be "Tajam" (Sharp) and to the point.
-3. Use bullet points heavily for lists, scope, and impact.
+--- HIGH-IMPACT STRUCTURE RULE ---
+1. Be comprehensive but highly structured. Executives appreciate depth but hate unstructured text walls.
+2. Ensure you write thoroughly (target 300-400 words per chapter) to build a persuasive business case.
+3. Use bullet points heavily for lists, scope, and methodology.
 4. Use bold text to highlight key numbers or outcomes.
-5. Limit paragraphs to 2-3 sentences max.
+
+--- DEEP PERSONALIZATION & FORMATTING RULES ---
+1. NO H1 TITLES: Do NOT output the main Chapter Title (e.g., # BAB I). Start your response directly with the H2 (##) sub-chapters.
+2. NAME DROPPING: NEVER use generic terms like "Klien", "Perusahaan Anda", or "Organisasi". You MUST explicitly use the exact client name: "{client}" throughout the text.
+3. WEAVE CONTEXT: Intertwine their specific industry ({industry}) and their real-world news ({client_news}) naturally into your arguments.
 
 --- OSINT & API CONTEXT ---
 Client News: {client_news}

@@ -25,6 +25,14 @@
         .checkbox-group { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
         .checkbox-group label { display: flex; align-items: center; font-weight: normal; margin: 0; font-size: 0.95rem; cursor: pointer; }
         .checkbox-group input[type="checkbox"] { width: auto; margin-right: 8px; margin-bottom: 0; transform: scale(1.1); cursor: pointer; }
+        
+        /* New Summary Box Styles */
+        .summary-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 20px; font-size: 0.95rem; }
+        .summary-row { display: flex; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #cbd5e1; }
+        .summary-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+        .summary-label { width: 35%; font-weight: 600; color: #475569; }
+        .summary-value { width: 65%; color: #0f172a; font-weight: 500; word-wrap: break-word; }
+
         .spinner { width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; display: none; vertical-align: middle; margin-left: 10px; }
         .spinner.active { display: inline-block; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -131,8 +139,29 @@
                 <textarea id="input-catatan" placeholder="Catatan meeting, preferensi klien, referensi spesifik..."></textarea>
             </div>
             
-            <button type="button" id="btn-generate" disabled>Generate Smart Proposal <span id="spinner" class="spinner"></span></button>
+            <button type="button" id="btn-review" disabled>Review Parameter Proposal</button>
             <button type="button" id="btn-refresh" class="secondary" style="font-size:0.85rem; padding:8px;">🔄 Sinkronisasi Database Klien</button>
+        </div>
+
+        <div id="step-summary" class="hidden">
+            <h2>Konfirmasi Data</h2>
+            <p class="sub">Pastikan seluruh parameter sudah tepat sebelum proses AI Generate dimulai.</p>
+            
+            <div class="summary-box">
+                <div class="summary-row"><div class="summary-label">Perusahaan</div><div class="summary-value" id="sum-perusahaan"></div></div>
+                <div class="summary-row"><div class="summary-label">Sektor Industri</div><div class="summary-value" id="sum-industri"></div></div>
+                <div class="summary-row"><div class="summary-label">Karyawan / DM</div><div class="summary-value" id="sum-demografi"></div></div>
+                <div class="summary-row"><div class="summary-label">Jenis Proyek</div><div class="summary-value" id="sum-proyek"></div></div>
+                <div class="summary-row"><div class="summary-label">Target Budget</div><div class="summary-value" id="sum-budget" style="color: #16a34a; font-weight: bold;"></div></div>
+                <div class="summary-row"><div class="summary-label">Estimasi Waktu</div><div class="summary-value" id="sum-waktu"></div></div>
+                <div class="summary-row"><div class="summary-label">Framework</div><div class="summary-value" id="sum-framework"></div></div>
+                <div class="summary-row"><div class="summary-label">Scope</div><div class="summary-value" id="sum-scope"></div></div>
+            </div>
+
+            <div class="grid-2">
+                <button type="button" id="btn-back" class="secondary">Kembali & Edit</button>
+                <button type="button" id="btn-confirm">Generate Proposal <span id="spinner" class="spinner"></span></button>
+            </div>
         </div>
 
         <div id="step-success" class="hidden" style="text-align:center; padding: 20px;">
@@ -148,9 +177,11 @@
             loader: document.getElementById('loader'),
             loaderText: document.getElementById('loader-text'),
             configStep: document.getElementById('step-config'),
+            summaryStep: document.getElementById('step-summary'),
             successStep: document.getElementById('step-success'),
             containerDynamic: document.getElementById('container-dynamic'),
             
+            // Inputs
             selPerusahaan: document.getElementById('select-perusahaan'),
             selIndustri: document.getElementById('select-industri'),
             selKaryawan: document.getElementById('select-karyawan'),
@@ -159,16 +190,27 @@
             selProyek: document.getElementById('select-proyek'),
             inpRuangLingkup: document.getElementById('input-ruang-lingkup'),
             inpOutcome: document.getElementById('input-outcome'),
-            
             groupFramework: document.getElementById('group-framework'),
             cbFrameworkLainnya: document.getElementById('cb-framework-lainnya'),
             inpFramework: document.getElementById('input-framework'),
-            
             inpWaktu: document.getElementById('input-waktu'),
             inpBiaya: document.getElementById('input-biaya'),
             inpCatatan: document.getElementById('input-catatan'),
             
-            btnGenerate: document.getElementById('btn-generate'),
+            // Summary Fields
+            sumPerusahaan: document.getElementById('sum-perusahaan'),
+            sumIndustri: document.getElementById('sum-industri'),
+            sumDemografi: document.getElementById('sum-demografi'),
+            sumProyek: document.getElementById('sum-proyek'),
+            sumBudget: document.getElementById('sum-budget'),
+            sumWaktu: document.getElementById('sum-waktu'),
+            sumFramework: document.getElementById('sum-framework'),
+            sumScope: document.getElementById('sum-scope'),
+
+            // Buttons
+            btnReview: document.getElementById('btn-review'),
+            btnBack: document.getElementById('btn-back'),
+            btnConfirm: document.getElementById('btn-confirm'),
             btnRefresh: document.getElementById('btn-refresh'),
             spinner: document.getElementById('spinner')
         };
@@ -220,11 +262,39 @@
 
         function checkReady() {
             const isReady = ui.selPerusahaan.value && ui.inpRuangLingkup.value.trim() && ui.inpOutcome.value.trim() && ui.inpBiaya.value.trim() && ui.inpWaktu.value.trim();
-            ui.btnGenerate.disabled = !isReady;
+            ui.btnReview.disabled = !isReady;
         }
 
-        ui.btnGenerate.onclick = () => {
-            ui.btnGenerate.disabled = true; 
+        // STEP 1 to STEP 2: Show Summary
+        ui.btnReview.onclick = () => {
+            // Populate summary values
+            ui.sumPerusahaan.innerText = ui.selPerusahaan.value;
+            ui.sumIndustri.innerText = ui.selIndustri.value;
+            ui.sumDemografi.innerText = `${ui.selKaryawan.value} | ${ui.selUsia.value}`;
+            ui.sumProyek.innerText = `${ui.selStatusProyek.value} - ${ui.selProyek.value}`;
+            ui.sumBudget.innerText = ui.inpBiaya.value;
+            ui.sumWaktu.innerText = ui.inpWaktu.value;
+            ui.sumFramework.innerText = getFinalFramework() || "Tidak ada framework khusus";
+            
+            // Truncate scope for display so it doesn't take up the whole screen
+            const scopeText = ui.inpRuangLingkup.value;
+            ui.sumScope.innerText = scopeText.length > 100 ? scopeText.substring(0, 100) + "..." : scopeText;
+
+            // Switch views
+            ui.configStep.classList.add('hidden');
+            ui.summaryStep.classList.remove('hidden');
+        };
+
+        // STEP 2 to STEP 1: Go Back
+        ui.btnBack.onclick = () => {
+            ui.summaryStep.classList.add('hidden');
+            ui.configStep.classList.remove('hidden');
+        };
+
+        // STEP 2 to STEP 3: Confirm and Generate
+        ui.btnConfirm.onclick = () => {
+            ui.btnConfirm.disabled = true; 
+            ui.btnBack.disabled = true;
             ui.spinner.classList.add('active');
             
             const payload = {
@@ -247,18 +317,22 @@
                 headers: {'Content-Type': 'application/json'}, 
                 body: JSON.stringify(payload) 
             })
-            .then(res => res.blob())
+            .then(res => {
+                if (!res.ok) throw new Error("Server Error: Pastikan backend berjalan dengan benar.");
+                return res.blob();
+            })
             .then(blob => {
                 let url = window.URL.createObjectURL(blob);
                 let a = document.createElement('a'); 
                 a.href = url; 
                 a.download = `Proposal_${ui.selPerusahaan.value.replace(/\s+/g, '_')}.docx`; 
                 a.click();
-                ui.configStep.classList.add('hidden'); 
+                ui.summaryStep.classList.add('hidden'); 
                 ui.successStep.classList.remove('hidden');
-            }).catch(() => {
-                alert("Generation failed.");
-                ui.btnGenerate.disabled = false;
+            }).catch((err) => {
+                alert("Gagal membuat proposal: " + err.message);
+                ui.btnConfirm.disabled = false;
+                ui.btnBack.disabled = false;
                 ui.spinner.classList.remove('active');
             });
         };

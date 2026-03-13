@@ -1,6 +1,7 @@
 import os
 import io
 import re
+import json
 import logging
 import requests
 import pandas as pd
@@ -16,36 +17,30 @@ import textwrap
 from PIL import Image, ImageStat
 from difflib import SequenceMatcher
 
-# SQL ORM untuk migrasi Database
 from sqlalchemy import create_engine
-
-# Robust Parsing
 import markdown
 from bs4 import BeautifulSoup
 
-# Docx
 from docx import Document
 from docx.shared import Pt, RGBColor, Inches, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
-# AI Clients
 from ollama import Client 
 from chromadb.utils import embedding_functions
 
-# Import dari config baru
 from config import (
-    GOOGLE_API_KEY, GOOGLE_CX_ID, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL, DB_URI,
+    SERPER_API_KEY, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL, DB_URI,
     WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE, TONE_MAPPINGS,
-    PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING, 
-    DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, MOCK_FIRM_STANDARDS, MOCK_FIRM_PROFILE
+    PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING, DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, 
+    MOCK_FIRM_STANDARDS, MOCK_FIRM_PROFILE
 )
 
 logger = logging.getLogger(__name__)
 
 # =====================================================================
-# FIRM API ADAPTER (Baseline Data)
+# FIRM API ADAPTER
 # =====================================================================
 class FirmAPIClient:
     def __init__(self):
@@ -68,7 +63,7 @@ class FirmAPIClient:
 
     def get_firm_profile(self):
         if self.demo_mode:
-            logger.info("[DEMO MODE] Mengambil Profil Firm dari Database Internal (Mock).")
+            logger.info("[DEMO MODE] Mengambil Profil Firm dari Database Internal.")
             return MOCK_FIRM_PROFILE
         else:
             try:
@@ -122,7 +117,7 @@ class KnowledgeBase:
                 raw_df.to_sql("projects", self.engine, index=False, if_exists='replace')
                 self.df = raw_df
             else:
-                self.df = pd.DataFrame() # Fallback so the app doesn't crash if no csv
+                self.df = pd.DataFrame() 
                 return False
             
         existing_ids = set(self.collection.get()['ids'])
@@ -166,84 +161,79 @@ class KnowledgeBase:
         except Exception: return ""
 
 # =====================================================================
-# OSINT RESEARCHER
+# UNRESTRICTED GLOBAL OSINT RESEARCHER (Serper.dev)
 # =====================================================================
 class Researcher:
     @staticmethod
-    @lru_cache(maxsize=256)
-    def search(query, limit=5):
-        if "YOUR_GOOGLE" in GOOGLE_API_KEY: return None
+    def get_system_geolocation():
         try:
-            params = {'q': query, 'key': GOOGLE_API_KEY, 'cx': GOOGLE_CX_ID, 'num': limit, 'gl': 'id'}
-            response = requests.get("https://www.googleapis.com/customsearch/v1", params=params, timeout=5)
+            loc = requests.get('https://ipinfo.io/json', timeout=2).json()
+            return loc.get('country', 'ID').lower()
+        except:
+            return 'id' 
+
+    @staticmethod
+    @lru_cache(maxsize=256)
+    def search(query, limit=5, up_to_the_second=False, use_news_endpoint=False):
+        if "YOUR_SERPER" in SERPER_API_KEY: return None
+        
+        endpoint = "news" if use_news_endpoint else "search"
+        url = f"https://google.serper.dev/{endpoint}"
+        
+        payload_dict = {
+            "q": query,
+            "num": limit,
+            "gl": Researcher.get_system_geolocation(), 
+            "autocorrect": True
+        }
+        
+        if up_to_the_second:
+            payload_dict["tbs"] = "sbd:1"
+            
+        payload = json.dumps(payload_dict)
+        headers = {
+            'X-API-KEY': SERPER_API_KEY,
+            'Content-Type': 'application/json'
+        }
+        try:
+            response = requests.post(url, headers=headers, data=payload, timeout=5)
             response.raise_for_status()
             return response.json()
         except Exception as e: 
-            logger.warning(f"Search API Error: {e}")
+            logger.warning(f"Serper API Error: {e}")
             return None
 
     @staticmethod
     @lru_cache(maxsize=128)
-    def get_entity_profile(entity_name):
-        res = Researcher.search(f'"{entity_name}" profil perusahaan OR "tentang kami" -saham -loker -lowongan', limit=3)
-        if not res or 'items' not in res: return f"{entity_name}"
-        return "\n".join([i.get('snippet', '') for i in res['items']])
-
-    @staticmethod
-    @lru_cache(maxsize=128)
-    def get_contact_details(entity_name):
-        query = f'"{entity_name}" "alamat kantor" OR "telepon kantor" OR "hubungi kami" indonesia -linkedin -direktur -ceo -manager -loker -lowongan'
-        res = Researcher.search(query, limit=5)
-        if not res or 'items' not in res: return ""
-        return "\n".join([i.get('snippet', '') for i in res['items']])
-
-    @staticmethod
-    @lru_cache(maxsize=128)
-    def get_firm_experience(firm_name, project_topic):
-        res = Researcher.search(f'"{firm_name}" "portofolio" OR "klien kami" OR "berpengalaman" -loker -lowongan', limit=5)
-        if not res or 'items' not in res: return ""
-        return "\n".join([i.get('snippet', '') for i in res['items']])
-
-    @staticmethod
-    @lru_cache(maxsize=128)
-    def get_collaboration_data(client, firm):
-        res = Researcher.search(f'"{client}" AND "{firm}" kerjasama OR proyek OR "telah mempercayakan"', limit=4)
-        if not res or 'items' not in res: return "Data kolaborasi spesifik tidak dipublikasikan secara terbuka."
-        return "\n".join([i.get('snippet', '') for i in res['items']])
-
-    @staticmethod
-    @lru_cache(maxsize=128)
     def get_latest_client_news(client_name):
-        res = Researcher.search(f'"{client_name}" berita inovasi 2026', limit=3)
-        if not res or 'items' not in res: return "Tidak ada berita relevan terbaru."
-        return "\n".join([i.get('snippet', '') for i in res['items']])
-
-    @staticmethod
-    @lru_cache(maxsize=128)
-    def get_regulatory_data(regulation_name):
-        if not regulation_name: return "Tidak ada regulasi spesifik."
-        res = Researcher.search(f'Ringkasan kepatuhan mandat {regulation_name}', limit=3)
-        if not res or 'items' not in res: return f"Merujuk pada standar umum {regulation_name}."
-        return "\n".join([i.get('snippet', '') for i in res['items']])
+        res = Researcher.search(f'"{client_name}" inovasi OR teknologi', limit=5, up_to_the_second=True, use_news_endpoint=True)
+        if not res or 'news' not in res: return "Tidak ada berita relevan terbaru."
+        return "\n".join([i.get('snippet', '') for i in res['news']])
 
 class LogoManager:
     @staticmethod
     def get_logo_and_color(client_name):
-        if "YOUR_GOOGLE" in GOOGLE_API_KEY: return None, DEFAULT_COLOR
+        if "YOUR_SERPER" in SERPER_API_KEY: return None, DEFAULT_COLOR
+        url = "https://google.serper.dev/images"
+        payload = json.dumps({
+            "q": f"{client_name} company corporate logo png transparent",
+            "num": 3,
+            "gl": Researcher.get_system_geolocation()
+        })
+        headers = {
+            'X-API-KEY': SERPER_API_KEY,
+            'Content-Type': 'application/json'
+        }
         try:
-            params = {
-                'q': f"{client_name} company corporate logo png transparent", 
-                'key': GOOGLE_API_KEY, 
-                'cx': GOOGLE_CX_ID, 
-                'num': 3, 
-                'searchType': 'image'
-            }
-            res = requests.get("https://www.googleapis.com/customsearch/v1", params=params, timeout=5).json()
-            if 'items' in res:
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                for item in res['items']:
+            res = requests.post(url, headers=headers, data=payload, timeout=5).json()
+            if 'images' in res:
+                img_headers = {'User-Agent': 'Mozilla/5.0'}
+                for item in res['images']:
                     try:
-                        img_resp = requests.get(item['link'], headers=headers, timeout=5)
+                        img_url = item.get('imageUrl')
+                        if not img_url: continue
+                        
+                        img_resp = requests.get(img_url, headers=img_headers, timeout=5)
                         if img_resp.status_code == 200:
                             stream = io.BytesIO(img_resp.content)
                             img = Image.open(stream).convert('RGB')
@@ -258,40 +248,6 @@ class LogoManager:
                     except Exception: continue
         except Exception: pass
         return None, DEFAULT_COLOR
-
-class StyleEngine:
-    @staticmethod
-    def apply_document_styles(doc):
-        style = doc.styles['Normal']
-        font = style.font
-        font.name = 'Calibri'
-        font.size = Pt(11)
-        pf = style.paragraph_format
-        pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-        pf.line_spacing = 1.15
-        pf.space_after = Pt(8) 
-        
-        # STANDARD INIXINDO FORMATTING (Headers, Footers, Margins)
-        for section in doc.sections:
-            section.top_margin = Cm(2.54)
-            section.bottom_margin = Cm(2.54)
-            section.left_margin = Cm(2.54)
-            section.right_margin = Cm(2.54)
-            
-            # Header
-            header = section.header
-            h_par = header.paragraphs[0]
-            h_par.text = f"{WRITER_FIRM_NAME} | Proposal Strategis"
-            h_par.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            h_par.runs[0].font.size = Pt(9)
-            h_par.runs[0].font.color.rgb = RGBColor(100, 100, 100)
-            
-            # Footer (Page Numbers)
-            footer = section.footer
-            f_par = footer.paragraphs[0]
-            f_par.text = "Dokumen ini bersifat Rahasia (Confidential)"
-            f_par.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            f_par.runs[0].font.size = Pt(9)
 
 class ChartEngine:
     @staticmethod
@@ -368,6 +324,79 @@ class ChartEngine:
             return img
         except Exception: return None
 
+    @staticmethod
+    def create_flowchart(data_str, theme_color):
+        try:
+            steps = [s.strip() for s in data_str.split('->')]
+            if len(steps) < 2: return None
+            steps = ["\n".join(textwrap.wrap(s, width=18)) for s in steps]
+            fig, ax = plt.subplots(figsize=(8, 3))
+            ax.axis('off')
+            n_steps = len(steps)
+            x_pos = [i * 2.5 for i in range(n_steps)]
+            y_pos = 0.5
+            for i in range(n_steps - 1):
+                ax.annotate("", xy=(x_pos[i+1]-1.0, y_pos), xytext=(x_pos[i]+1.0, y_pos), arrowprops=dict(arrowstyle="-|>", color="#555555", lw=1.5, mutation_scale=15))
+            for i, step in enumerate(steps):
+                box = patches.FancyBboxPatch((x_pos[i]-1.0, y_pos-0.4), 2.0, 0.8, boxstyle="round,pad=0.1,rounding_size=0.2", fc=ChartEngine._get_plt_color(theme_color), ec="#2c3e50", alpha=0.9, zorder=2)
+                ax.add_patch(box)
+                ax.text(x_pos[i], y_pos, step, ha="center", va="center", size=9, color="white", fontweight='bold', zorder=3)
+            ax.set_xlim(-1.2, (n_steps-1)*2.5 + 1.2)
+            ax.set_ylim(0, 1)
+            img = io.BytesIO()
+            plt.savefig(img, format='png', bbox_inches='tight', dpi=200, transparent=True)
+            plt.close()
+            img.seek(0)
+            return img
+        except Exception: return None
+
+    @staticmethod
+    def create_math_image(latex_str, theme_color):
+        try:
+            fig = plt.figure(figsize=(6, 0.8))
+            clean_tex = latex_str.replace('*', r'\times').replace('=', r'\=').strip()
+            plt.text(0.5, 0.5, f"${clean_tex}$", fontsize=16, ha='center', va='center', color='#222222', fontweight='normal')
+            plt.axis('off')
+            img = io.BytesIO()
+            plt.savefig(img, format='png', bbox_inches='tight', dpi=200, transparent=True)
+            plt.close()
+            img.seek(0)
+            return img
+        except Exception: return None
+
+class StyleEngine:
+    @staticmethod
+    def apply_document_styles(doc):
+        style = doc.styles['Normal']
+        font = style.font
+        font.name = 'Calibri'
+        font.size = Pt(11)
+        pf = style.paragraph_format
+        pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+        pf.line_spacing = 1.15
+        pf.space_after = Pt(8) 
+        
+        for section in doc.sections:
+            section.top_margin = Cm(2.54)
+            section.bottom_margin = Cm(2.54)
+            section.left_margin = Cm(2.54)
+            section.right_margin = Cm(2.54)
+            
+            # Header
+            header = section.header
+            h_par = header.paragraphs[0]
+            h_par.text = f"{WRITER_FIRM_NAME} | Proposal Strategis"
+            h_par.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            h_par.runs[0].font.size = Pt(9)
+            h_par.runs[0].font.color.rgb = RGBColor(100, 100, 100)
+            
+            # Footer (Page Numbers)
+            footer = section.footer
+            f_par = footer.paragraphs[0]
+            f_par.text = "Dokumen ini bersifat Rahasia (Confidential)"
+            f_par.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            f_par.runs[0].font.size = Pt(9)
+
 class DocumentBuilder:
     @staticmethod
     def parse_html_to_docx(doc, html_content, theme_color):
@@ -403,10 +432,10 @@ class DocumentBuilder:
                     for j, col in enumerate(cols):
                         if j < max_cols:
                             cell = table.cell(i, j)
-                            p = cell.paragraphs[0]
-                            DocumentBuilder._process_inline_html(p, col)
-                            # Light grey header row
+                            # Handle line breaks correctly within tables
+                            cell.text = col.get_text(separator='\n').strip()
                             if row.find('th') or i == 0:
+                                p = cell.paragraphs[0]
                                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 for run in p.runs: run.bold = True
                                 tcPr = cell._element.get_or_add_tcPr()
@@ -426,14 +455,60 @@ class DocumentBuilder:
 
     @staticmethod
     def process_content(doc, raw_text, theme_color=DEFAULT_COLOR, chapter_title=""):
-        md_text = "\n".join([line.strip() for line in raw_text.split('\n') if line.strip() and not line.strip().startswith('#')])
+        clean_lines = []
+        for line in raw_text.split('\n'):
+            stripped = line.strip()
+            
+            # Chart Processing Hooks Restored
+            if stripped.startswith('[[CHART:') and stripped.endswith(']]'):
+                data = stripped.replace('[[CHART:', '').replace(']]', '').strip()
+                img = ChartEngine.create_bar_chart(data, theme_color)
+                if img: doc.add_paragraph().add_run().add_picture(img, width=Inches(5.5))
+                continue
+            if stripped.startswith('[[GANTT:') and stripped.endswith(']]'):
+                data = stripped.replace('[[GANTT:', '').replace(']]', '').strip()
+                img = ChartEngine.create_gantt_chart(data, theme_color)
+                if img: doc.add_paragraph().add_run().add_picture(img, width=Inches(6))
+                continue
+            if stripped.startswith('[[FLOW:') and stripped.endswith(']]'):
+                data = stripped.replace('[[FLOW:', '').replace(']]', '').strip()
+                img = ChartEngine.create_flowchart(data, theme_color)
+                if img: doc.add_paragraph().add_run().add_picture(img, width=Inches(6.5))
+                continue
+            if stripped.startswith('[[MATH:') and stripped.endswith(']]'):
+                data = stripped.replace('[[MATH:', '').replace(']]', '').strip()
+                img = ChartEngine.create_math_image(data, theme_color)
+                if img: 
+                    p = doc.add_paragraph()
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    p.add_run().add_picture(img, width=Inches(2.5))
+                continue
+            
+            # Remove duplicate LLM headers
+            if stripped.startswith('#') and chapter_title.lower() in stripped.lower():
+                continue 
+                
+            clean_lines.append(line) # Preserves spaces for Markdown tables
+            
+        md_text = "\n".join(clean_lines)
         html = markdown.markdown(md_text, extensions=['tables'])
         DocumentBuilder.parse_html_to_docx(doc, html, theme_color)
 
     @staticmethod
-    def create_cover(doc, client, project_type, theme_color=DEFAULT_COLOR):
+    def create_cover(doc, client, project_type, logo_stream=None, theme_color=DEFAULT_COLOR):
         StyleEngine.apply_document_styles(doc)
-        for _ in range(4): doc.add_paragraph()
+        
+        # RESTORED: Logo Injection Logic
+        for _ in range(3): doc.add_paragraph()
+        if logo_stream:
+            try:
+                p = doc.add_paragraph()
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                p.add_run().add_picture(logo_stream, width=Inches(3))
+            except Exception as e:
+                logger.error(f"Failed to insert logo: {e}")
+                
+        doc.add_paragraph()
         t = doc.add_paragraph("PROPOSAL STRATEGIS")
         t.alignment = WD_ALIGN_PARAGRAPH.CENTER
         t.runs[0].font.size = Pt(18)
@@ -472,7 +547,6 @@ class ProposalGenerator:
         clean_regex = r'\b(Cabang|Branch|Region|Area|Tbk)\b.*$|^(PT\.|PT\s+|CV\.|CV\s+)'
         base_client = re.sub(clean_regex, '', client, flags=re.IGNORECASE).strip()
 
-        # Fire OSINT searches concurrently
         research_futures = {
             'news': self.io_pool.submit(Researcher.get_latest_client_news, base_client)
         }
@@ -481,25 +555,32 @@ class ProposalGenerator:
         try: client_news = research_futures['news'].result(timeout=5)
         except Exception: client_news = "Tidak ada berita spesifik terbaru."
         
+        # Ensure we wait for the logo to finish downloading
         try: logo_stream, theme_color = logo_future.result(timeout=8)
         except Exception: logo_stream, theme_color = None, DEFAULT_COLOR
 
         doc = Document()
-        DocumentBuilder.create_cover(doc, client, project_type, theme_color)
+        # PASSED THE LOGO_STREAM HERE
+        DocumentBuilder.create_cover(doc, client, project_type, logo_stream, theme_color)
         
         for chap in UNIVERSAL_STRUCTURE:
             extra = ""
-            # Stop Prompt Bleeding - Only inject Firm Portfolio in Chapter 6 or 8
-            if "TIM" in chap['title'] or "KAPABILITAS" in chap['title']: 
-                extra = f"[MANDATORY] Synthesize Firm API Portfolio: {firm_profile['portfolio_highlights']}"
             
-            # Only inject Contact Info at the very end
-            if "PENUTUP" in chap['title']: 
-                extra = f"[MANDATORY] End with this official Firm API Contact exactly as provided: {firm_profile['contact_info']}"
+            # FORCE OSINT PERSONALIZATION IN CHAPTER 1
+            if chap['id'] == 'c_1':
+                extra = f"[MANDATORY] Open the proposal by specifically acknowledging {client}'s current position in the market. Integrate this OSINT News context: {client_news}"
 
-            # Only inject Firm Pricing Standards in the Cost chapter
-            if "ESTIMASI" in chap['title'] or "BIAYA" in chap['title']:
-                extra = f"[MANDATORY] Build the decoy pricing table. Use these exact commercial rules from the firm: {firm_data['commercial']}"
+            # Inject Firm Methodology into Bab V (Metodologi)
+            if chap['id'] == 'c_5':
+                extra = f"[MANDATORY] Base the steps on this official methodology: {firm_data['methodology']}"
+
+            # Inject Firm Portfolio into Bab IX (Struktur & Team Proyek)
+            if chap['id'] == 'c_9': 
+                extra = f"[MANDATORY] Synthesize Firm API Portfolio & Team: {firm_profile['portfolio_highlights']} | Team req: {firm_data['team']}"
+            
+            # Inject Pricing Rules and Contact Info into Bab X (Model Pembiayaan)
+            if chap['id'] == 'c_10':
+                extra = f"[MANDATORY] Build the decoy pricing table. Use commercial rules: {firm_data['commercial']}. End with this contact info: {firm_profile['contact_info']}"
 
             prompt = PROPOSAL_SYSTEM_PROMPT.format(
                 writer_firm=WRITER_FIRM_NAME, 
@@ -528,7 +609,7 @@ class ProposalGenerator:
                 res = self.ollama.chat(
                     model=LLM_MODEL, 
                     messages=[{'role': 'system', 'content': prompt}, {'role': 'user', 'content': f"Write {chap['title']}."}],
-                    options={'num_ctx': 4096, 'num_predict': 1024} # Keep token predict strict to enforce brevity
+                    options={'num_ctx': 6144, 'num_predict': 2048} 
                 )
                 h = doc.add_heading(chap['title'], level=1)
                 h.runs[0].font.color.rgb = RGBColor(*theme_color)

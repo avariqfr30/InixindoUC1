@@ -4,9 +4,7 @@ import logging
 from flask import Flask, send_file, request, jsonify, render_template
 from flask_cors import CORS
 from core import ProposalGenerator, KnowledgeBase
-
-# FIXED: Removed SMART_SUGGESTIONS from the import list
-from config import DB_URI, DATA_MAPPING 
+from config import DB_URI, DATA_MAPPING
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
