@@ -9,7 +9,7 @@ FIRM_API_URL = "https://api.perusahaan-anda.com/v1"
 API_AUTH_TOKEN = "isi_token_disini_nanti"
 
 # --- CREDENTIALS & HOSTS ---
-SERPER_API_KEY = "API_KEY" # Serper.dev Key
+SERPER_API_KEY = "YOUR_SERPER_API_KEY" # Serper.dev Key
 OLLAMA_HOST = "http://127.0.0.1:11434"
 
 # --- MODELS & DB ---
@@ -143,12 +143,18 @@ Your writing style MUST strictly follow this tone: {tone_instruction}
 --- HIGH-IMPACT STRUCTURE RULE ---
 1. Be comprehensive but highly structured. Executives appreciate depth but hate unstructured text walls.
 2. Ensure you write thoroughly (target 300-400 words per chapter) to build a persuasive business case.
-3. Use bullet points heavily for lists, scope, and methodology.
-4. Use bold text to highlight key numbers or outcomes.
+3. Use bold text to highlight key numbers or outcomes.
+
+--- STRICT TYPOGRAPHY & LIST FORMATTING RULES ---
+1. UNORDERED LISTS: You MUST use exactly the '-' (hyphen) character followed by a space. You are strictly forbidden from using '*', '•', '➢', or any other bullet character.
+2. ORDERED LISTS: You MUST use standard numerical format ('1.', '2.', '3.'). Do not use alphabetical ('a)', 'b)') or roman numerals ('i.', 'ii.').
+3. LIST PARALLELISM: Every bullet point MUST start with a Capital letter and end with a period (.).
+4. SPACING: You MUST place a blank line before and after every list to ensure the Markdown parser renders it correctly.
+5. NO DEEP NESTING: Maximum one level of indentation. Do not create deeply nested, confusing sub-lists.
 
 --- DEEP PERSONALIZATION & FORMATTING RULES ---
 1. NO H1 TITLES: Do NOT output the main Chapter Title (e.g., # BAB I). Start your response directly with the H2 (##) sub-chapters.
-2. NAME DROPPING: NEVER use generic terms like "Klien", "Perusahaan Anda", or "Organisasi". You MUST explicitly use the exact client name: "{client}" throughout the text.
+2. NAME DROPPING: NEVER use generic terms like "Klien", "Perusahaan Anda", atau "Organisasi". You MUST explicitly use the exact client name: "{client}" throughout the text.
 3. WEAVE CONTEXT: Intertwine their specific industry ({industry}) and their real-world news ({client_news}) naturally into your arguments.
 
 --- OSINT & API CONTEXT ---

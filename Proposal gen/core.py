@@ -390,7 +390,7 @@ class StyleEngine:
             h_par.runs[0].font.size = Pt(9)
             h_par.runs[0].font.color.rgb = RGBColor(100, 100, 100)
             
-            # Footer (Page Numbers)
+            # Footer
             footer = section.footer
             f_par = footer.paragraphs[0]
             f_par.text = "Dokumen ini bersifat Rahasia (Confidential)"
@@ -420,6 +420,12 @@ class DocumentBuilder:
                 style = 'List Bullet' if element.name == 'ul' else 'List Number'
                 for li in element.find_all('li'):
                     p = doc.add_paragraph(style=style)
+                    
+                    # LAYER 3: INJECT PROFESSIONAL SPACING FOR LISTS
+                    p.paragraph_format.space_before = Pt(2)
+                    p.paragraph_format.space_after = Pt(4)
+                    p.paragraph_format.left_indent = Inches(0.25)
+                    
                     DocumentBuilder._process_inline_html(p, li)
             elif element.name == 'table':
                 rows = element.find_all('tr')
@@ -432,7 +438,6 @@ class DocumentBuilder:
                     for j, col in enumerate(cols):
                         if j < max_cols:
                             cell = table.cell(i, j)
-                            # Handle line breaks correctly within tables
                             cell.text = col.get_text(separator='\n').strip()
                             if row.find('th') or i == 0:
                                 p = cell.paragraphs[0]
@@ -455,11 +460,17 @@ class DocumentBuilder:
 
     @staticmethod
     def process_content(doc, raw_text, theme_color=DEFAULT_COLOR, chapter_title=""):
+        # LAYER 2: TYPOGRAPHY SANITIZATION
+        # Force all rogue bullet symbols (*, •, ➢, +) at the start of lines to become standard hyphens (-)
+        raw_text = re.sub(r'^[ \t]*[\*\•\➢\+][ \t]+', '- ', raw_text, flags=re.MULTILINE)
+        
+        # Fix broken spacing around lists (ensures markdown parser recognizes them)
+        raw_text = re.sub(r'([^\n])\n(- |1\. )', r'\1\n\n\2', raw_text)
+
         clean_lines = []
         for line in raw_text.split('\n'):
             stripped = line.strip()
             
-            # Chart Processing Hooks Restored
             if stripped.startswith('[[CHART:') and stripped.endswith(']]'):
                 data = stripped.replace('[[CHART:', '').replace(']]', '').strip()
                 img = ChartEngine.create_bar_chart(data, theme_color)
@@ -488,7 +499,7 @@ class DocumentBuilder:
             if stripped.startswith('#') and chapter_title.lower() in stripped.lower():
                 continue 
                 
-            clean_lines.append(line) # Preserves spaces for Markdown tables
+            clean_lines.append(line) 
             
         md_text = "\n".join(clean_lines)
         html = markdown.markdown(md_text, extensions=['tables'])
@@ -498,8 +509,9 @@ class DocumentBuilder:
     def create_cover(doc, client, project_type, logo_stream=None, theme_color=DEFAULT_COLOR):
         StyleEngine.apply_document_styles(doc)
         
-        # RESTORED: Logo Injection Logic
         for _ in range(3): doc.add_paragraph()
+        
+        # Logo Injection Logic Restored
         if logo_stream:
             try:
                 p = doc.add_paragraph()
@@ -555,30 +567,28 @@ class ProposalGenerator:
         try: client_news = research_futures['news'].result(timeout=5)
         except Exception: client_news = "Tidak ada berita spesifik terbaru."
         
-        # Ensure we wait for the logo to finish downloading
         try: logo_stream, theme_color = logo_future.result(timeout=8)
         except Exception: logo_stream, theme_color = None, DEFAULT_COLOR
 
         doc = Document()
-        # PASSED THE LOGO_STREAM HERE
         DocumentBuilder.create_cover(doc, client, project_type, logo_stream, theme_color)
         
         for chap in UNIVERSAL_STRUCTURE:
             extra = ""
             
-            # FORCE OSINT PERSONALIZATION IN CHAPTER 1
+            # Context Weaving
             if chap['id'] == 'c_1':
-                extra = f"[MANDATORY] Open the proposal by specifically acknowledging {client}'s current position in the market. Integrate this OSINT News context: {client_news}"
+                extra = f"[MANDATORY] Open the proposal by specifically acknowledging {client}'s current position in the market. Integrate this OSINT News context naturally: {client_news}"
 
-            # Inject Firm Methodology into Bab V (Metodologi)
+            # Method Injection
             if chap['id'] == 'c_5':
                 extra = f"[MANDATORY] Base the steps on this official methodology: {firm_data['methodology']}"
 
-            # Inject Firm Portfolio into Bab IX (Struktur & Team Proyek)
+            # Portfolio Injection
             if chap['id'] == 'c_9': 
                 extra = f"[MANDATORY] Synthesize Firm API Portfolio & Team: {firm_profile['portfolio_highlights']} | Team req: {firm_data['team']}"
             
-            # Inject Pricing Rules and Contact Info into Bab X (Model Pembiayaan)
+            # Pricing & Contact Injection
             if chap['id'] == 'c_10':
                 extra = f"[MANDATORY] Build the decoy pricing table. Use commercial rules: {firm_data['commercial']}. End with this contact info: {firm_profile['contact_info']}"
 
@@ -609,7 +619,7 @@ class ProposalGenerator:
                 res = self.ollama.chat(
                     model=LLM_MODEL, 
                     messages=[{'role': 'system', 'content': prompt}, {'role': 'user', 'content': f"Write {chap['title']}."}],
-                    options={'num_ctx': 6144, 'num_predict': 2048} 
+                    options={'num_ctx': 8192, 'num_predict': 4076} 
                 )
                 h = doc.add_heading(chap['title'], level=1)
                 h.runs[0].font.color.rgb = RGBColor(*theme_color)
