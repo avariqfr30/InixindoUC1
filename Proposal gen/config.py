@@ -1,9 +1,15 @@
 # config.py
 import os
 
+<<<<<<< HEAD
 # =====================================================================
 # SYSTEM MODE & API ADAPTER
 # =====================================================================
+=======
+
+# SYSTEM MODE & API ADAPTER (HANDOVER SETTINGS)
+
+>>>>>>> parent of 142dbd2 (Update)
 DEMO_MODE = True 
 FIRM_API_URL = "https://api.perusahaan-anda.com/v1" 
 API_AUTH_TOKEN = "isi_token_disini_nanti"
@@ -27,6 +33,7 @@ DATA_MAPPING = {
     "budget": "Investment Estimation"
 }
 
+<<<<<<< HEAD
 # =====================================================================
 # MOCK API DATA (Internal Firm Database Simulation)
 # =====================================================================
@@ -34,6 +41,32 @@ MOCK_FIRM_PROFILE = {
     "contact_info": "Kantor Pusat Inixindo Jogja\nJl. Kenari No. 69, Muja Muju, Kec. Umbulharjo, Kota Yogyakarta, DIY 55165\nEmail: info@inixindo.id\nTelp: (0274) 515448",
     "portfolio_highlights": "Inixindo Jogja memiliki pengalaman lebih dari 30 tahun dalam Transformasi TI, Audit, dan Pelatihan Enterprise."
 }
+=======
+
+# KNOWLEDGE PATTERN LIBRARY (Intelligent Autocomplete di UI)
+
+SMART_SUGGESTIONS = {
+    "banking": {
+        "keywords": ["bank", "bca", "bri", "mandiri", "finance", "fintech", "payment", "kredit"],
+        "regulations": ["POJK No. 4/POJK.05/2021", "ISO 27001", "PCI-DSS", "UU PDP"]
+    },
+    "government": {
+        "keywords": ["kementerian", "dinas", "pemprov", "pemkab", "bumn", "publik", "layanan"],
+        "regulations": ["Perpres SPBE No 95 Tahun 2018", "SNI ISO 37001", "UU PDP"]
+    },
+    "healthcare": {
+        "keywords": ["rumah sakit", "klinik", "bpjs", "kesehatan", "medis"],
+        "regulations": ["Permenkes No 24 Tahun 2022 (Rekam Medis Elektronik)", "HIPAA", "ISO 27001"]
+    },
+    "general_it": {
+        "keywords": ["infrastruktur", "cloud", "aplikasi", "software", "jaringan", "data center"],
+        "regulations": ["ITIL v4", "COBIT 2019", "TOGAF", "ISO 20000", "ISO 27001"]
+    }
+}
+
+
+# MOCK API DATA (Internal Firm Standards)
+>>>>>>> parent of 142dbd2 (Update)
 
 MOCK_FIRM_STANDARDS = {
     "Diagnostic": {"methodology": "1. Discovery\n2. As-Is Analysis\n3. Gap Analysis\n4. Report", "team": "1x Principal Consultant, 1x Business Analyst.", "commercial": "Fixed-fee based on scope."},
@@ -42,6 +75,7 @@ MOCK_FIRM_STANDARDS = {
     "Implementation": {"methodology": "1. Design\n2. UAT & Testing\n3. Deployment\n4. Go-Live", "team": "1x Project Manager, 1x Lead Engineer.", "commercial": "Milestone-based (20% Kickoff, 40% UAT, 30% Go-Live, 10% Handover)."}
 }
 
+<<<<<<< HEAD
 # =====================================================================
 # TONE OF VOICE MAPPING (Psychographic Targeting based on DM Age)
 # =====================================================================
@@ -55,6 +89,11 @@ TONE_MAPPINGS = {
 # =====================================================================
 # PROPOSAL STRUCTURE (MAPPED STRICTLY TO INIXINDO FLOWCHART)
 # =====================================================================
+=======
+
+# PROPOSAL STRUCTURE (TARGET: 20-25 PAGES TOTAL)
+
+>>>>>>> parent of 142dbd2 (Update)
 UNIVERSAL_STRUCTURE = [
     # --- PHASE 1: PEMAHAMAN DASAR ---
     {
@@ -118,6 +157,7 @@ UNIVERSAL_STRUCTURE = [
 
     # --- PHASE 4: KOMERSIAL ---
     {
+<<<<<<< HEAD
         "id": "c_10", "title": "BAB X – MODEL PEMBIAYAAN",
         "subs": ["10.1 Model Bisnis dan Opsi Biaya", "10.2 Tahapan Pembayaran dan Batasan Pekerjaan"],
         "keywords": "budget cost commercial investment terms decoy pricing boundaries",
@@ -128,6 +168,24 @@ Create a Markdown table with EXACTLY 3 Tiers of pricing based on the Target Budg
 2. Opsi Rekomendasi: Matches Target Budget exactly. Highest perceived value.
 3. Opsi Premium: 60% higher than target budget. Anchoring option with 24/7 VIP support.
 End this chapter with the official Firm Contact Info for next steps."""
+=======
+        "id": "c_8", "title": "BAB VIII – TIM DAN KAPABILITAS",
+        "subs": ["8.1 Struktur Organisasi Tata Kelola Proyek", "8.2 Profil Peran dan Rekam Jejak Firm"],
+        "keywords": "team expert role structure director manager portfolio",
+        "length_intent": "Detail the governance structure. Base the firm's historical excellence entirely on the retrieved OSINT data. (Target: 500 words)."
+    },
+    {
+        "id": "c_9", "title": "BAB IX – ESTIMASI BIAYA",
+        "subs": ["9.1 Rincian Investasi Komprehensif", "9.2 Ketentuan Komersial dan Asumsi Legal"],
+        "keywords": "budget cost commercial investment terms assumption legal",
+        "length_intent": "Provide a Markdown table for costs. Detail the assumptions, exclusions, and commercial terms. (Target: 400 words)."
+    },
+    {
+        "id": "c_10", "title": "BAB X – PENUTUP",
+        "subs": ["10.1 Kesimpulan Eksekutif", "10.2 Rencana Tindak Lanjut (Next Steps)"],
+        "keywords": "closing commitment next steps",
+        "length_intent": "Write a strong executive conclusion. End with a call to action and the firm's contact details sourced from OSINT. (Target: 200 words)."
+>>>>>>> parent of 142dbd2 (Update)
     }
 ]
 
@@ -136,9 +194,21 @@ You are an elite Proposal Architect for {writer_firm}.
 Client: {client} | Industry: {industry} | Employees: {employee_count}
 Project Type: {project_status} - {project_type}
 
+<<<<<<< HEAD
 --- PSYCHOGRAPHIC TONE ---
 The Decision Maker is in this age group: {dm_age}.
 Your writing style MUST strictly follow this tone: {tone_instruction}
+=======
+--- SYSTEM CONTEXT ---
+Global Client Data: {global_data}
+Latest Client News: {client_news}
+Regulatory/Framework Context: {regulation_data}
+Writer Firm Contact Info: {writer_data}
+Writer Firm Portfolio/Experience: {firm_exp_data}
+Writer Firm Collaboration with Client: {collab_data}
+Historical Vector Data: {structured_row_data}
+Semantic DB Matches: {rag_data}
+>>>>>>> parent of 142dbd2 (Update)
 
 --- HIGH-IMPACT STRUCTURE RULE ---
 1. Be comprehensive but highly structured. Executives appreciate depth but hate unstructured text walls.
@@ -169,6 +239,18 @@ Timeline: {timeline} | Target Budget: {budget}
 Extra Notes: {notes}
 {extra_instructions}
 
+<<<<<<< HEAD
+=======
+--- LENGTH DIRECTIVE ---
+You are writing a professional consulting proposal. Ensure high technical detail and deep analytical thought, but remain structured.
+Read the length intent carefully: {length_intent}
+
+--- STRICT ACCURACY & RAW DATA SYNTHESIS RULE ---
+1. You must use the 'Writer Firm Contact Info' and 'Writer Firm Portfolio/Experience' provided in the OSINT system context. 
+2. CRITICAL: The OSINT data is provided as raw Google snippets containing fragmented sentences and ellipses (...). DO NOT output these fragments raw. You MUST synthesize these fragmented facts into smooth, professional, and highly confident sentences.
+3. If the OSINT data for the firm is sparse or unclear, confidently extrapolate using general enterprise best practices. NEVER state or admit that your firm lacks experience, lacks a public portfolio, or that information is unavailable. Frame all capabilities with supreme confidence.
+
+>>>>>>> parent of 142dbd2 (Update)
 --- TASK ---
 Write "{chapter_title}".
 Include these sub-chapters exactly as H2 (##):

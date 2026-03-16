@@ -31,10 +31,17 @@ from ollama import Client
 from chromadb.utils import embedding_functions
 
 from config import (
+<<<<<<< HEAD
     SERPER_API_KEY, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL, DB_URI,
     WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE, TONE_MAPPINGS,
     PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING, DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, 
     MOCK_FIRM_STANDARDS, MOCK_FIRM_PROFILE
+=======
+    GOOGLE_API_KEY, GOOGLE_CX_ID, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL, DB_URI,
+    WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE, 
+    PERSONAS, PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING, 
+    DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, MOCK_FIRM_STANDARDS
+>>>>>>> parent of 142dbd2 (Update)
 )
 
 logger = logging.getLogger(__name__)
@@ -61,6 +68,7 @@ class FirmAPIClient:
                 logger.error(f"Gagal terhubung ke API Internal: {e}")
                 return {"methodology": "TBD", "team": "TBD", "commercial": "TBD"}
 
+<<<<<<< HEAD
     def get_firm_profile(self):
         if self.demo_mode:
             logger.info("[DEMO MODE] Mengambil Profil Firm dari Database Internal.")
@@ -74,8 +82,10 @@ class FirmAPIClient:
                 logger.error(f"Gagal mengambil Profil Firm dari API Internal: {e}")
                 return {"contact_info": "Kantor Pusat Terdaftar", "portfolio_highlights": "Penyedia Solusi IT Terkemuka"}
 
+=======
+>>>>>>> parent of 142dbd2 (Update)
 # =====================================================================
-# KNOWLEDGE BASE & VECTOR DB
+# KNOWLEDGE BASE & OSINT (RESEARCHER)
 # =====================================================================
 class KnowledgeBase:
     def __init__(self, db_uri):
@@ -100,6 +110,7 @@ class KnowledgeBase:
                 rename_dict = {v: k for k, v in DATA_MAPPING.items()}
                 raw_df.rename(columns=rename_dict, inplace=True)
                 
+                # Currencies must be in Indonesian Rupiah
                 def format_rupiah_range(val):
                     try:
                         clean_str = re.sub(r'[^\d]', '', str(val))
@@ -160,9 +171,12 @@ class KnowledgeBase:
             if res['documents'] and len(res['documents'][0]) > 0: return "\n".join(res['documents'][0])
         except Exception: return ""
 
+<<<<<<< HEAD
 # =====================================================================
 # UNRESTRICTED GLOBAL OSINT RESEARCHER (Serper.dev)
 # =====================================================================
+=======
+>>>>>>> parent of 142dbd2 (Update)
 class Researcher:
     @staticmethod
     def get_system_geolocation():
@@ -205,10 +219,53 @@ class Researcher:
 
     @staticmethod
     @lru_cache(maxsize=128)
+<<<<<<< HEAD
+=======
+    def fetch_page_content(url):
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            resp = requests.get(url, headers=headers, timeout=5)
+            soup = BeautifulSoup(resp.content, 'html.parser')
+            texts = soup.find_all(['p', 'h1', 'h2', 'h3', 'li'])
+            return ' '.join([t.get_text(strip=True) for t in texts])[:4000]
+        except Exception: return ""
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def get_entity_profile(entity_name):
+        res = Researcher.search(f'"{entity_name}" profil perusahaan OR "tentang kami" -saham -loker -lowongan', limit=3)
+        if not res or 'items' not in res: return f"{entity_name}"
+        return "\n".join([i.get('snippet', '') for i in res['items']])
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def get_contact_details(entity_name):
+        query = f'"{entity_name}" "alamat kantor" OR "telepon kantor" OR "hubungi kami" indonesia -linkedin -direktur -ceo -manager -loker -lowongan'
+        res = Researcher.search(query, limit=5)
+        if not res or 'items' not in res: return f"Kantor Pusat {entity_name}, Indonesia."
+        return "\n".join([i.get('snippet', '') for i in res['items']])
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def get_collaboration_data(client, firm):
+        res = Researcher.search(f'"{client}" AND "{firm}" kerjasama OR proyek OR "telah mempercayakan"', limit=4)
+        if not res or 'items' not in res: return "Data kolaborasi spesifik tidak dipublikasikan secara terbuka."
+        return "\n".join([i.get('snippet', '') for i in res['items']])
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+>>>>>>> parent of 142dbd2 (Update)
     def get_latest_client_news(client_name):
         res = Researcher.search(f'"{client_name}" inovasi OR teknologi', limit=5, up_to_the_second=True, use_news_endpoint=True)
         if not res or 'news' not in res: return "Tidak ada berita relevan terbaru."
         return "\n".join([i.get('snippet', '') for i in res['news']])
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def get_firm_experience(firm_name, project_topic):
+        res = Researcher.search(f'"{firm_name}" "portofolio" OR "klien kami" OR "berpengalaman" -loker -lowongan', limit=5)
+        if not res or 'items' not in res: return f"{firm_name} adalah penyedia solusi IT terkemuka dengan rekam jejak panjang di sektor enterprise Indonesia."
+        return "\n".join([i.get('snippet', '') for i in res['items']])
 
 class LogoManager:
     @staticmethod
@@ -549,20 +606,131 @@ class ProposalGenerator:
         self.io_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
         self.firm_api = FirmAPIClient()
 
+<<<<<<< HEAD
     def run(self, client, industry, employee_count, dm_age, project_status, project_type, scope, outcome, regulations, timeline, budget, notes):
         logger.info(f"Generating optimized proposal for: {client}")
         
         firm_data = self.firm_api.get_project_standards(project_type)
         firm_profile = self.firm_api.get_firm_profile()
         tone_instruction = TONE_MAPPINGS.get(dm_age, TONE_MAPPINGS["Gen X (45 - 60 Tahun)"])
+=======
+    def _fetch_chapter_context(self, chap, client, project, budget, project_goal, project_type, timeline, notes, regulations, firm_data, research_futures):
+        try:
+            try: global_data = research_futures['profile'].result(timeout=5)
+            except Exception: global_data = ""
+            
+            try: client_news = research_futures['news'].result(timeout=5)
+            except Exception: client_news = "Tidak ada berita spesifik."
+
+            try: regulation_data = research_futures['regulations'].result(timeout=5)
+            except Exception: regulation_data = "Standar umum."
+            
+            try: writer_data = research_futures['contact'].result(timeout=5)
+            except Exception: writer_data = "Unavailable"
+            
+            try: collab_data = research_futures['collab'].result(timeout=5)
+            except Exception: collab_data = "Unavailable"
+            
+            try: firm_exp_data = research_futures['firm_exp'].result(timeout=5)
+            except Exception: firm_exp_data = "Unavailable"
+
+            structured_row_data = self.kb.get_exact_context(client, project, budget)
+            rag_data = self.kb.query(client, project, chap['keywords'])
+            
+            discovery_notes = "Tidak ada catatan tambahan."
+            if notes: discovery_notes = notes
+            
+            persona = PERSONAS.get(chap.get('id', 'default'), PERSONAS['default'])
+            subs = "\n".join([f"- {s}" for s in chap['subs']])
+            
+            visual_prompt = "Do not force visuals."
+            if "visual_intent" in chap:
+                if chap['visual_intent'] == "bar_chart": visual_prompt = "Mandatory Data Visual: [[CHART: Judul | Label | Kat 1,10; Kat 2,20]]"
+                elif chap['visual_intent'] == "gantt": visual_prompt = f"Mandatory Timeline Visual: [[GANTT: Jadwal Implementasi | Waktu | Task 1,0,2; Task 2,2,4]]. Align with timeline: {timeline}."
+                elif chap['visual_intent'] == "flowchart": visual_prompt = "Process visual: [[FLOW: Step 1 -> Step 2 -> Step 3]]."
+
+            extra = ""
+            if chap['id'] == 'c_1':
+                extra = f"[MANDATORY] Base the organizational context HEAVILY on this explicit client context provided by the user: '{project}'. Integrate global profile data: {global_data}"
+            elif chap['id'] == 'c_2':
+                extra = f"[MANDATORY] Focus strictly on these explicit problems faced by the client: '{notes}'. Do not invent unrelated problems. Perform Deep Root Cause Analysis."
+            elif chap['id'] == 'c_3':
+                extra = f"[MANDATORY] The solution must be framed as a '{service_type}' engagement. Project Type: '{project_type}'. Client's Core Needs/Goals: '{project_goal}'. Adapt the approach to solve the previously stated problems."
+            elif chap['id'] == 'c_4':
+                extra = f"[MANDATORY] You MUST integrate and detail these specific frameworks/regulations: '{regulations}'. Use this OSINT data to explain their compliance mandates: {regulation_data}."
+            elif chap['id'] == 'c_6':
+                extra = f"[MANDATORY] You MUST base your methodology EXACTLY on this internal Firm Methodology for {project_type}: {firm_data['methodology']}."
+            elif chap['id'] == 'c_7':
+                extra = f"[MANDATORY] The total estimated timeline for this project is '{timeline}'. Detail the phases to logically fit within this duration."
+            elif chap['id'] == 'c_8':
+                extra = f"[MANDATORY] You MUST use this exact Team Structure required for {project_type}: {firm_data['team']}. Expand heavily on each role."
+            elif chap['id'] == 'c_9':
+                extra = f"[MANDATORY] The estimated budget/cost provided by the user is: '{budget}'. You MUST strictly state these exact Commercial Rules: {firm_data['commercial']}. Create a highly detailed pricing breakdown table."
+            elif chap['id'] == 'c_10':
+                extra = f"[MANDATORY] Create a structured closing."
+
+            prompt = PROPOSAL_SYSTEM_PROMPT.format(
+                client=client, 
+                writer_firm=WRITER_FIRM_NAME, 
+                persona=persona,
+                global_data=global_data, 
+                client_news=client_news, 
+                regulation_data=regulation_data,
+                writer_data=writer_data,
+                firm_exp_data=firm_exp_data,
+                collab_data=collab_data,
+                structured_row_data=structured_row_data,
+                project_goal=project_goal, 
+                project_type=project_type, 
+                timeline=timeline, 
+                discovery_notes=discovery_notes,
+                firm_methodology=firm_data['methodology'], 
+                firm_team=firm_data['team'], 
+                firm_commercial=firm_data['commercial'],
+                rag_data=rag_data, 
+                visual_prompt=visual_prompt, 
+                extra_instructions=extra,
+                chapter_title=chap['title'], 
+                sub_chapters=subs, 
+                length_intent=chap.get('length_intent', 'Expand heavily.')
+            )
+
+            return {"prompt": prompt, "success": True}
+            
+        except Exception as e:
+            return {"prompt": "", "success": False, "error": str(e)}
+
+    def run(self, client, project, budget=None, service_type="Konsultan", project_goal="Improvement", project_type="Implementation", timeline="TBD", notes="", regulations=""):
+        logger.info(f"Starting Generation: {client} | Mode Demo: {DEMO_MODE}")
+        
+        active_structure = UNIVERSAL_STRUCTURE
+        firm_data = self.firm_api.get_project_standards(project_type)
+>>>>>>> parent of 142dbd2 (Update)
         
         clean_regex = r'\b(Cabang|Branch|Region|Area|Tbk)\b.*$|^(PT\.|PT\s+|CV\.|CV\s+)'
         base_client = re.sub(clean_regex, '', client, flags=re.IGNORECASE).strip()
 
         research_futures = {
+<<<<<<< HEAD
             'news': self.io_pool.submit(Researcher.get_latest_client_news, base_client)
         }
         logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client) 
+=======
+            'profile': self.io_pool.submit(Researcher.get_entity_profile, base_client),
+            'contact': self.io_pool.submit(Researcher.get_contact_details, WRITER_FIRM_NAME),
+            'collab': self.io_pool.submit(Researcher.get_collaboration_data, base_client, base_firm),
+            'firm_exp': self.io_pool.submit(Researcher.get_firm_experience, base_firm, project),
+            'news': self.io_pool.submit(Researcher.get_latest_client_news, base_client), 
+            'regulations': self.io_pool.submit(Researcher.get_regulatory_data, regulations)
+        }
+        logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client) 
+        
+        context_futures = {}
+        for chap in active_structure:
+            context_futures[chap['id']] = self.io_pool.submit(
+                self._fetch_chapter_context, chap, client, project, budget, project_goal, project_type, timeline, notes, regulations, firm_data, research_futures
+            )
+>>>>>>> parent of 142dbd2 (Update)
 
         try: client_news = research_futures['news'].result(timeout=5)
         except Exception: client_news = "Tidak ada berita spesifik terbaru."
