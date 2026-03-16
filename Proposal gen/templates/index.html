@@ -5,31 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Strategic Proposal System</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #f1f5f9; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; color: #334155; }
-        .card { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); width: 680px; max-height: 95vh; overflow-y: auto;}
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; color: #334155; }
+        .card { background: white; padding: 35px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 680px; max-height: 90vh; overflow-y: auto; border: 1px solid #e2e8f0; }
         .hidden { display: none !important; }
-        h2 { color: #0f172a; margin: 0 0 10px 0; font-size: 1.8rem; }
-        p.sub { color: #64748b; margin: 0 0 25px 0; font-size: 1rem; }
-        label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.95rem; }
-        select, input, textarea, button { width: 100%; padding: 12px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 1rem; background: white; box-sizing: border-box; font-family: 'Segoe UI', sans-serif;}
-        select:focus, input:focus, textarea:focus { border-color: #3b82f6; outline: none; }
-        button { background: #2563eb; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; margin-top: 10px; }
+        h2 { color: #0f172a; margin: 0 0 5px 0; font-size: 1.6rem; }
+        p.sub { color: #64748b; margin: 0 0 20px 0; font-size: 0.95rem; }
+        label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; color: #475569;}
+        select, input[type="text"], textarea, button { width: 100%; padding: 10px; margin-bottom: 12px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.95rem; box-sizing: border-box; }
+        select:focus, input[type="text"]:focus, textarea:focus { border-color: #3b82f6; outline: none; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1); }
+        button { background: #2563eb; color: white; border: none; font-weight: 600; cursor: pointer; transition: 0.2s; margin-top: 5px; }
         button:hover { background: #1d4ed8; }
         button:disabled { background: #94a3b8; cursor: not-allowed; }
         button.secondary { background: white; color: #475569; border: 1px solid #cbd5e1; }
-        button.secondary:hover { background: #f8fafc; }
-        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-        .review-box { background: #f8fafc; padding: 25px; border-radius: 12px; margin-bottom: 25px; border: 1px solid #e2e8f0; font-size: 0.95rem; }
-        .review-row { display: flex; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px dashed #e2e8f0; padding-bottom: 5px;}
-        .review-row span:last-child { font-weight: 600; color: #0f172a; text-align: right; max-width: 60%; word-wrap: break-word;}
-        .spinner { width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; display: none; vertical-align: middle; margin-left: 10px; }
+        button.secondary:hover { background: #f1f5f9; }
+        
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .checkbox-group { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+        .checkbox-group label { display: flex; align-items: center; font-weight: 400; margin: 0; font-size: 0.9rem; cursor: pointer; }
+        .checkbox-group input[type="checkbox"] { width: auto; margin-right: 6px; margin-bottom: 0; }
+        
+        .finance-panel { background: #f1f5f9; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 15px; }
+        .finance-tier { display: flex; justify-content: space-between; padding: 8px; border-bottom: 1px solid #cbd5e1; cursor: pointer; transition: 0.2s; }
+        .finance-tier:hover { background: #e2e8f0; }
+        .finance-tier:last-child { border-bottom: none; }
+        
+        .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; display: none; vertical-align: middle; margin-left: 8px; }
         .spinner.active { display: inline-block; }
-        textarea { resize: vertical; min-height: 70px; margin-bottom: 10px; }
-
-        /* Custom Checkbox Group Styling */
-        .checkbox-group { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
-        .checkbox-group label { display: flex; align-items: center; font-weight: normal; margin: 0; font-size: 0.95rem; cursor: pointer; }
-        .checkbox-group input[type="checkbox"] { width: auto; margin-right: 8px; margin-bottom: 0; transform: scale(1.1); cursor: pointer; }
+        textarea { resize: vertical; min-height: 60px; margin-bottom: 10px; }
         
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
@@ -37,15 +39,15 @@
 <body>
     <div class="card">
         <div id="loader" style="text-align:center; padding: 40px;">
-            <div style="border:4px solid #e2e8f0; border-top:4px solid #3b82f6; border-radius:50%; width:40px; height:40px; animation: spin 1s linear infinite; margin: 0 auto 20px auto;"></div>
-            <p id="loader-text">Memuat Sistem &amp; Database...</p>
+            <div style="border:3px solid #e2e8f0; border-top:3px solid #3b82f6; border-radius:50%; width:30px; height:30px; animation: spin 1s linear infinite; margin: 0 auto 15px auto;"></div>
+            <p id="loader-text">Memuat Sistem...</p>
         </div>
 
         <div id="step-config" class="hidden">
-            <h2>Inixindo Proposal Engine</h2>
-            <p class="sub">Requirement & Discovery Layer</p>
+            <h2>Proposal Generator</h2>
+            <p class="sub">Engine Requirement & Discovery</p>
             
-            <label for="select-perusahaan">Nama Perusahaan</label>
+            <label for="select-perusahaan">Nama Perusahaan Klien</label>
             <select id="select-perusahaan"></select>
             
             <div id="container-dynamic" class="hidden">
@@ -53,7 +55,7 @@
                     <div>
                         <label for="select-proposal">Jenis Proposal</label>
                         <select id="select-proposal">
-                            <option value="" disabled selected>Pilih Jenis Proposal...</option>
+                            <option value="" disabled selected>Pilih...</option>
                             <option value="Training">Training</option>
                             <option value="Konsultan">Konsultan</option>
                             <option value="Training dan Konsultan">Training dan Konsultan</option>
@@ -62,7 +64,7 @@
                     <div>
                         <label for="select-proyek">Jenis Proyek</label>
                         <select id="select-proyek">
-                            <option value="" disabled selected>Pilih Jenis Proyek...</option>
+                            <option value="" disabled selected>Pilih...</option>
                             <option value="Diagnostic">Diagnostic</option>
                             <option value="Strategic">Strategic</option>
                             <option value="Transformation">Transformation</option>
@@ -71,13 +73,13 @@
                     </div>
                 </div>
 
-                <label for="input-konteks">Konteks Organisasi</label>
-                <textarea id="input-konteks" placeholder="Deskripsikan konteks organisasi klien..."></textarea>
+                <label for="input-konteks">Tujuan Objektif Proyek</label>
+                <textarea id="input-konteks" placeholder="Singkat dan padat..."></textarea>
 
-                <label for="input-permasalahan">Permasalahan</label>
-                <textarea id="input-permasalahan" placeholder="Deskripsikan masalah utama yang dihadapi klien..."></textarea>
+                <label for="input-permasalahan">Permasalahan Utama (Pain Points)</label>
+                <textarea id="input-permasalahan" placeholder="Sebutkan root cause..."></textarea>
 
-                <label>Klasifikasi Kebutuhan (Pilih lebih dari satu)</label>
+                <label>Pendekatan / Kebutuhan (Bisa pilih lebih dari satu)</label>
                 <div class="checkbox-group" id="group-kebutuhan">
                     <label><input type="checkbox" value="Problem"> Problem</label>
                     <label><input type="checkbox" value="Opportunity"> Opportunity</label>
@@ -86,16 +88,24 @@
 
                 <div class="grid-2">
                     <div>
-                        <label for="input-waktu">Estimasi Waktu</label>
-                        <input type="text" id="input-waktu" placeholder="Cth: 3 Bulan..." />
+                        <label for="input-waktu">Durasi Proyek</label>
+                        <input type="text" id="input-waktu" placeholder="Contoh: 3 Bulan" />
                     </div>
                     <div>
-                        <label for="input-biaya">Estimasi Biaya</label>
-                        <input type="text" id="input-biaya" placeholder="Cth: Rp. 150.000.000" />
+                        <label for="input-biaya">Estimasi Anggaran</label>
+                        <input type="text" id="input-biaya" placeholder="Masukkan harga atau pilih di bawah..." />
                     </div>
                 </div>
 
-                <label>Potensi Framework (Pilih lebih dari satu)</label>
+                <div class="finance-panel">
+                    <button type="button" id="btn-analyze" class="secondary" style="font-size: 0.85rem;">📊 Auto-Analisis Finansial & Opsi Harga</button>
+                    <div id="finance-result" class="hidden" style="margin-top: 10px; font-size: 0.85rem;">
+                        <p id="finance-summary" style="margin: 0 0 10px 0; font-style: italic; color: #475569;"></p>
+                        <div id="finance-options"></div>
+                    </div>
+                </div>
+
+                <label>Potensi Framework (Bisa pilih lebih dari satu)</label>
                 <div class="checkbox-group" id="group-framework">
                     <label><input type="checkbox" value="Itil"> Itil</label>
                     <label><input type="checkbox" value="Togaf"> Togaf</label>
@@ -104,212 +114,182 @@
                     <label><input type="checkbox" value="Teori"> Teori</label>
                     <label><input type="checkbox" value="Regulasi"> Regulasi</label>
                     <label><input type="checkbox" value="Best Practise"> Best Practise</label>
-                    <label><input type="checkbox" value="Lainnya" id="cb-framework-lainnya"> Lainnya (Custom)...</label>
+                    <label><input type="checkbox" id="cb-lainnya" value="Lainnya"> Lainnya..</label>
                 </div>
-                <input type="text" id="input-framework" class="hidden" placeholder="Masukkan Framework Custom..." />
+                <input type="text" id="input-framework-lainnya" class="hidden" placeholder="Ketik framework manual..." />
             </div>
             
-            <button type="button" id="btn-review" disabled>Lanjut Tinjau Data</button>
-            <button type="button" id="btn-refresh" class="secondary" style="font-size:0.9rem; padding:10px;">🔄 Refresh Database</button>
-        </div>
-
-        <div id="step-review" class="hidden">
-            <h2>Konfirmasi Detail</h2>
-            <p class="sub">Validasi data Discovery sebelum menyusun proposal.</p>
-            <div class="review-box" id="review-text"></div>
-            <div style="display:flex; gap:15px;">
-                <button type="button" id="btn-back" class="secondary" style="width:35%">Kembali</button>
-                <button type="button" id="btn-generate" style="width:65%">Generate Proposal <span id="spinner" class="spinner"></span></button>
-            </div>
+            <button type="button" id="btn-generate" disabled>Generate Proposal Singkat & Padat <span id="spinner" class="spinner"></span></button>
         </div>
 
         <div id="step-success" class="hidden" style="text-align:center; padding: 20px;">
-            <div style="font-size: 60px; margin-bottom: 20px;">✅</div>
+            <div style="font-size: 50px; margin-bottom: 15px;">✅</div>
             <h2>Selesai!</h2>
-            <p class="sub">Dokumen telah berhasil disusun dan diunduh.</p>
-            <button type="button" onclick="location.reload()" class="secondary">Buat Proposal Baru</button>
+            <p class="sub">Dokumen berhasil disusun menggunakan format ringkas.</p>
+            <button type="button" onclick="location.reload()" class="secondary">Buat Baru</button>
         </div>
     </div>
 
     <script>
         const ui = {
             loader: document.getElementById('loader'),
-            loaderText: document.getElementById('loader-text'),
             configStep: document.getElementById('step-config'),
-            reviewStep: document.getElementById('step-review'),
             successStep: document.getElementById('step-success'),
-            
             selPerusahaan: document.getElementById('select-perusahaan'),
             selProposal: document.getElementById('select-proposal'),
             selProyek: document.getElementById('select-proyek'),
             inpKonteks: document.getElementById('input-konteks'),
             inpPermasalahan: document.getElementById('input-permasalahan'),
-            groupKebutuhan: document.getElementById('group-kebutuhan'),
             inpWaktu: document.getElementById('input-waktu'),
             inpBiaya: document.getElementById('input-biaya'),
+            groupKebutuhan: document.getElementById('group-kebutuhan'),
             groupFramework: document.getElementById('group-framework'),
-            cbFrameworkLainnya: document.getElementById('cb-framework-lainnya'),
-            inpFramework: document.getElementById('input-framework'),
-            
+            cbLainnya: document.getElementById('cb-lainnya'),
+            inpFrameworkLainnya: document.getElementById('input-framework-lainnya'),
             containerDynamic: document.getElementById('container-dynamic'),
-            reviewText: document.getElementById('review-text'),
-            
-            btnReview: document.getElementById('btn-review'),
             btnGenerate: document.getElementById('btn-generate'),
-            btnRefresh: document.getElementById('btn-refresh'),
-            btnBack: document.getElementById('btn-back'),
+            btnAnalyze: document.getElementById('btn-analyze'),
+            financeResult: document.getElementById('finance-result'),
+            financeSummary: document.getElementById('finance-summary'),
+            financeOptions: document.getElementById('finance-options'),
             spinner: document.getElementById('spinner')
         };
 
-        const populateSelect = (element, items, placeholder) => {
-            element.innerHTML = `<option value="" disabled selected>${placeholder}</option>`;
-            items.forEach(item => element.add(new Option(item, item)));
-        };
-
-        const getSelectedKebutuhan = () => {
-            const checked = Array.from(ui.groupKebutuhan.querySelectorAll('input:checked'));
-            return checked.map(cb => cb.value).join(', ');
-        };
-
-        // Combines all checked standard frameworks + custom text if "Lainnya" is checked
-        const getFinalFramework = () => {
-            const checkedBoxes = Array.from(ui.groupFramework.querySelectorAll('input:checked:not(#cb-framework-lainnya)'));
-            const frameworkNames = checkedBoxes.map(cb => cb.value);
-            
-            if (ui.cbFrameworkLainnya.checked && ui.inpFramework.value.trim()) {
-                frameworkNames.push(ui.inpFramework.value.trim());
-            }
-            return frameworkNames.join(', ');
-        };
-
-        async function initializeSystem() {
-            try {
-                const companiesRes = await fetch('/api/companies');
-                const companies = await companiesRes.json();
-                
-                populateSelect(ui.selPerusahaan, companies, "Pilih Perusahaan...");
-                
-                ui.loader.classList.add('hidden'); 
-                ui.configStep.classList.remove('hidden');
-            } catch (err) {
-                ui.loaderText.innerHTML = `<span class="error-text">Gagal memuat database server.</span>`;
-            }
-        }
-        
-        initializeSystem();
-
-        ui.btnRefresh.onclick = () => {
-            ui.btnRefresh.innerText = "Refreshing..."; ui.btnRefresh.disabled = true;
-            fetch('/refresh-knowledge', {method: 'POST'})
-                .then(response => response.json())
-                .then(res => { alert("Database Synced!"); location.reload(); })
-                .catch(err => { ui.btnRefresh.innerText = "🔄 Refresh Database"; ui.btnRefresh.disabled = false; });
-        };
-
-        ui.selPerusahaan.onchange = () => {
-            ui.containerDynamic.classList.remove('hidden');
-            checkReviewReady();
-        };
-
-        // Logic to toggle the custom input box for "Lainnya" checkbox
-        ui.cbFrameworkLainnya.addEventListener('change', () => {
-            if (ui.cbFrameworkLainnya.checked) {
-                ui.inpFramework.classList.remove('hidden');
+        // UI Logic for the "Lainnya" Checkbox
+        ui.cbLainnya.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                ui.inpFrameworkLainnya.classList.remove('hidden');
+                ui.inpFrameworkLainnya.focus();
             } else {
-                ui.inpFramework.classList.add('hidden');
-                ui.inpFramework.value = ''; // clear it
+                ui.inpFrameworkLainnya.classList.add('hidden');
+                ui.inpFrameworkLainnya.value = ''; 
             }
-            checkReviewReady();
+            checkReady();
         });
 
-        // Event listeners for groups
-        ui.groupKebutuhan.addEventListener('change', checkReviewReady);
-        ui.groupFramework.addEventListener('change', checkReviewReady);
+        // Helper to grab selected frameworks including the custom input
+        const getFinalFrameworks = () => {
+            const checked = Array.from(ui.groupFramework.querySelectorAll('input:checked:not(#cb-lainnya)'))
+                                 .map(cb => cb.value);
+            if (ui.cbLainnya.checked && ui.inpFrameworkLainnya.value.trim() !== '') {
+                checked.push(ui.inpFrameworkLainnya.value.trim());
+            }
+            return checked.join(', ');
+        };
 
-        // Attach listeners to Dropdowns & Inputs
-        [ui.selProposal, ui.selProyek, ui.inpKonteks, ui.inpPermasalahan, ui.inpBiaya, ui.inpWaktu, ui.inpFramework].forEach(el => {
-            el.addEventListener('input', checkReviewReady);
-        });
+        const getChecked = (container) => Array.from(container.querySelectorAll('input:checked')).map(cb => cb.value).join(', ');
 
-        function checkReviewReady() {
+        const checkReady = () => {
             const hasKebutuhan = ui.groupKebutuhan.querySelectorAll('input:checked').length > 0;
-            const hasFramework = getFinalFramework().length > 0;
+            const hasFramework = getFinalFrameworks().length > 0;
 
-            const isReady = ui.selPerusahaan.value && 
-                            ui.selProposal.value && 
-                            ui.selProyek.value &&
-                            ui.inpKonteks.value.trim() && 
-                            ui.inpPermasalahan.value.trim() && 
-                            ui.inpBiaya.value.trim() && 
-                            ui.inpWaktu.value.trim() &&
-                            hasKebutuhan &&
-                            hasFramework;
-            ui.btnReview.disabled = !isReady;
+            const isReady = ui.selPerusahaan.value && ui.selProposal.value && ui.selProyek.value &&
+                            ui.inpKonteks.value.trim() && ui.inpPermasalahan.value.trim() && 
+                            ui.inpBiaya.value.trim() && ui.inpWaktu.value.trim() &&
+                            hasKebutuhan && hasFramework;
+                            
+            ui.btnGenerate.disabled = !isReady;
+        };
+
+        async function init() {
+            try {
+                const res = await fetch('/api/companies');
+                const data = await res.json();
+                ui.selPerusahaan.innerHTML = `<option value="" disabled selected>Pilih Klien...</option>`;
+                data.forEach(d => ui.selPerusahaan.add(new Option(d, d)));
+                ui.loader.classList.add('hidden');
+                ui.configStep.classList.remove('hidden');
+            } catch (e) {
+                document.getElementById('loader-text').innerText = "Gagal memuat database.";
+            }
         }
+        init();
 
-        ui.btnReview.onclick = () => { 
-            ui.reviewText.innerHTML = `
-                <div class="review-row"><span>Perusahaan</span><span>${ui.selPerusahaan.value}</span></div>
-                <div class="review-row"><span>Jenis Proposal</span><span>${ui.selProposal.value}</span></div>
-                <div class="review-row"><span>Jenis Proyek</span><span>${ui.selProyek.value}</span></div>
-                <div class="review-row"><span>Konteks Organisasi</span><span>${ui.inpKonteks.value}</span></div>
-                <div class="review-row"><span>Permasalahan</span><span>${ui.inpPermasalahan.value}</span></div>
-                <div class="review-row"><span>Kebutuhan</span><span>${getSelectedKebutuhan()}</span></div>
-                <div class="review-row"><span>Estimasi Waktu</span><span>${ui.inpWaktu.value}</span></div>
-                <div class="review-row"><span>Estimasi Biaya</span><span>${ui.inpBiaya.value}</span></div>
-                <div class="review-row"><span>Framework</span><span>${getFinalFramework()}</span></div>
-            `;
-            ui.configStep.classList.add('hidden'); 
-            ui.reviewStep.classList.remove('hidden'); 
-        };
+        ui.selPerusahaan.addEventListener('change', () => {
+            ui.containerDynamic.classList.remove('hidden');
+            ui.financeResult.classList.add('hidden'); 
+            checkReady();
+        });
 
-        ui.btnBack.onclick = () => { 
-            ui.reviewStep.classList.add('hidden'); 
-            ui.configStep.classList.remove('hidden'); 
-        };
+        // Event Listeners for Validation
+        ['change', 'input'].forEach(evt => {
+            [ui.selProposal, ui.selProyek, ui.inpKonteks, ui.inpPermasalahan, ui.inpWaktu, ui.inpBiaya, ui.groupKebutuhan, ui.groupFramework, ui.inpFrameworkLainnya].forEach(el => {
+                if(el) el.addEventListener(evt, checkReady);
+            });
+        });
 
-        ui.btnGenerate.onclick = () => {
-            ui.btnGenerate.disabled = true; 
-            ui.spinner.classList.add('active');
+        // Smart Pricing Logic
+        ui.btnAnalyze.addEventListener('click', async () => {
+            const client = ui.selPerusahaan.value;
+            if(!client) return alert("Pilih klien terlebih dahulu.");
             
+            ui.btnAnalyze.innerText = "Menganalisis OSINT...";
+            ui.btnAnalyze.disabled = true;
+
+            try {
+                const res = await fetch('/api/suggest-budget', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ nama_perusahaan: client })
+                });
+                const data = await res.json();
+                
+                ui.financeSummary.innerText = data.analysis;
+                ui.financeOptions.innerHTML = data.options.map(opt => `
+                    <div class="finance-tier" onclick="document.getElementById('input-biaya').value='${opt.price}'; document.getElementById('input-biaya').dispatchEvent(new Event('input'));">
+                        <strong>${opt.tier}</strong>
+                        <span>${opt.price}</span>
+                    </div>
+                `).join('');
+                
+                ui.financeResult.classList.remove('hidden');
+            } catch (err) {
+                alert("Gagal menganalisa data finansial.");
+            } finally {
+                ui.btnAnalyze.innerText = "📊 Auto-Analisis Finansial & Opsi Harga";
+                ui.btnAnalyze.disabled = false;
+            }
+        });
+
+        ui.btnGenerate.addEventListener('click', async () => {
+            ui.btnGenerate.disabled = true;
+            ui.spinner.classList.add('active');
+
             const payload = {
                 nama_perusahaan: ui.selPerusahaan.value,
                 jenis_proposal: ui.selProposal.value,
                 jenis_proyek: ui.selProyek.value,
                 konteks_organisasi: ui.inpKonteks.value,
                 permasalahan: ui.inpPermasalahan.value,
-                klasifikasi_kebutuhan: getSelectedKebutuhan(), 
+                klasifikasi_kebutuhan: getChecked(ui.groupKebutuhan),
                 estimasi_waktu: ui.inpWaktu.value,
                 estimasi_biaya: ui.inpBiaya.value,
-                potensi_framework: getFinalFramework() 
+                potensi_framework: getFinalFrameworks()
             };
 
-            fetch('/generate', { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify(payload) 
-            })
-            .then(response => {
-                if (!response.ok) throw new Error("Document generation failed.");
-                return response.blob();
-            })
-            .then(blob => {
-                let url = window.URL.createObjectURL(blob);
-                let a = document.createElement('a'); 
-                a.href = url; 
-                a.download = `Proposal_${ui.selPerusahaan.value.replace(/\\s+/g, '_')}.docx`; 
+            try {
+                const res = await fetch('/generate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error();
+                
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Proposal_Ringkas_${payload.nama_perusahaan.replace(/\s+/g, '_')}.docx`;
                 a.click();
                 
-                window.URL.revokeObjectURL(url);
-                ui.reviewStep.classList.add('hidden'); 
+                ui.configStep.classList.add('hidden');
                 ui.successStep.classList.remove('hidden');
-            })
-            .catch(err => {
-                alert("Failed to generate document. Check server logs.");
+            } catch (e) {
+                alert("Gagal generate dokumen. Periksa console/log server.");
                 ui.btnGenerate.disabled = false;
                 ui.spinner.classList.remove('active');
-            });
-        };
+            }
+        });
     </script>
 </body>
 </html>

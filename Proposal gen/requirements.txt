@@ -5,3 +5,9 @@ pandas
 ollama
 gunicorn
 chromadb
+requests
+sqlalchemy
+beautifulsoup4
+markdown
+matplotlib
+pillow

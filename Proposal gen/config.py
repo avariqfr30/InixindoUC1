@@ -1,16 +1,17 @@
-# config.py
+"""
+Configuration and constants for the Proposal Generator Engine.
+"""
 import os
 
 # =====================================================================
-# SYSTEM MODE & API ADAPTER (HANDOVER SETTINGS)
+# SYSTEM MODE & API ADAPTER
 # =====================================================================
 DEMO_MODE = True 
 FIRM_API_URL = "https://api.perusahaan-anda.com/v1" 
-API_AUTH_TOKEN = "isi_token_disini_nanti"
+API_AUTH_TOKEN = "isi_token_disini_nanti" # <-- Paste real token here
 
 # --- CREDENTIALS & HOSTS ---
-GOOGLE_API_KEY = "API_KEY"
-GOOGLE_CX_ID = "CX_ID"
+SERPER_API_KEY = "YOUR_SERPER_API_KEY"    # <-- Paste real Serper key here
 OLLAMA_HOST = "http://127.0.0.1:11434"
 
 # --- MODELS & DB ---
@@ -29,7 +30,7 @@ DATA_MAPPING = {
 }
 
 # =====================================================================
-# KNOWLEDGE PATTERN LIBRARY (Intelligent Autocomplete di UI)
+# KNOWLEDGE PATTERN LIBRARY
 # =====================================================================
 SMART_SUGGESTIONS = {
     "banking": {
@@ -42,7 +43,7 @@ SMART_SUGGESTIONS = {
     },
     "healthcare": {
         "keywords": ["rumah sakit", "klinik", "bpjs", "kesehatan", "medis"],
-        "regulations": ["Permenkes No 24 Tahun 2022 (Rekam Medis Elektronik)", "HIPAA", "ISO 27001"]
+        "regulations": ["Permenkes No 24 Tahun 2022", "HIPAA", "ISO 27001"]
     },
     "general_it": {
         "keywords": ["infrastruktur", "cloud", "aplikasi", "software", "jaringan", "data center"],
@@ -51,148 +52,117 @@ SMART_SUGGESTIONS = {
 }
 
 # =====================================================================
-# MOCK API DATA (Internal Firm Database Simulation)
+# MOCK API DATA
 # =====================================================================
 MOCK_FIRM_PROFILE = {
-    "contact_info": "Kantor Pusat Inixindo Jogja\nJl. Kenari No. 69, Muja Muju, Kec. Umbulharjo, Kota Yogyakarta, DIY 55165\nEmail: info@inixindo.id\nTelp: (0274) 515448",
-    "portfolio_highlights": "Inixindo Jogja memiliki pengalaman dalam Transformasi TI, Konsultasi, dan Pelatihan Enterprise. Termasuk IT Master Plan, DevSecOps, dan ISO/POJK."
+    "contact_info": "Kantor Pusat Inixindo Jogja\nJl. Kenari No. 69, Yogyakarta\nEmail: info@inixindo.id\nTelp: (0274) 515448",
+    "portfolio_highlights": "Pengalaman di Transformasi TI, IT Master Plan, DevSecOps, dan ISO/POJK."
 }
 
 MOCK_FIRM_STANDARDS = {
     "Diagnostic": {
-        "methodology": "1. Discovery & Data Gathering\n2. As-Is Architecture Analysis\n3. Gap Analysis & Risk Assessment\n4. Diagnostic Report Generation.",
-        "team": "1x Principal Consultant, 2x Senior Business Analyst.",
-        "commercial": "Fixed-fee based on scope. 50% Upfront, 50% upon Diagnostic Report delivery."
+        "methodology": "1. Data Gathering\n2. As-Is Analysis\n3. Gap Analysis\n4. Diagnostic Report.",
+        "team": "1x Principal Consultant, 2x Senior BA.",
+        "commercial": "Fixed-fee. 50% Upfront, 50% on Report delivery."
     },
     "Strategic": {
-        "methodology": "1. Executive Alignment & Visioning\n2. To-Be Visioning & Target Operating Model\n3. Strategic Roadmap Development\n4. Board-Level Presentation.",
-        "team": "1x Project Director, 1x Enterprise Architect, 1x Financial Modeler.",
-        "commercial": "Retainer or Fixed-fee. Milestone payments tied to strategic sign-offs."
+        "methodology": "1. Visioning\n2. Target Operating Model\n3. Roadmap\n4. Board Presentation.",
+        "team": "1x Project Director, 1x Enterprise Architect.",
+        "commercial": "Retainer or Fixed-fee based on milestones."
     },
     "Transformation": {
-        "methodology": "1. Change Readiness Assessment\n2. Phased Rollout (Agile/Scrum)\n3. Organizational Change Management (OCM)\n4. Hypercare & Value Realization.",
-        "team": "1x Program Manager, 2x Change Management Experts, 3x Technical/Domain Leads.",
-        "commercial": "Time & Materials (T&M) or milestone-based over 12-18 months. Excludes software licensing."
+        "methodology": "1. Readiness Assessment\n2. Phased Rollout\n3. Change Management\n4. Hypercare.",
+        "team": "1x Program Manager, 2x Change Experts, 3x Tech Leads.",
+        "commercial": "Time & Materials (T&M) over 12-18 months."
     },
     "Implementation": {
-        "methodology": "1. Requirement Traceability\n2. System Design & Configuration\n3. UAT & Integration Testing\n4. Deployment & Go-Live\n5. Handover to BAU.",
-        "team": "1x Project Manager, 1x Lead Engineer, 3x System Implementers, 1x QA Specialist.",
-        "commercial": "Milestone-based (20% Kickoff, 40% UAT, 30% Go-Live, 10% Handover)."
+        "methodology": "1. Design\n2. Configuration\n3. UAT\n4. Go-Live\n5. Handover.",
+        "team": "1x PM, 1x Lead Engineer, 3x Implementers.",
+        "commercial": "Milestones: 20% Kickoff, 40% UAT, 30% Go-Live, 10% Handover."
     }
 }
 
 # =====================================================================
-# PROPOSAL STRUCTURE (TARGET: 20-25 PAGES TOTAL)
+# PROPOSAL STRUCTURE (CONCISE & DENSE TARGET)
 # =====================================================================
 UNIVERSAL_STRUCTURE = [
     {
         "id": "c_1", "title": "BAB I – KONTEKS ORGANISASI",
-        "subs": ["1.1 Latar Belakang Perusahaan", "1.2 Dinamika dan Visi Saat Ini"],
+        "subs": ["1.1 Latar Belakang Singkat", "1.2 Visi & Objektif"],
         "keywords": "context background vision strategy",
-        "length_intent": "Provide a thorough background using the OSINT data. Detail the market conditions and the macro-level vision. (Target: 500 words)."
+        "length_intent": "Target: 150 words. Write directly and concisely using bullet points. Focus purely on facts from OSINT."
     },
     {
         "id": "c_2", "title": "BAB II – PERMASALAHAN",
-        "subs": ["2.1 Tantangan Utama dan Root Cause Analysis", "2.2 Dampak Terhadap Bisnis dan Risiko Masa Depan"],
-        "keywords": "problem pain points bottleneck issue root cause",
-        "length_intent": "Perform a focused Root Cause Analysis (RCA). Theorize why it is happening structurally and quantify the business risks. (Target: 600 words)."
+        "subs": ["2.1 Tantangan Utama", "2.2 Dampak Bisnis"],
+        "keywords": "problem pain points bottleneck issue",
+        "length_intent": "Target: 200 words. Provide a direct, unpadded Root Cause Analysis. List impacts using bullet points."
     },
     {
-        "id": "c_3", "title": "BAB III – SOLUSI DAN PENDEKATAN",
-        "subs": ["3.1 Klasifikasi Kebutuhan Strategis", "3.2 Arsitektur Pendekatan Solusi"],
-        "keywords": "solution approach diagnostic strategic implementation architecture",
-        "length_intent": "Deliver a technical explanation of the proposed solution. Break down how the solution resolves the Root Causes. (Target: 600 words)."
+        "id": "c_3", "title": "BAB III – SOLUSI & PENDEKATAN",
+        "subs": ["3.1 Arsitektur Solusi", "3.2 Nilai Tambah"],
+        "keywords": "solution approach architecture",
+        "length_intent": "Target: 200 words. Explain technical implementation practically without academic theory."
     },
     {
-        "id": "c_4", "title": "BAB IV – POTENSI KERANGKA KERJA",
-        "subs": ["4.1 Pemetaan Framework Global", "4.2 Pemenuhan Kepatuhan dan Regulasi Nasional"],
-        "keywords": "framework iso cobit itil regulation compliance",
-        "length_intent": "Provide an authoritative breakdown of EVERY requested framework based on the OSINT data. Explain practical implementation. (Target: 500 words)."
+        "id": "c_4", "title": "BAB IV – KERANGKA KERJA & KEPATUHAN",
+        "subs": ["4.1 Framework Terpilih", "4.2 Pemenuhan Regulasi"],
+        "keywords": "framework iso cobit regulation compliance",
+        "length_intent": "Target: 150 words. State exactly how the framework maps to the client's needs."
     },
     {
-        "id": "c_5", "title": "BAB V – MANFAAT",
-        "subs": ["5.1 Efisiensi dan Optimalisasi Operasional", "5.2 ROI, Skalabilitas, dan Nilai Tambah Bisnis"],
-        "keywords": "benefit roi advantage growth efficiency scalability",
-        "length_intent": "Write a strong business case. Include hypothetical percentages and long-term strategic advantages. (Target: 400 words)."
-    },
-    {
-        "id": "c_6", "title": "BAB VI – METODOLOGI",
-        "subs": ["6.1 Rincian Pendekatan Pelaksanaan Berfase", "6.2 Manajemen Risiko dan Jaminan Kualitas"],
-        "keywords": "methodology quality assurance process framework risk mitigation",
-        "length_intent": "Explain the inputs, processes, and expected outputs of every phase. Detail how risks are mitigated. (Target: 600 words).",
-        "visual_intent": "flowchart"
-    },
-    {
-        "id": "c_7", "title": "BAB VII – TAHAPAN DAN WAKTU",
-        "subs": ["7.1 Penjabaran Jadwal Pelaksanaan", "7.2 Milestone Kritis dan Kriteria Penerimaan"],
-        "keywords": "timeline phase schedule milestone sprint",
-        "length_intent": "Provide a narrative describing what happens in the timeline phases. Define Acceptance Criteria. (Target: 400 words).",
+        "id": "c_5", "title": "BAB V – METODOLOGI & WAKTU",
+        "subs": ["5.1 Fase Pelaksanaan", "5.2 Jadwal Estimasi"],
+        "keywords": "methodology timeline schedule phase",
+        "length_intent": "Target: 200 words. Highly structured, step-by-step methodology breakdown. No filler.",
         "visual_intent": "gantt"
     },
     {
-        "id": "c_8", "title": "BAB VIII – TIM DAN KAPABILITAS",
-        "subs": ["8.1 Struktur Organisasi Tata Kelola Proyek", "8.2 Profil Peran dan Rekam Jejak Firm"],
-        "keywords": "team expert role structure director manager portfolio",
-        "length_intent": "Detail the governance structure. Firmly assert the firm's historical excellence using the dynamically provided API and OSINT data. (Target: 500 words)."
+        "id": "c_6", "title": "BAB VI – TIM & KAPABILITAS",
+        "subs": ["6.1 Struktur Tim", "6.2 Portofolio Firm"],
+        "keywords": "team expert role portfolio",
+        "length_intent": "Target: 150 words. Confident list of roles and past successes."
     },
     {
-        "id": "c_9", "title": "BAB IX – ESTIMASI BIAYA",
-        "subs": ["9.1 Rincian Investasi Komprehensif", "9.2 Ketentuan Komersial dan Asumsi Legal"],
-        "keywords": "budget cost commercial investment terms assumption legal",
-        "length_intent": "Provide a Markdown table for costs. Detail the assumptions, exclusions, and commercial terms. (Target: 400 words)."
-    },
-    {
-        "id": "c_10", "title": "BAB X – PENUTUP",
-        "subs": ["10.1 Kesimpulan Eksekutif", "10.2 Rencana Tindak Lanjut (Next Steps)"],
-        "keywords": "closing commitment next steps",
-        "length_intent": "Write a strong executive conclusion. End with a call to action and the exact firm contact details provided in the dynamic instructions. (Target: 200 words)."
+        "id": "c_7", "title": "BAB VII – ESTIMASI BIAYA & PENUTUP",
+        "subs": ["7.1 Investasi", "7.2 Kesimpulan & Langkah Lanjut"],
+        "keywords": "budget cost investment closing",
+        "length_intent": "Target: 200 words. Include a markdown table for pricing. Provide a decisive 2-sentence closing."
     }
 ]
 
 PERSONAS = {
+    "default": "Principal Management Consultant",
     "c_1": "Senior Business Analyst",
-    "c_2": "Principal Enterprise Architect",
     "c_3": "Chief Technology Officer",
-    "c_4": "Lead Compliance & Governance Auditor",
-    "c_5": "Chief Financial Officer",
-    "c_6": "Senior Delivery Director",
-    "c_7": "Master Project Manager",
-    "c_8": "Partner/Managing Director",
-    "c_9": "Commercial Lead",
-    "c_10": "Senior Account Executive",
-    "default": "Principal Management Consultant"
+    "c_7": "Commercial Director"
 }
 
 PROPOSAL_SYSTEM_PROMPT = """
-You are an elite Principal Consultant and Technical Writer at {writer_firm}.
-Your target audience is the Executive Board of {client}. Adopt this persona: {persona}.
+You are an elite Principal Consultant at {writer_firm}.
+Your audience is the Executive Board of {client}. Adopt this persona: {persona}.
 
---- EXTERNAL OSINT CONTEXT (CLIENT DATA) ---
-Global Client Data: {global_data}
-Latest Client News: {client_news}
-Regulatory/Framework Context: {regulation_data}
-Client Collaboration History: {collab_data}
-Historical Vector Data: {structured_row_data}
-Semantic DB Matches: {rag_data}
+--- STRICT WRITING RULES ---
+1. NO FLUFF: Write strictly "singkat, padat, tidak bertele-tele" (concise, dense, non-theoretical).
+2. FORMATTING: Maximize the use of bullet points and short paragraphs. Avoid dense blocks of text.
+3. TONE: Professional, objective, direct, and highly persuasive in Indonesian. Do not use academic filler.
+4. SYNTHESIS: Integrate OSINT data naturally as facts, do not mention "berdasarkan sumber online".
 
---- DYNAMIC INSTRUCTIONS (FROM UI INPUTS) ---
+--- CONTEXT DATA ---
+Global OSINT Data: {global_data}
+Client News: {client_news}
+Regulatory Data: {regulation_data}
+Historical Data: {structured_row_data}
+Semantic RAG: {rag_data}
+
+--- DYNAMIC INSTRUCTIONS ---
 {extra_instructions}
 
---- LENGTH DIRECTIVE ---
-You are writing a professional consulting proposal. Ensure high technical detail and deep analytical thought, but remain structured.
-Read the length intent carefully: {length_intent}
-
---- SYNTHESIS RULES ---
-1. RAW DATA HANDLING: The OSINT data is provided as raw Google snippets. DO NOT output fragmented sentences. Synthesize the facts smoothly.
-2. CONFIDENCE: Frame all capabilities with supreme confidence. 
-
 --- TASK ---
-Write "{chapter_title}".
-Include these sub-chapters exactly as H2 (##):
+Write "{chapter_title}" ensuring it meets the length intent: {length_intent}
+Include these H2 (##) exactly:
 {sub_chapters}
 
-Rules:
-- Tone MUST be professional, objective, academic, and highly persuasive in Indonesian.
-- {visual_prompt}
-- DO NOT write an introduction or greeting. Go straight into the content.
+{visual_prompt}
+DO NOT write greetings or introductions. Output strictly the chapter content.
 """
