@@ -1,15 +1,9 @@
 # config.py
 import os
 
-<<<<<<< HEAD
-# =====================================================================
-# SYSTEM MODE & API ADAPTER
-# =====================================================================
-=======
 
 # SYSTEM MODE & API ADAPTER (HANDOVER SETTINGS)
 
->>>>>>> parent of 142dbd2 (Update)
 DEMO_MODE = True 
 FIRM_API_URL = "https://api.perusahaan-anda.com/v1" 
 API_AUTH_TOKEN = "isi_token_disini_nanti"
@@ -33,15 +27,6 @@ DATA_MAPPING = {
     "budget": "Investment Estimation"
 }
 
-<<<<<<< HEAD
-# =====================================================================
-# MOCK API DATA (Internal Firm Database Simulation)
-# =====================================================================
-MOCK_FIRM_PROFILE = {
-    "contact_info": "Kantor Pusat Inixindo Jogja\nJl. Kenari No. 69, Muja Muju, Kec. Umbulharjo, Kota Yogyakarta, DIY 55165\nEmail: info@inixindo.id\nTelp: (0274) 515448",
-    "portfolio_highlights": "Inixindo Jogja memiliki pengalaman lebih dari 30 tahun dalam Transformasi TI, Audit, dan Pelatihan Enterprise."
-}
-=======
 
 # KNOWLEDGE PATTERN LIBRARY (Intelligent Autocomplete di UI)
 
@@ -66,7 +51,6 @@ SMART_SUGGESTIONS = {
 
 
 # MOCK API DATA (Internal Firm Standards)
->>>>>>> parent of 142dbd2 (Update)
 
 MOCK_FIRM_STANDARDS = {
     "Diagnostic": {"methodology": "1. Discovery\n2. As-Is Analysis\n3. Gap Analysis\n4. Report", "team": "1x Principal Consultant, 1x Business Analyst.", "commercial": "Fixed-fee based on scope."},
@@ -75,25 +59,9 @@ MOCK_FIRM_STANDARDS = {
     "Implementation": {"methodology": "1. Design\n2. UAT & Testing\n3. Deployment\n4. Go-Live", "team": "1x Project Manager, 1x Lead Engineer.", "commercial": "Milestone-based (20% Kickoff, 40% UAT, 30% Go-Live, 10% Handover)."}
 }
 
-<<<<<<< HEAD
-# =====================================================================
-# TONE OF VOICE MAPPING (Psychographic Targeting based on DM Age)
-# =====================================================================
-TONE_MAPPINGS = {
-    "Boomer (>60 Tahun)": "Sangat formal, penuh rasa hormat, berorientasi pada mitigasi risiko, keamanan, dan stabilitas jangka panjang. Hindari jargon teknis yang tidak perlu.",
-    "Gen X (45 - 60 Tahun)": "Profesional, terstruktur, berorientasi pada ROI yang jelas, efisiensi proses, dan kepatuhan (compliance).",
-    "Millennial (30 - 45 Tahun)": "Modern, langsung pada intinya (to the point), berorientasi pada skalabilitas, inovasi teknologi, dan kecepatan eksekusi.",
-    "Gen Z (<30 Tahun)": "Sangat tajam, ringkas, visioner, berorientasi pada disrupsi digital, UI/UX, dan fleksibilitas (Agile)."
-}
-
-# =====================================================================
-# PROPOSAL STRUCTURE (MAPPED STRICTLY TO INIXINDO FLOWCHART)
-# =====================================================================
-=======
 
 # PROPOSAL STRUCTURE (TARGET: 20-25 PAGES TOTAL)
 
->>>>>>> parent of 142dbd2 (Update)
 UNIVERSAL_STRUCTURE = [
     # --- PHASE 1: PEMAHAMAN DASAR ---
     {
@@ -157,18 +125,6 @@ UNIVERSAL_STRUCTURE = [
 
     # --- PHASE 4: KOMERSIAL ---
     {
-<<<<<<< HEAD
-        "id": "c_10", "title": "BAB X – MODEL PEMBIAYAAN",
-        "subs": ["10.1 Model Bisnis dan Opsi Biaya", "10.2 Tahapan Pembayaran dan Batasan Pekerjaan"],
-        "keywords": "budget cost commercial investment terms decoy pricing boundaries",
-        "length_intent": """CRITICAL INSTRUCTION - DECOY PRICING:
-Menjelaskan model bisnis proyek (biaya, tahapan pembayaran, batasan pekerjaan). 
-Create a Markdown table with EXACTLY 3 Tiers of pricing based on the Target Budget:
-1. Opsi Esensial: 20% lower than target budget. Minimum scope.
-2. Opsi Rekomendasi: Matches Target Budget exactly. Highest perceived value.
-3. Opsi Premium: 60% higher than target budget. Anchoring option with 24/7 VIP support.
-End this chapter with the official Firm Contact Info for next steps."""
-=======
         "id": "c_8", "title": "BAB VIII – TIM DAN KAPABILITAS",
         "subs": ["8.1 Struktur Organisasi Tata Kelola Proyek", "8.2 Profil Peran dan Rekam Jejak Firm"],
         "keywords": "team expert role structure director manager portfolio",
@@ -185,7 +141,6 @@ End this chapter with the official Firm Contact Info for next steps."""
         "subs": ["10.1 Kesimpulan Eksekutif", "10.2 Rencana Tindak Lanjut (Next Steps)"],
         "keywords": "closing commitment next steps",
         "length_intent": "Write a strong executive conclusion. End with a call to action and the firm's contact details sourced from OSINT. (Target: 200 words)."
->>>>>>> parent of 142dbd2 (Update)
     }
 ]
 
@@ -194,11 +149,6 @@ You are an elite Proposal Architect for {writer_firm}.
 Client: {client} | Industry: {industry} | Employees: {employee_count}
 Project Type: {project_status} - {project_type}
 
-<<<<<<< HEAD
---- PSYCHOGRAPHIC TONE ---
-The Decision Maker is in this age group: {dm_age}.
-Your writing style MUST strictly follow this tone: {tone_instruction}
-=======
 --- SYSTEM CONTEXT ---
 Global Client Data: {global_data}
 Latest Client News: {client_news}
@@ -208,7 +158,6 @@ Writer Firm Portfolio/Experience: {firm_exp_data}
 Writer Firm Collaboration with Client: {collab_data}
 Historical Vector Data: {structured_row_data}
 Semantic DB Matches: {rag_data}
->>>>>>> parent of 142dbd2 (Update)
 
 --- HIGH-IMPACT STRUCTURE RULE ---
 1. Be comprehensive but highly structured. Executives appreciate depth but hate unstructured text walls.
@@ -239,8 +188,6 @@ Timeline: {timeline} | Target Budget: {budget}
 Extra Notes: {notes}
 {extra_instructions}
 
-<<<<<<< HEAD
-=======
 --- LENGTH DIRECTIVE ---
 You are writing a professional consulting proposal. Ensure high technical detail and deep analytical thought, but remain structured.
 Read the length intent carefully: {length_intent}
@@ -250,7 +197,6 @@ Read the length intent carefully: {length_intent}
 2. CRITICAL: The OSINT data is provided as raw Google snippets containing fragmented sentences and ellipses (...). DO NOT output these fragments raw. You MUST synthesize these fragmented facts into smooth, professional, and highly confident sentences.
 3. If the OSINT data for the firm is sparse or unclear, confidently extrapolate using general enterprise best practices. NEVER state or admit that your firm lacks experience, lacks a public portfolio, or that information is unavailable. Frame all capabilities with supreme confidence.
 
->>>>>>> parent of 142dbd2 (Update)
 --- TASK ---
 Write "{chapter_title}".
 Include these sub-chapters exactly as H2 (##):

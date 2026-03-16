@@ -31,17 +31,10 @@ from ollama import Client
 from chromadb.utils import embedding_functions
 
 from config import (
-<<<<<<< HEAD
-    SERPER_API_KEY, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL, DB_URI,
-    WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE, TONE_MAPPINGS,
-    PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING, DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, 
-    MOCK_FIRM_STANDARDS, MOCK_FIRM_PROFILE
-=======
     GOOGLE_API_KEY, GOOGLE_CX_ID, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL, DB_URI,
     WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE, 
     PERSONAS, PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING, 
     DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, MOCK_FIRM_STANDARDS
->>>>>>> parent of 142dbd2 (Update)
 )
 
 logger = logging.getLogger(__name__)
@@ -68,22 +61,6 @@ class FirmAPIClient:
                 logger.error(f"Gagal terhubung ke API Internal: {e}")
                 return {"methodology": "TBD", "team": "TBD", "commercial": "TBD"}
 
-<<<<<<< HEAD
-    def get_firm_profile(self):
-        if self.demo_mode:
-            logger.info("[DEMO MODE] Mengambil Profil Firm dari Database Internal.")
-            return MOCK_FIRM_PROFILE
-        else:
-            try:
-                response = requests.get(f"{self.base_url}/firm-profile", headers=self.headers, timeout=5)
-                response.raise_for_status()
-                return response.json()
-            except Exception as e:
-                logger.error(f"Gagal mengambil Profil Firm dari API Internal: {e}")
-                return {"contact_info": "Kantor Pusat Terdaftar", "portfolio_highlights": "Penyedia Solusi IT Terkemuka"}
-
-=======
->>>>>>> parent of 142dbd2 (Update)
 # =====================================================================
 # KNOWLEDGE BASE & OSINT (RESEARCHER)
 # =====================================================================
@@ -171,12 +148,6 @@ class KnowledgeBase:
             if res['documents'] and len(res['documents'][0]) > 0: return "\n".join(res['documents'][0])
         except Exception: return ""
 
-<<<<<<< HEAD
-# =====================================================================
-# UNRESTRICTED GLOBAL OSINT RESEARCHER (Serper.dev)
-# =====================================================================
-=======
->>>>>>> parent of 142dbd2 (Update)
 class Researcher:
     @staticmethod
     def get_system_geolocation():
@@ -219,8 +190,6 @@ class Researcher:
 
     @staticmethod
     @lru_cache(maxsize=128)
-<<<<<<< HEAD
-=======
     def fetch_page_content(url):
         try:
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -254,7 +223,6 @@ class Researcher:
 
     @staticmethod
     @lru_cache(maxsize=128)
->>>>>>> parent of 142dbd2 (Update)
     def get_latest_client_news(client_name):
         res = Researcher.search(f'"{client_name}" inovasi OR teknologi', limit=5, up_to_the_second=True, use_news_endpoint=True)
         if not res or 'news' not in res: return "Tidak ada berita relevan terbaru."
@@ -606,14 +574,6 @@ class ProposalGenerator:
         self.io_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
         self.firm_api = FirmAPIClient()
 
-<<<<<<< HEAD
-    def run(self, client, industry, employee_count, dm_age, project_status, project_type, scope, outcome, regulations, timeline, budget, notes):
-        logger.info(f"Generating optimized proposal for: {client}")
-        
-        firm_data = self.firm_api.get_project_standards(project_type)
-        firm_profile = self.firm_api.get_firm_profile()
-        tone_instruction = TONE_MAPPINGS.get(dm_age, TONE_MAPPINGS["Gen X (45 - 60 Tahun)"])
-=======
     def _fetch_chapter_context(self, chap, client, project, budget, project_goal, project_type, timeline, notes, regulations, firm_data, research_futures):
         try:
             try: global_data = research_futures['profile'].result(timeout=5)
@@ -705,17 +665,11 @@ class ProposalGenerator:
         
         active_structure = UNIVERSAL_STRUCTURE
         firm_data = self.firm_api.get_project_standards(project_type)
->>>>>>> parent of 142dbd2 (Update)
         
         clean_regex = r'\b(Cabang|Branch|Region|Area|Tbk)\b.*$|^(PT\.|PT\s+|CV\.|CV\s+)'
         base_client = re.sub(clean_regex, '', client, flags=re.IGNORECASE).strip()
 
         research_futures = {
-<<<<<<< HEAD
-            'news': self.io_pool.submit(Researcher.get_latest_client_news, base_client)
-        }
-        logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client) 
-=======
             'profile': self.io_pool.submit(Researcher.get_entity_profile, base_client),
             'contact': self.io_pool.submit(Researcher.get_contact_details, WRITER_FIRM_NAME),
             'collab': self.io_pool.submit(Researcher.get_collaboration_data, base_client, base_firm),
@@ -730,7 +684,6 @@ class ProposalGenerator:
             context_futures[chap['id']] = self.io_pool.submit(
                 self._fetch_chapter_context, chap, client, project, budget, project_goal, project_type, timeline, notes, regulations, firm_data, research_futures
             )
->>>>>>> parent of 142dbd2 (Update)
 
         try: client_news = research_futures['news'].result(timeout=5)
         except Exception: client_news = "Tidak ada berita spesifik terbaru."
