@@ -39,13 +39,13 @@ from config import (
     GOOGLE_API_KEY, GOOGLE_CX_ID, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL, DB_URI,
     WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE, 
     PERSONAS, PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING, 
-    DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, MOCK_FIRM_STANDARDS
+    DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, MOCK_FIRM_STANDARDS, MOCK_FIRM_PROFILE
 )
 
 logger = logging.getLogger(__name__)
 
 # =====================================================================
-# FIRM API ADAPTER
+# FIRM API ADAPTER (Baseline Data)
 # =====================================================================
 class FirmAPIClient:
     def __init__(self):
@@ -66,8 +66,21 @@ class FirmAPIClient:
                 logger.error(f"Gagal terhubung ke API Internal: {e}")
                 return {"methodology": "TBD", "team": "TBD", "commercial": "TBD"}
 
+    def get_firm_profile(self):
+        if self.demo_mode:
+            logger.info("[DEMO MODE] Mengambil Profil Firm dari Database Internal (Mock).")
+            return MOCK_FIRM_PROFILE
+        else:
+            try:
+                response = requests.get(f"{self.base_url}/firm-profile", headers=self.headers, timeout=5)
+                response.raise_for_status()
+                return response.json()
+            except Exception as e:
+                logger.error(f"Gagal mengambil Profil Firm dari API Internal: {e}")
+                return {"contact_info": "Kantor Pusat Terdaftar", "portfolio_highlights": "Penyedia Solusi IT Terkemuka"}
+
 # =====================================================================
-# KNOWLEDGE BASE & OSINT (RESEARCHER)
+# KNOWLEDGE BASE & VECTOR DB
 # =====================================================================
 class KnowledgeBase:
     def __init__(self, db_uri):
@@ -92,7 +105,6 @@ class KnowledgeBase:
                 rename_dict = {v: k for k, v in DATA_MAPPING.items()}
                 raw_df.rename(columns=rename_dict, inplace=True)
                 
-                # Currencies must be in Indonesian Rupiah
                 def format_rupiah_range(val):
                     try:
                         clean_str = re.sub(r'[^\d]', '', str(val))
@@ -152,6 +164,9 @@ class KnowledgeBase:
             if res['documents'] and len(res['documents'][0]) > 0: return "\n".join(res['documents'][0])
         except Exception: return ""
 
+# =====================================================================
+# OSINT RESEARCHER (Dynamic Client & Firm Data)
+# =====================================================================
 class Researcher:
     @staticmethod
     @lru_cache(maxsize=256)
@@ -189,7 +204,14 @@ class Researcher:
     def get_contact_details(entity_name):
         query = f'"{entity_name}" "alamat kantor" OR "telepon kantor" OR "hubungi kami" indonesia -linkedin -direktur -ceo -manager -loker -lowongan'
         res = Researcher.search(query, limit=5)
-        if not res or 'items' not in res: return f"Kantor Pusat {entity_name}, Indonesia."
+        if not res or 'items' not in res: return ""
+        return "\n".join([i.get('snippet', '') for i in res['items']])
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def get_firm_experience(firm_name, project_topic):
+        res = Researcher.search(f'"{firm_name}" "portofolio" OR "klien kami" OR "berpengalaman" -loker -lowongan', limit=5)
+        if not res or 'items' not in res: return ""
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
     @staticmethod
@@ -212,13 +234,6 @@ class Researcher:
         if not regulation_name: return "Tidak ada regulasi spesifik."
         res = Researcher.search(f'Ringkasan kepatuhan mandat {regulation_name}', limit=3)
         if not res or 'items' not in res: return f"Merujuk pada standar umum {regulation_name}."
-        return "\n".join([i.get('snippet', '') for i in res['items']])
-
-    @staticmethod
-    @lru_cache(maxsize=128)
-    def get_firm_experience(firm_name, project_topic):
-        res = Researcher.search(f'"{firm_name}" "portofolio" OR "klien kami" OR "berpengalaman" -loker -lowongan', limit=5)
-        if not res or 'items' not in res: return f"{firm_name} adalah penyedia solusi IT terkemuka dengan rekam jejak panjang di sektor enterprise Indonesia."
         return "\n".join([i.get('snippet', '') for i in res['items']])
 
 class LogoManager:
@@ -536,7 +551,7 @@ class ProposalGenerator:
         self.io_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
         self.firm_api = FirmAPIClient()
 
-    def _fetch_chapter_context(self, chap, client, project, budget, project_goal, project_type, timeline, notes, regulations, firm_data, research_futures):
+    def _fetch_chapter_context(self, chap, client, project, budget, project_goal, project_type, timeline, notes, regulations, firm_data, firm_profile, research_futures):
         try:
             try: global_data = research_futures['profile'].result(timeout=5)
             except Exception: global_data = ""
@@ -547,14 +562,15 @@ class ProposalGenerator:
             try: regulation_data = research_futures['regulations'].result(timeout=5)
             except Exception: regulation_data = "Standar umum."
             
-            try: writer_data = research_futures['contact'].result(timeout=5)
-            except Exception: writer_data = "Unavailable"
-            
             try: collab_data = research_futures['collab'].result(timeout=5)
             except Exception: collab_data = "Unavailable"
-            
-            try: firm_exp_data = research_futures['firm_exp'].result(timeout=5)
-            except Exception: firm_exp_data = "Unavailable"
+
+            # Dynamic OSINT for the firm (Generated but only selectively applied)
+            try: firm_osint_contact = research_futures['firm_contact'].result(timeout=5)
+            except Exception: firm_osint_contact = "Unavailable"
+
+            try: firm_osint_exp = research_futures['firm_exp'].result(timeout=5)
+            except Exception: firm_osint_exp = "Unavailable"
 
             structured_row_data = self.kb.get_exact_context(client, project, budget)
             rag_data = self.kb.query(client, project, chap['keywords'])
@@ -571,6 +587,9 @@ class ProposalGenerator:
                 elif chap['visual_intent'] == "gantt": visual_prompt = f"Mandatory Timeline Visual: [[GANTT: Jadwal Implementasi | Waktu | Task 1,0,2; Task 2,2,4]]. Align with timeline: {timeline}."
                 elif chap['visual_intent'] == "flowchart": visual_prompt = "Process visual: [[FLOW: Step 1 -> Step 2 -> Step 3]]."
 
+            # ==========================================================
+            # DYNAMIC INJECTION: Stopping "Prompt Bleed"
+            # ==========================================================
             extra = ""
             if chap['id'] == 'c_1':
                 extra = f"[MANDATORY] Base the organizational context HEAVILY on this explicit client context provided by the user: '{project}'. Integrate global profile data: {global_data}"
@@ -585,11 +604,13 @@ class ProposalGenerator:
             elif chap['id'] == 'c_7':
                 extra = f"[MANDATORY] The total estimated timeline for this project is '{timeline}'. Detail the phases to logically fit within this duration."
             elif chap['id'] == 'c_8':
-                extra = f"[MANDATORY] You MUST use this exact Team Structure required for {project_type}: {firm_data['team']}. Expand heavily on each role."
+                extra = f"[MANDATORY] You MUST use this exact Team Structure required for {project_type}: {firm_data['team']}. Expand heavily on each role.\n"
+                extra += f"[MANDATORY FIRM DATA] Assert the firm's historical excellence using this data. Merge API and OSINT data smoothly:\n- API Portfolio: {firm_profile.get('portfolio_highlights')}\n- OSINT Mentions: {firm_osint_exp}"
             elif chap['id'] == 'c_9':
                 extra = f"[MANDATORY] The estimated budget/cost provided by the user is: '{budget}'. You MUST strictly state these exact Commercial Rules: {firm_data['commercial']}. Create a highly detailed pricing breakdown table."
             elif chap['id'] == 'c_10':
-                extra = f"[MANDATORY] Create a structured closing."
+                extra = f"[MANDATORY] Create a structured closing.\n"
+                extra += f"[MANDATORY FIRM DATA] End with a call to action using these exact contact details. Prioritize API Contact:\n- API Contact: {firm_profile.get('contact_info')}\n- OSINT Contact: {firm_osint_contact}"
 
             prompt = PROPOSAL_SYSTEM_PROMPT.format(
                 client=client, 
@@ -598,17 +619,8 @@ class ProposalGenerator:
                 global_data=global_data, 
                 client_news=client_news, 
                 regulation_data=regulation_data,
-                writer_data=writer_data,
-                firm_exp_data=firm_exp_data,
                 collab_data=collab_data,
                 structured_row_data=structured_row_data,
-                project_goal=project_goal, 
-                project_type=project_type, 
-                timeline=timeline, 
-                discovery_notes=discovery_notes,
-                firm_methodology=firm_data['methodology'], 
-                firm_team=firm_data['team'], 
-                firm_commercial=firm_data['commercial'],
                 rag_data=rag_data, 
                 visual_prompt=visual_prompt, 
                 extra_instructions=extra,
@@ -626,26 +638,30 @@ class ProposalGenerator:
         logger.info(f"Starting Generation: {client} | Mode Demo: {DEMO_MODE}")
         
         active_structure = UNIVERSAL_STRUCTURE
+        
+        # Pull Baseline Firm Data from API
         firm_data = self.firm_api.get_project_standards(project_type)
+        firm_profile = self.firm_api.get_firm_profile()
         
         clean_regex = r'\b(Cabang|Branch|Region|Area|Tbk)\b.*$|^(PT\.|PT\s+|CV\.|CV\s+)'
         base_client = re.sub(clean_regex, '', client, flags=re.IGNORECASE).strip()
         base_firm = re.sub(clean_regex, '', WRITER_FIRM_NAME, flags=re.IGNORECASE).strip()
 
+        # Execute OSINT for BOTH Client and Firm (Parallel)
         research_futures = {
             'profile': self.io_pool.submit(Researcher.get_entity_profile, base_client),
-            'contact': self.io_pool.submit(Researcher.get_contact_details, WRITER_FIRM_NAME),
             'collab': self.io_pool.submit(Researcher.get_collaboration_data, base_client, base_firm),
-            'firm_exp': self.io_pool.submit(Researcher.get_firm_experience, base_firm, project),
             'news': self.io_pool.submit(Researcher.get_latest_client_news, base_client), 
-            'regulations': self.io_pool.submit(Researcher.get_regulatory_data, regulations)
+            'regulations': self.io_pool.submit(Researcher.get_regulatory_data, regulations),
+            'firm_contact': self.io_pool.submit(Researcher.get_contact_details, WRITER_FIRM_NAME),
+            'firm_exp': self.io_pool.submit(Researcher.get_firm_experience, base_firm, project)
         }
         logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client) 
         
         context_futures = {}
         for chap in active_structure:
             context_futures[chap['id']] = self.io_pool.submit(
-                self._fetch_chapter_context, chap, client, project, budget, project_goal, project_type, timeline, notes, regulations, firm_data, research_futures
+                self._fetch_chapter_context, chap, client, project, budget, project_goal, project_type, timeline, notes, regulations, firm_data, firm_profile, research_futures
             )
 
         try: logo_stream, theme_color = logo_future.result(timeout=8)
