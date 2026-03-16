@@ -20,13 +20,11 @@
         button.secondary { background: white; color: #475569; border: 1px solid #cbd5e1; }
         button.secondary:hover { background: #f8fafc; }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
         .section-title { font-size: 1.1rem; font-weight: 700; color: #0f172a; margin: 25px 0 15px 0; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; }
         .checkbox-group { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
         .checkbox-group label { display: flex; align-items: center; font-weight: normal; margin: 0; font-size: 0.95rem; cursor: pointer; }
         .checkbox-group input[type="checkbox"] { width: auto; margin-right: 8px; margin-bottom: 0; transform: scale(1.1); cursor: pointer; }
         
-        /* New Summary Box Styles */
         .summary-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 20px; font-size: 0.95rem; }
         .summary-row { display: flex; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #cbd5e1; }
         .summary-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
@@ -47,52 +45,20 @@
 
         <div id="step-config" class="hidden">
             <h2>Parameter Proposal</h2>
-            <p class="sub">Requirement & Discovery Layer (Standar Inixindo)</p>
+            <p class="sub">Requirement & Discovery Layer</p>
             
             <div class="section-title">Konteks Klien</div>
             <label for="select-perusahaan">Nama Perusahaan Klien</label>
             <select id="select-perusahaan"></select>
             
             <div id="container-dynamic" class="hidden">
-                <div class="grid-3">
-                    <div>
-                        <label for="select-industri">Sektor Industri</label>
-                        <select id="select-industri">
-                            <option value="Perbankan & Keuangan">Perbankan & Keuangan</option>
-                            <option value="Pemerintahan / BUMN">Pemerintahan / BUMN</option>
-                            <option value="Kesehatan / Rumah Sakit">Kesehatan / Rumah Sakit</option>
-                            <option value="Teknologi / Telekomunikasi">Teknologi / Telekomunikasi</option>
-                            <option value="Manufaktur & Retail">Manufaktur & Retail</option>
-                            <option value="Lainnya">Lainnya</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label for="select-karyawan">Jumlah Karyawan</label>
-                        <select id="select-karyawan">
-                            <option value="< 50 (Small)">< 50 (Small)</option>
-                            <option value="50 - 200 (Medium)">50 - 200 (Medium)</option>
-                            <option value="201 - 1000 (Enterprise)">201 - 1000 (Enterprise)</option>
-                            <option value="> 1000 (Large Enterprise)">> 1000 (Large Enterprise)</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label for="select-usia">Generasi Decision Maker</label>
-                        <select id="select-usia">
-                            <option value="Boomer (>60 Tahun)">Boomer (>60 Tahun)</option>
-                            <option value="Gen X (45 - 60 Tahun)" selected>Gen X (45 - 60 Tahun)</option>
-                            <option value="Millennial (30 - 45 Tahun)">Millennial (30 - 45 Tahun)</option>
-                            <option value="Gen Z (<30 Tahun)">Gen Z (<30 Tahun)</option>
-                        </select>
-                    </div>
-                </div>
-
                 <div class="section-title">Ruang Lingkup & Tujuan</div>
                 <div class="grid-2">
                     <div>
                         <label for="select-status-proyek">Status Inisiatif</label>
                         <select id="select-status-proyek">
-                            <option value="Proyek Baru (Implementasi dari awal)">Proyek Baru (Implementasi dari awal)</option>
-                            <option value="Proyek Lanjutan (Enhancement/Optimasi)">Proyek Lanjutan (Enhancement/Optimasi)</option>
+                            <option value="Proyek Baru">Proyek Baru</option>
+                            <option value="Proyek Lanjutan">Proyek Lanjutan (Enhancement)</option>
                         </select>
                     </div>
                     <div>
@@ -109,20 +75,19 @@
                 <label for="input-ruang-lingkup">Ruang Lingkup Pekerjaan (Scope)</label>
                 <textarea id="input-ruang-lingkup" placeholder="Detailkan modul, area kerja, atau batas pekerjaan..."></textarea>
 
-                <label for="input-outcome">Output / Outcome (Goals)</label>
-                <textarea id="input-outcome" placeholder="Apa dampak nyata atau target yang ingin dicapai klien? (Contoh: Menurunkan downtime 20%)"></textarea>
+                <label for="input-outcome">Output / Target Pencapaian</label>
+                <textarea id="input-outcome" placeholder="Apa dampak nyata atau target yang ingin dicapai klien?"></textarea>
 
                 <div class="section-title">Regulasi & Komersial</div>
-                <label>Regulasi / Kebijakan IT Terkait</label>
+                <label>Framework / Regulasi IT Terkait</label>
                 <div class="checkbox-group" id="group-framework">
                     <label><input type="checkbox" value="ISO 27001"> ISO 27001</label>
                     <label><input type="checkbox" value="ITIL v4"> ITIL v4</label>
                     <label><input type="checkbox" value="COBIT 2019"> COBIT</label>
                     <label><input type="checkbox" value="POJK Terkait"> POJK</label>
-                    <label><input type="checkbox" value="SPBE / UU PDP"> SPBE / UU PDP</label>
                     <label><input type="checkbox" value="Lainnya" id="cb-framework-lainnya"> Lainnya...</label>
                 </div>
-                <input type="text" id="input-framework" class="hidden" placeholder="Masukkan Regulasi Custom..." />
+                <input type="text" id="input-framework" class="hidden" placeholder="Masukkan Regulasi Spesifik..." />
 
                 <div class="grid-2">
                     <div>
@@ -131,16 +96,17 @@
                     </div>
                     <div>
                         <label for="input-biaya">Target Budget (Rekomendasi)</label>
-                        <input type="text" id="input-biaya" placeholder="Cth: Rp. 500.000.000" />
+                        <input type="text" id="input-biaya" placeholder="Cth: Rp. 500.000.000" style="margin-bottom: 2px;" />
+                        <div id="budget-suggestion" style="font-size: 0.8rem; color: #2563eb; font-weight: 600; min-height: 20px;"></div>
                     </div>
                 </div>
 
-                <label for="input-catatan">Catatan Tambahan / Data Riset (Opsional)</label>
-                <textarea id="input-catatan" placeholder="Catatan meeting, preferensi klien, referensi spesifik..."></textarea>
+                <label for="input-catatan">Catatan Tambahan (Opsional)</label>
+                <textarea id="input-catatan" placeholder="Catatan meeting, referensi spesifik..."></textarea>
             </div>
             
             <button type="button" id="btn-review" disabled>Review Parameter Proposal</button>
-            <button type="button" id="btn-refresh" class="secondary" style="font-size:0.85rem; padding:8px;">🔄 Sinkronisasi Database Klien</button>
+            <button type="button" id="btn-refresh" class="secondary" style="font-size:0.85rem; padding:8px;">🔄 Sinkronisasi Database</button>
         </div>
 
         <div id="step-summary" class="hidden">
@@ -149,8 +115,6 @@
             
             <div class="summary-box">
                 <div class="summary-row"><div class="summary-label">Perusahaan</div><div class="summary-value" id="sum-perusahaan"></div></div>
-                <div class="summary-row"><div class="summary-label">Sektor Industri</div><div class="summary-value" id="sum-industri"></div></div>
-                <div class="summary-row"><div class="summary-label">Karyawan / DM</div><div class="summary-value" id="sum-demografi"></div></div>
                 <div class="summary-row"><div class="summary-label">Jenis Proyek</div><div class="summary-value" id="sum-proyek"></div></div>
                 <div class="summary-row"><div class="summary-label">Target Budget</div><div class="summary-value" id="sum-budget" style="color: #16a34a; font-weight: bold;"></div></div>
                 <div class="summary-row"><div class="summary-label">Estimasi Waktu</div><div class="summary-value" id="sum-waktu"></div></div>
@@ -167,7 +131,7 @@
         <div id="step-success" class="hidden" style="text-align:center; padding: 20px;">
             <div style="font-size: 60px; margin-bottom: 20px;">✅</div>
             <h2>Dokumen Siap!</h2>
-            <p class="sub">Proposal telah dioptimasi dengan format standar Inixindo.</p>
+            <p class="sub">Proposal telah berhasil dibuat.</p>
             <button type="button" onclick="location.reload()" class="secondary">Buat Proposal Baru</button>
         </div>
     </div>
@@ -181,11 +145,7 @@
             successStep: document.getElementById('step-success'),
             containerDynamic: document.getElementById('container-dynamic'),
             
-            // Inputs
             selPerusahaan: document.getElementById('select-perusahaan'),
-            selIndustri: document.getElementById('select-industri'),
-            selKaryawan: document.getElementById('select-karyawan'),
-            selUsia: document.getElementById('select-usia'),
             selStatusProyek: document.getElementById('select-status-proyek'),
             selProyek: document.getElementById('select-proyek'),
             inpRuangLingkup: document.getElementById('input-ruang-lingkup'),
@@ -197,17 +157,15 @@
             inpBiaya: document.getElementById('input-biaya'),
             inpCatatan: document.getElementById('input-catatan'),
             
-            // Summary Fields
+            suggestionBox: document.getElementById('budget-suggestion'),
+
             sumPerusahaan: document.getElementById('sum-perusahaan'),
-            sumIndustri: document.getElementById('sum-industri'),
-            sumDemografi: document.getElementById('sum-demografi'),
             sumProyek: document.getElementById('sum-proyek'),
             sumBudget: document.getElementById('sum-budget'),
             sumWaktu: document.getElementById('sum-waktu'),
             sumFramework: document.getElementById('sum-framework'),
             sumScope: document.getElementById('sum-scope'),
 
-            // Buttons
             btnReview: document.getElementById('btn-review'),
             btnBack: document.getElementById('btn-back'),
             btnConfirm: document.getElementById('btn-confirm'),
@@ -250,6 +208,22 @@
         ui.selPerusahaan.onchange = () => {
             ui.containerDynamic.classList.remove('hidden');
             checkReady();
+            
+            // Trigger API to suggest realistic budget based on financial OSINT
+            ui.suggestionBox.innerHTML = '💡 <i>Mengumpulkan data OSINT finansial...</i>';
+            
+            fetch('/api/suggest-budget', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ nama_perusahaan: ui.selPerusahaan.value })
+            })
+            .then(res => res.json())
+            .then(data => {
+                ui.suggestionBox.innerHTML = '💡 ' + data.suggestion;
+            })
+            .catch(() => {
+                ui.suggestionBox.innerHTML = '';
+            });
         };
 
         ui.cbFrameworkLainnya.addEventListener('change', () => {
@@ -265,33 +239,25 @@
             ui.btnReview.disabled = !isReady;
         }
 
-        // STEP 1 to STEP 2: Show Summary
         ui.btnReview.onclick = () => {
-            // Populate summary values
             ui.sumPerusahaan.innerText = ui.selPerusahaan.value;
-            ui.sumIndustri.innerText = ui.selIndustri.value;
-            ui.sumDemografi.innerText = `${ui.selKaryawan.value} | ${ui.selUsia.value}`;
             ui.sumProyek.innerText = `${ui.selStatusProyek.value} - ${ui.selProyek.value}`;
             ui.sumBudget.innerText = ui.inpBiaya.value;
             ui.sumWaktu.innerText = ui.inpWaktu.value;
             ui.sumFramework.innerText = getFinalFramework() || "Tidak ada framework khusus";
             
-            // Truncate scope for display so it doesn't take up the whole screen
             const scopeText = ui.inpRuangLingkup.value;
             ui.sumScope.innerText = scopeText.length > 100 ? scopeText.substring(0, 100) + "..." : scopeText;
 
-            // Switch views
             ui.configStep.classList.add('hidden');
             ui.summaryStep.classList.remove('hidden');
         };
 
-        // STEP 2 to STEP 1: Go Back
         ui.btnBack.onclick = () => {
             ui.summaryStep.classList.add('hidden');
             ui.configStep.classList.remove('hidden');
         };
 
-        // STEP 2 to STEP 3: Confirm and Generate
         ui.btnConfirm.onclick = () => {
             ui.btnConfirm.disabled = true; 
             ui.btnBack.disabled = true;
@@ -299,9 +265,6 @@
             
             const payload = {
                 nama_perusahaan: ui.selPerusahaan.value,
-                sektor_industri: ui.selIndustri.value,
-                jumlah_karyawan: ui.selKaryawan.value,
-                usia_pimpinan: ui.selUsia.value,
                 status_proyek: ui.selStatusProyek.value,
                 jenis_proyek: ui.selProyek.value,
                 ruang_lingkup: ui.inpRuangLingkup.value,
