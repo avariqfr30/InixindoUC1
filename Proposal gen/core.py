@@ -22,7 +22,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import textwrap
-from PIL import Image, ImageStat
+from PIL import Image, ImageDraw, ImageFont, ImageStat
 from difflib import SequenceMatcher
 
 from sqlalchemy import create_engine
@@ -30,6 +30,7 @@ import markdown
 from bs4 import BeautifulSoup
 
 from docx import Document
+from docx.image.exceptions import UnrecognizedImageError
 from docx.shared import Pt, RGBColor, Inches, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
@@ -250,9 +251,31 @@ class FinancialAnalyzer:
 
 class LogoManager:
     @staticmethod
+    def _create_fallback_logo(client_name: str) -> io.BytesIO:
+        initials = "".join([w[0] for w in re.findall(r"[A-Za-z0-9]+", client_name)[:3]]).upper() or "CL"
+        canvas = Image.new('RGB', (320, 320), color=(236, 242, 255))
+        draw = ImageDraw.Draw(canvas)
+        draw.rounded_rectangle((16, 16, 304, 304), radius=36, outline=(37, 99, 235), width=8)
+        try:
+            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 110)
+        except Exception:
+            font = ImageFont.load_default()
+        try:
+            bbox = draw.textbbox((0, 0), initials, font=font)
+            w = bbox[2] - bbox[0]
+            h = bbox[3] - bbox[1]
+        except Exception:
+            w, h = draw.textsize(initials, font=font)
+        draw.text(((320 - w) / 2, (320 - h) / 2 - 6), initials, fill=(15, 23, 42), font=font)
+        out = io.BytesIO()
+        canvas.save(out, format='PNG')
+        out.seek(0)
+        return out
+
+    @staticmethod
     def get_logo_and_color(client_name: str) -> Tuple[Optional[io.BytesIO], Tuple[int, int, int]]:
         if "YOUR_SERPER" in SERPER_API_KEY:
-            return None, DEFAULT_COLOR
+            return LogoManager._create_fallback_logo(client_name), DEFAULT_COLOR
         try:
             url = "https://google.serper.dev/images"
             payload = json.dumps({"q": f"{client_name} corporate logo png transparent", "num": 3})
@@ -265,22 +288,34 @@ class LogoManager:
                         img_resp = requests.get(item['imageUrl'], headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
                         if img_resp.status_code == 200:
                             stream = io.BytesIO(img_resp.content)
-                            img = Image.open(stream).convert('RGB')
+                            img = Image.open(stream)
+                            
+                            # Ensure DOCX-compatible format by converting any source format (e.g. WEBP/SVG fallback) to PNG.
+                            if img.mode in ("RGBA", "LA", "P"):
+                                normalized = Image.new("RGBA", img.size, (255, 255, 255, 0))
+                                normalized.paste(img, (0, 0), img if img.mode in ("RGBA", "LA") else None)
+                                img = normalized.convert('RGB')
+                            else:
+                                img = img.convert('RGB')
+
                             img.thumbnail((150, 150))
                             dom_color = list(map(int, ImageStat.Stat(img).mean[:3]))
-                            
+
                             luminance = 0.299 * dom_color[0] + 0.587 * dom_color[1] + 0.114 * dom_color[2]
-                            if luminance > 120:  
+                            if luminance > 120:
                                 factor = 120 / luminance
                                 dom_color = [max(0, min(255, int(c * factor))) for c in dom_color]
-                                
-                            stream.seek(0)
-                            return stream, tuple(dom_color)
+
+                            # Return normalized PNG bytes instead of original content to avoid UnrecognizedImageError.
+                            png_stream = io.BytesIO()
+                            img.save(png_stream, format='PNG')
+                            png_stream.seek(0)
+                            return png_stream, tuple(dom_color)
                     except Exception:
                         continue
         except Exception as e:
             logger.warning(f"Logo Retrieval Error: {e}")
-        return None, DEFAULT_COLOR
+        return LogoManager._create_fallback_logo(client_name), DEFAULT_COLOR
 
 
 # =====================================================================
@@ -424,6 +459,19 @@ class ProposalGenerator:
         self.io_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
         self.firm_api = FirmAPIClient()
 
+    @staticmethod
+    def _target_words(chap: Dict[str, Any]) -> int:
+        m = re.search(r'Target:\s*(\d+)\s*words', chap.get('length_intent', ''), re.IGNORECASE)
+        return int(m.group(1)) if m else 700
+
+    @staticmethod
+    def _max_words(chap: Dict[str, Any]) -> int:
+        return int(ProposalGenerator._target_words(chap) * 1.3)
+
+    @staticmethod
+    def _word_count(text: str) -> int:
+        return len(re.findall(r'\b\w+\b', text))
+
     def _fetch_chapter_context(self, chap, client, project, budget, service_type, project_goal, project_type, timeline, notes, regulations, firm_data, research_futures) -> Dict[str, Any]:
         try:
             global_data = research_futures['profile'].result(timeout=5)
@@ -447,7 +495,7 @@ class ProposalGenerator:
             # ==========================================================
             extra = (
                 "[GLOBAL] Proposal ini wajib mempertahankan kedalaman konten tingkat eksekutif dan total dokumen target 20-25 halaman. "
-                "Setiap bab harus memiliki konteks spesifik klien, poin yang dapat ditindaklanjuti, dan tidak generik."
+                "Setiap bab harus memiliki konteks spesifik klien, poin yang dapat ditindaklanjuti, dan tidak generik. Gunakan kombinasi numbering dan bullet yang rapi di setiap H2, namun tetap padat dan tidak banyak whitespace."
             )
             if chap['id'] == 'c_1':
                 extra += f" [CRITICAL] Fokus pada latar belakang organisasi '{client}' dan tujuan proyek: '{project}'. Soroti driver bisnis utama: [{project_goal}]."
@@ -522,9 +570,13 @@ class ProposalGenerator:
             doc.add_paragraph()
 
         if logo_stream:
-            cover_logo = doc.add_paragraph()
-            cover_logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            cover_logo.add_run().add_picture(logo_stream, width=Inches(1.8))
+            try:
+                logo_stream.seek(0)
+                cover_logo = doc.add_paragraph()
+                cover_logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                cover_logo.add_run().add_picture(logo_stream, width=Inches(1.8))
+            except (UnrecognizedImageError, OSError, ValueError) as e:
+                logger.warning(f"Logo skipped due to unsupported image format: {e}")
 
         title = doc.add_paragraph("ARSITEKTUR PROPOSAL")
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -562,16 +614,47 @@ class ProposalGenerator:
             if ctx['success']:
                 try:
                     res = self.ollama.chat(
-                        model=LLM_MODEL, 
+                        model=LLM_MODEL,
                         messages=[
-                            {'role': 'system', 'content': ctx['prompt']}, 
+                            {'role': 'system', 'content': ctx['prompt']},
                             {'role': 'user', 'content': f"Write content for {chap['title']}."}
                         ],
-                        options={'num_ctx': 8192, 'num_predict': 1600, 'temperature': 0.25}  
+                        options={'num_ctx': 8192, 'num_predict': 2200, 'temperature': 0.2}
                     )
+                    content = res['message']['content']
+                    target_words = self._target_words(chap)
+                    if self._word_count(content) < int(target_words * 0.8):
+                        expand = self.ollama.chat(
+                            model=LLM_MODEL,
+                            messages=[
+                                {'role': 'system', 'content': ctx['prompt']},
+                                {'role': 'user', 'content': (
+                                    f"Revise and expand {chap['title']} to be more detailed. Minimum {target_words} words. "
+                                    "Keep exact H2 headings, add 2-3 H3 under each H2, use numbered lists for sequence "
+                                    "and bullets for supporting details with short explanations, include practical examples and metrics."
+                                )}
+                            ],
+                            options={'num_ctx': 8192, 'num_predict': 2600, 'temperature': 0.2}
+                        )
+                        content = expand['message']['content']
+
+                    if self._word_count(content) > self._max_words(chap):
+                        condense = self.ollama.chat(
+                            model=LLM_MODEL,
+                            messages=[
+                                {'role': 'system', 'content': ctx['prompt']},
+                                {'role': 'user', 'content': (
+                                    f"Condense {chap['title']} to around {target_words} words while preserving all key facts and structure. "
+                                    "Keep exact H2 headings, retain numbered/bullet formatting, and remove repetition."
+                                )}
+                            ],
+                            options={'num_ctx': 8192, 'num_predict': 1800, 'temperature': 0.1}
+                        )
+                        content = condense['message']['content']
+
                     h = doc.add_heading(chap['title'], level=1)
                     h.runs[0].font.color.rgb = RGBColor(*theme_color)
-                    DocumentBuilder.process_content(doc, res['message']['content'], theme_color, chap['title'])
+                    DocumentBuilder.process_content(doc, content, theme_color, chap['title'])
                     if i < len(UNIVERSAL_STRUCTURE) - 1: doc.add_page_break()
                 except Exception as e:
                     logger.error(f"Generation Error for {chap['title']}: {e}")
