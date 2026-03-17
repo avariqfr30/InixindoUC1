@@ -44,6 +44,12 @@ def suggest_budget():
     result = analyzer.suggest_budget(client_name)
     return jsonify(result)
 
+@app.route('/api/preview-outline', methods=['POST'])
+def preview_outline():
+    data = request.json or {}
+    outline = generator.build_preview_outline(data)
+    return jsonify({"outline": outline})
+
 @app.route('/generate', methods=['POST'])
 def generate_doc():
     data = request.json

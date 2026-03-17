@@ -32,6 +32,13 @@
         .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; display: none; vertical-align: middle; margin-left: 8px; }
         .spinner.active { display: inline-block; }
         textarea { resize: vertical; min-height: 60px; margin-bottom: 10px; }
+
+        .preview-panel { background: #f8fafc; border: 1px solid #dbeafe; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+        .preview-item { border-bottom: 1px dashed #cbd5e1; padding: 8px 0; }
+        .preview-item:last-child { border-bottom: none; }
+        .preview-item h4 { margin: 0 0 4px 0; font-size: 0.95rem; color: #0f172a; }
+        .preview-item p { margin: 0; font-size: 0.85rem; color: #475569; }
+        .preview-item ul { margin: 6px 0 0 16px; padding: 0; font-size: 0.82rem; color: #64748b; }
         
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
@@ -118,6 +125,12 @@
                 </div>
                 <input type="text" id="input-framework-lainnya" class="hidden" placeholder="Ketik framework manual..." />
             </div>
+
+            <button type="button" id="btn-preview" class="secondary">👁️ Preview Struktur Proposal</button>
+            <div id="preview-panel" class="preview-panel hidden">
+                <p class="sub" style="margin-bottom:10px;">Pratinjau struktur konten berdasarkan input saat ini.</p>
+                <div id="preview-content"></div>
+            </div>
             
             <button type="button" id="btn-generate" disabled>Generate Proposal Singkat & Padat <span id="spinner" class="spinner"></span></button>
         </div>
@@ -149,6 +162,9 @@
             containerDynamic: document.getElementById('container-dynamic'),
             btnGenerate: document.getElementById('btn-generate'),
             btnAnalyze: document.getElementById('btn-analyze'),
+            btnPreview: document.getElementById('btn-preview'),
+            previewPanel: document.getElementById('preview-panel'),
+            previewContent: document.getElementById('preview-content'),
             financeResult: document.getElementById('finance-result'),
             financeSummary: document.getElementById('finance-summary'),
             financeOptions: document.getElementById('finance-options'),
@@ -251,21 +267,54 @@
             }
         });
 
+        const getPayload = () => ({
+            nama_perusahaan: ui.selPerusahaan.value,
+            jenis_proposal: ui.selProposal.value,
+            jenis_proyek: ui.selProyek.value,
+            konteks_organisasi: ui.inpKonteks.value,
+            permasalahan: ui.inpPermasalahan.value,
+            klasifikasi_kebutuhan: getChecked(ui.groupKebutuhan),
+            estimasi_waktu: ui.inpWaktu.value,
+            estimasi_biaya: ui.inpBiaya.value,
+            potensi_framework: getFinalFrameworks()
+        });
+
+        ui.btnPreview.addEventListener('click', async () => {
+            const payload = getPayload();
+            if (!payload.nama_perusahaan || !payload.konteks_organisasi || !payload.permasalahan) {
+                return alert('Lengkapi minimal nama klien, tujuan proyek, dan permasalahan sebelum preview.');
+            }
+            ui.btnPreview.disabled = true;
+            ui.btnPreview.innerText = 'Menyusun Preview...';
+            try {
+                const res = await fetch('/api/preview-outline', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error();
+                const data = await res.json();
+                ui.previewContent.innerHTML = data.outline.map(ch => `
+                    <div class="preview-item">
+                        <h4>${ch.title}</h4>
+                        <p>${ch.preview}</p>
+                        <ul>${ch.subsections.map(s => `<li>${s}</li>`).join('')}</ul>
+                    </div>
+                `).join('');
+                ui.previewPanel.classList.remove('hidden');
+            } catch (e) {
+                alert('Gagal memuat preview struktur proposal.');
+            } finally {
+                ui.btnPreview.disabled = false;
+                ui.btnPreview.innerText = '👁️ Preview Struktur Proposal';
+            }
+        });
+
         ui.btnGenerate.addEventListener('click', async () => {
             ui.btnGenerate.disabled = true;
             ui.spinner.classList.add('active');
 
-            const payload = {
-                nama_perusahaan: ui.selPerusahaan.value,
-                jenis_proposal: ui.selProposal.value,
-                jenis_proyek: ui.selProyek.value,
-                konteks_organisasi: ui.inpKonteks.value,
-                permasalahan: ui.inpPermasalahan.value,
-                klasifikasi_kebutuhan: getChecked(ui.groupKebutuhan),
-                estimasi_waktu: ui.inpWaktu.value,
-                estimasi_biaya: ui.inpBiaya.value,
-                potensi_framework: getFinalFrameworks()
-            };
+            const payload = getPayload();
 
             try {
                 const res = await fetch('/generate', {

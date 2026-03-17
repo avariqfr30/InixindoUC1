@@ -13,6 +13,7 @@ import pandas as pd
 import chromadb
 from chromadb.config import Settings
 import concurrent.futures
+from datetime import datetime
 from functools import lru_cache
 from typing import Dict, List, Any, Tuple, Optional
 
@@ -21,7 +22,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import textwrap
-from PIL import Image, ImageStat
+from PIL import Image, ImageDraw, ImageFont, ImageStat
 from difflib import SequenceMatcher
 
 from sqlalchemy import create_engine
@@ -29,6 +30,7 @@ import markdown
 from bs4 import BeautifulSoup
 
 from docx import Document
+from docx.image.exceptions import UnrecognizedImageError
 from docx.shared import Pt, RGBColor, Inches, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
@@ -174,29 +176,84 @@ class Researcher:
         except requests.RequestException as e:
             logger.warning(f"Serper API Error: {e}")
             return []
+    @staticmethod
+    def _extract_year(text: str) -> Optional[int]:
+        if not text:
+            return None
+        years = re.findall(r'\b(20\d{2})\b', text)
+        if not years:
+            return None
+        return max(int(y) for y in years)
+
+    @staticmethod
+    def _is_recent(item: Dict[str, Any], max_age_years: int = 2) -> bool:
+        merged = " ".join([
+            str(item.get('date', '')),
+            str(item.get('snippet', '')),
+            str(item.get('title', '')),
+        ])
+        year = Researcher._extract_year(merged)
+        if year is None:
+            return True
+        return year >= (datetime.now().year - max_age_years)
+
+    @staticmethod
+    def _format_evidence(items: List[Dict[str, Any]], label: str, fallback: str) -> str:
+        if not items:
+            return f"[{label}] {fallback}"
+        lines = []
+        for i, item in enumerate(items, start=1):
+            title = item.get('title', 'Sumber tanpa judul')
+            snippet = (item.get('snippet', '') or '').strip()
+            link = item.get('link', '-')
+            date = item.get('date', '-')
+            if not snippet:
+                continue
+            lines.append(f"[{label} #{i}] {title} | date={date} | source={link} | fakta={snippet}")
+        return "\n".join(lines) if lines else f"[{label}] {fallback}"
+
 
     @staticmethod
     @lru_cache(maxsize=128)
     def get_entity_profile(entity_name: str) -> str:
-        res = Researcher.search(f'"{entity_name}" profil perusahaan OR "tentang kami" -saham -loker', limit=3)
-        return "\n".join([i.get('snippet', '') for i in res]) if res else f"{entity_name}"
+        res = Researcher.search(f'"{entity_name}" profil perusahaan OR "tentang kami" -saham -loker', limit=6)
+        filtered = [i for i in res if Researcher._is_recent(i, max_age_years=3)]
+        return Researcher._format_evidence(
+            filtered[:4],
+            label="OSINT_PROFILE",
+            fallback=f"Data profil terbaru untuk {entity_name} terbatas; gunakan informasi umum yang terverifikasi saja."
+        )
 
     @staticmethod
     @lru_cache(maxsize=128)
     def get_latest_client_news(client_name: str) -> str:
-        res = Researcher.search(f'"{client_name}" berita inovasi 2026', limit=3)
-        return "\n".join([i.get('snippet', '') for i in res])
+        current_year = datetime.now().year
+        prev_year = current_year - 1
+        res = Researcher.search(
+            f'"{client_name}" berita inovasi OR transformasi digital {current_year} OR {prev_year}',
+            limit=8
+        )
+        filtered = [i for i in res if Researcher._is_recent(i, max_age_years=2)]
+        return Researcher._format_evidence(
+            filtered[:4],
+            label="OSINT_NEWS",
+            fallback=f"Berita terbaru {client_name} tidak cukup kuat; jangan membuat klaim spesifik tanpa bukti."
+        )
 
     @staticmethod
     @lru_cache(maxsize=128)
     def get_regulatory_data(regulations_string: str) -> str:
         if not regulations_string:
-            return "Tidak ada regulasi spesifik."
-        
-        # If multiple frameworks, do a combined broad search
-        query = f'Ringkasan implementasi standar {regulations_string.replace(",", " OR ")}'
-        res = Researcher.search(query, limit=3)
-        return "\n".join([i.get('snippet', '') for i in res]) if res else f"Standar umum: {regulations_string}."
+            return "[OSINT_REG] Tidak ada regulasi spesifik dari input user."
+
+        query = f'Ringkasan implementasi standar {regulations_string.replace(",", " OR ")} site:.go.id OR site:iso.org'
+        res = Researcher.search(query, limit=8)
+        filtered = [i for i in res if Researcher._is_recent(i, max_age_years=5)]
+        return Researcher._format_evidence(
+            filtered[:5],
+            label="OSINT_REG",
+            fallback=f"Data regulasi untuk {regulations_string} terbatas; nyatakan asumsi dan batasan data secara eksplisit."
+        )
 
 
 # =====================================================================
@@ -249,9 +306,31 @@ class FinancialAnalyzer:
 
 class LogoManager:
     @staticmethod
+    def _create_fallback_logo(client_name: str) -> io.BytesIO:
+        initials = "".join([w[0] for w in re.findall(r"[A-Za-z0-9]+", client_name)[:3]]).upper() or "CL"
+        canvas = Image.new('RGB', (320, 320), color=(236, 242, 255))
+        draw = ImageDraw.Draw(canvas)
+        draw.rounded_rectangle((16, 16, 304, 304), radius=36, outline=(37, 99, 235), width=8)
+        try:
+            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 110)
+        except Exception:
+            font = ImageFont.load_default()
+        try:
+            bbox = draw.textbbox((0, 0), initials, font=font)
+            w = bbox[2] - bbox[0]
+            h = bbox[3] - bbox[1]
+        except Exception:
+            w, h = draw.textsize(initials, font=font)
+        draw.text(((320 - w) / 2, (320 - h) / 2 - 6), initials, fill=(15, 23, 42), font=font)
+        out = io.BytesIO()
+        canvas.save(out, format='PNG')
+        out.seek(0)
+        return out
+
+    @staticmethod
     def get_logo_and_color(client_name: str) -> Tuple[Optional[io.BytesIO], Tuple[int, int, int]]:
         if "YOUR_SERPER" in SERPER_API_KEY:
-            return None, DEFAULT_COLOR
+            return LogoManager._create_fallback_logo(client_name), DEFAULT_COLOR
         try:
             url = "https://google.serper.dev/images"
             payload = json.dumps({"q": f"{client_name} corporate logo png transparent", "num": 3})
@@ -264,22 +343,34 @@ class LogoManager:
                         img_resp = requests.get(item['imageUrl'], headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
                         if img_resp.status_code == 200:
                             stream = io.BytesIO(img_resp.content)
-                            img = Image.open(stream).convert('RGB')
+                            img = Image.open(stream)
+                            
+                            # Ensure DOCX-compatible format by converting any source format (e.g. WEBP/SVG fallback) to PNG.
+                            if img.mode in ("RGBA", "LA", "P"):
+                                normalized = Image.new("RGBA", img.size, (255, 255, 255, 0))
+                                normalized.paste(img, (0, 0), img if img.mode in ("RGBA", "LA") else None)
+                                img = normalized.convert('RGB')
+                            else:
+                                img = img.convert('RGB')
+
                             img.thumbnail((150, 150))
                             dom_color = list(map(int, ImageStat.Stat(img).mean[:3]))
-                            
+
                             luminance = 0.299 * dom_color[0] + 0.587 * dom_color[1] + 0.114 * dom_color[2]
-                            if luminance > 120:  
+                            if luminance > 120:
                                 factor = 120 / luminance
                                 dom_color = [max(0, min(255, int(c * factor))) for c in dom_color]
-                                
-                            stream.seek(0)
-                            return stream, tuple(dom_color)
+
+                            # Return normalized PNG bytes instead of original content to avoid UnrecognizedImageError.
+                            png_stream = io.BytesIO()
+                            img.save(png_stream, format='PNG')
+                            png_stream.seek(0)
+                            return png_stream, tuple(dom_color)
                     except Exception:
                         continue
         except Exception as e:
             logger.warning(f"Logo Retrieval Error: {e}")
-        return None, DEFAULT_COLOR
+        return LogoManager._create_fallback_logo(client_name), DEFAULT_COLOR
 
 
 # =====================================================================
@@ -366,9 +457,12 @@ class DocumentBuilder:
                 p = doc.add_paragraph()
                 DocumentBuilder._process_inline_html(p, element)
             elif element.name in ['ul', 'ol']:
-                style = 'List Bullet' if element.name == 'ul' else 'List Number'
-                for li in element.find_all('li'):
-                    p = doc.add_paragraph(style=style)
+                # Render list markers manually to prevent DOCX auto-number continuation across chapters.
+                direct_items = element.find_all('li', recursive=False)
+                for idx, li in enumerate(direct_items, start=1):
+                    p = doc.add_paragraph()
+                    marker = f"{idx}. " if element.name == 'ol' else "• "
+                    p.add_run(marker).bold = True
                     DocumentBuilder._process_inline_html(p, li)
             elif element.name == 'table':
                 rows = element.find_all('tr')
@@ -423,6 +517,53 @@ class ProposalGenerator:
         self.io_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
         self.firm_api = FirmAPIClient()
 
+    @staticmethod
+    def _target_words(chap: Dict[str, Any]) -> int:
+        m = re.search(r'Target:\s*(\d+)\s*words', chap.get('length_intent', ''), re.IGNORECASE)
+        return int(m.group(1)) if m else 700
+
+    @staticmethod
+    def _max_words(chap: Dict[str, Any]) -> int:
+        return int(ProposalGenerator._target_words(chap) * 1.3)
+
+    @staticmethod
+    def _word_count(text: str) -> int:
+        return len(re.findall(r'\b\w+\b', text))
+
+    def build_preview_outline(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        client = payload.get('nama_perusahaan', '').strip() or 'Klien'
+        project = payload.get('konteks_organisasi', '').strip() or 'Inisiatif belum diisi'
+        notes = payload.get('permasalahan', '').strip() or 'Belum ada detail pain points.'
+        project_type = payload.get('jenis_proyek', 'Implementation')
+        service_type = payload.get('jenis_proposal', 'Konsultan')
+        timeline = payload.get('estimasi_waktu', 'TBD')
+        budget = payload.get('estimasi_biaya', 'Menyesuaikan ruang lingkup')
+        needs = payload.get('klasifikasi_kebutuhan', '-')
+        frameworks = payload.get('potensi_framework', '-')
+
+        highlights = {
+            'c_1': f"Fokus konteks organisasi {client}, mandat proyek '{project}', dan driver bisnis utama.",
+            'c_2': f"Merangkum pain points utama: {notes}",
+            'c_3': f"Klasifikasi kebutuhan ({needs}) dan pemetaan jenis proyek {project_type}.",
+            'c_4': f"Pendekatan berbasis acuan/framework: {frameworks}.",
+            'c_5': f"Metodologi kerja untuk engagement {service_type} beserta tahapan implementasi.",
+            'c_6': "Desain solusi dan deliverable agar kebutuhan klien dapat tercapai.",
+            'c_7': f"Timeline pelaksanaan {timeline} termasuk aktivitas fase dan milestone.",
+            'c_8': "Mekanisme tata kelola, keputusan, kontrol progres, dan quality gate.",
+            'c_9': "Struktur tim, peran kunci, kapabilitas, pengalaman, dan sertifikasi.",
+            'c_10': f"Model pembiayaan, terms komersial, dan estimasi biaya awal {budget}."
+        }
+
+        return [
+            {
+                'id': chap['id'],
+                'title': chap['title'],
+                'subsections': chap['subs'],
+                'preview': highlights.get(chap['id'], 'Ringkasan bab disesuaikan konteks input user.')
+            }
+            for chap in UNIVERSAL_STRUCTURE
+        ]
+
     def _fetch_chapter_context(self, chap, client, project, budget, service_type, project_goal, project_type, timeline, notes, regulations, firm_data, research_futures) -> Dict[str, Any]:
         try:
             global_data = research_futures['profile'].result(timeout=5)
@@ -438,28 +579,36 @@ class ProposalGenerator:
             visual_prompt = ""
             if chap.get('visual_intent') == "gantt":
                 visual_prompt = f"Mandatory Timeline Visual: [[GANTT: Jadwal Pelaksanaan | Bulan | Fase 1,0,2; Fase 2,2,4]]. Total timeline: {timeline}."
+            elif chap.get('visual_intent') == "flowchart":
+                visual_prompt = "Tambahkan alur tahapan metodologi dalam bentuk bullet bertingkat yang jelas (fase -> aktivitas -> output)."
 
             # ==========================================================
             # DYNAMIC INSTRUCTIONS: Injecting the UI Choices
             # ==========================================================
-            extra = ""
+            extra = (
+                "[GLOBAL] Proposal ini wajib mempertahankan kedalaman konten tingkat eksekutif dan total dokumen target 20-25 halaman. "
+                "Setiap bab harus memiliki konteks spesifik klien, poin yang dapat ditindaklanjuti, dan tidak generik. Gunakan kombinasi numbering dan bullet yang rapi di setiap H2, namun tetap padat dan tidak banyak whitespace."
+            )
             if chap['id'] == 'c_1':
-                extra = f"[CRITICAL] Align Context heavily with the primary goal: '{project}'. The strategic drivers for this project are: [{project_goal}]. Do not write generic theory."
+                extra += f" [CRITICAL] Fokus pada latar belakang organisasi '{client}' dan tujuan proyek: '{project}'. Soroti driver bisnis utama: [{project_goal}]."
             elif chap['id'] == 'c_2':
-                extra = f"[CRITICAL] Focus strictly on these pain points: '{notes}'. Root cause analysis must be bulleted and punchy."
+                extra += f" [CRITICAL] Jabarkan kebutuhan/keinginan klien berdasarkan pain points berikut: '{notes}'. Gunakan analisis masalah yang tajam dan ringkas."
             elif chap['id'] == 'c_3':
-                # Influenced by service_type & project_goal
-                extra = f"[CRITICAL] Present the solution specifically as a '{service_type}' engagement. Ensure it addresses the strategic drivers: [{project_goal}]. Type of execution: '{project_type}'."
+                extra += f" [CRITICAL] Klasifikasikan kebutuhan ke Problem/Opportunity/Directive berdasarkan input: '{project_goal}'. Tetapkan jenis proyek: '{project_type}'."
             elif chap['id'] == 'c_4':
-                # Enforcing the checkboxes for Frameworks
-                extra = f"[CRITICAL] You MUST structure this chapter around these chosen frameworks/regulations: '{regulations}'. Use bullet points to map them directly to the client's needs."
+                extra += f" [CRITICAL] Gunakan framework/regulasi terpilih berikut sebagai acuan utama: '{regulations}'. Petakan langsung ke kebutuhan klien."
             elif chap['id'] == 'c_5':
-                extra = f"[CRITICAL] Methodology must fit exactly inside a {timeline} timeline. Base the phases on standard '{project_type}' processes: {firm_data['methodology']}."
+                extra += f" [CRITICAL] Jelaskan alasan pemilihan metodologi untuk engagement '{service_type}' dan gunakan baseline metodologi internal: {firm_data['methodology']}."
             elif chap['id'] == 'c_6':
-                # Influenced by service_type
-                extra = f"[CRITICAL] Outline a Team Structure tailored for a '{service_type}' engagement. Core roles included: {firm_data['team']}."
+                extra += f" [CRITICAL] Turunkan metodologi menjadi solution design yang konkret: output, deliverable, dan target state yang dapat dieksekusi."
             elif chap['id'] == 'c_7':
-                extra = f"[CRITICAL] State the Estimated Budget explicitly: {budget}. Include these Commercial Terms: {firm_data['commercial']}. Must use a Markdown table."
+                extra += f" [CRITICAL] Timeline harus sinkron dengan durasi proyek: '{timeline}'. Tampilkan aktivitas per fase, milestone, dan deliverable yang terukur."
+            elif chap['id'] == 'c_8':
+                extra += " [CRITICAL] Definisikan model tata kelola proyek: forum keputusan, frekuensi rapat, eskalasi isu, quality gate, dan kontrol progres."
+            elif chap['id'] == 'c_9':
+                extra += f" [CRITICAL] Uraikan struktur tim proyek untuk model layanan '{service_type}' dengan kapabilitas kunci, pengalaman, dan sertifikasi relevan. Referensi komposisi inti: {firm_data['team']}."
+            elif chap['id'] == 'c_10':
+                extra += f" [CRITICAL] Wajib menyajikan model pembiayaan dengan angka estimasi: {budget}. Sertakan termin pembayaran, model kerja, asumsi, eksklusi, dan terms komersial: {firm_data['commercial']}. Gunakan tabel markdown."
 
             prompt = PROPOSAL_SYSTEM_PROMPT.format(
                 client=client, 
@@ -508,13 +657,48 @@ class ProposalGenerator:
         doc = Document()
         StyleEngine.apply_document_styles(doc)
         
-        # Simple Cover Generation
-        for _ in range(5): doc.add_paragraph()
-        p = doc.add_paragraph(client.upper())
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p.runs[0].bold = True
-        p.runs[0].font.size = Pt(28)
-        p.runs[0].font.color.rgb = RGBColor(*theme_color)
+        # Personalized Cover Generation
+        for _ in range(2):
+            doc.add_paragraph()
+
+        if logo_stream:
+            try:
+                logo_stream.seek(0)
+                cover_logo = doc.add_paragraph()
+                cover_logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                cover_logo.add_run().add_picture(logo_stream, width=Inches(1.8))
+            except (UnrecognizedImageError, OSError, ValueError) as e:
+                logger.warning(f"Logo skipped due to unsupported image format: {e}")
+
+        title = doc.add_paragraph("ARSITEKTUR PROPOSAL")
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_run = title.runs[0]
+        title_run.bold = True
+        title_run.font.size = Pt(30)
+        title_run.font.color.rgb = RGBColor(*theme_color)
+
+        subtitle = doc.add_paragraph(f"{service_type} – {project_type}")
+        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        subtitle.runs[0].font.size = Pt(14)
+
+        doc.add_paragraph()
+        client_line = doc.add_paragraph(f"Untuk: {client}")
+        client_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        client_line.runs[0].bold = True
+        client_line.runs[0].font.size = Pt(16)
+
+        project_line = doc.add_paragraph(f"Inisiatif: {project}")
+        project_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        meta = doc.add_paragraph(
+            f"Durasi: {timeline} | Estimasi Investasi: {budget or 'Menyesuaikan ruang lingkup'} | Tanggal: {datetime.now().strftime('%d %B %Y')}"
+        )
+        meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        firm_info = self.firm_api.get_firm_profile().get('contact_info', WRITER_FIRM_NAME)
+        contact = doc.add_paragraph(f"Disusun oleh {WRITER_FIRM_NAME}\n{firm_info}")
+        contact.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
         doc.add_page_break()
         
         for i, chap in enumerate(UNIVERSAL_STRUCTURE):
@@ -522,16 +706,47 @@ class ProposalGenerator:
             if ctx['success']:
                 try:
                     res = self.ollama.chat(
-                        model=LLM_MODEL, 
+                        model=LLM_MODEL,
                         messages=[
-                            {'role': 'system', 'content': ctx['prompt']}, 
+                            {'role': 'system', 'content': ctx['prompt']},
                             {'role': 'user', 'content': f"Write content for {chap['title']}."}
                         ],
-                        options={'num_ctx': 4096, 'num_predict': 1024, 'temperature': 0.3}  
+                        options={'num_ctx': 8192, 'num_predict': 2200, 'temperature': 0.2}
                     )
+                    content = res['message']['content']
+                    target_words = self._target_words(chap)
+                    if self._word_count(content) < int(target_words * 0.8):
+                        expand = self.ollama.chat(
+                            model=LLM_MODEL,
+                            messages=[
+                                {'role': 'system', 'content': ctx['prompt']},
+                                {'role': 'user', 'content': (
+                                    f"Revise and expand {chap['title']} to be more detailed. Minimum {target_words} words. "
+                                    "Keep exact H2 headings, add 2-3 H3 under each H2, use numbered lists for sequence "
+                                    "and bullets for supporting details with short explanations, include practical examples and metrics."
+                                )}
+                            ],
+                            options={'num_ctx': 8192, 'num_predict': 2600, 'temperature': 0.2}
+                        )
+                        content = expand['message']['content']
+
+                    if self._word_count(content) > self._max_words(chap):
+                        condense = self.ollama.chat(
+                            model=LLM_MODEL,
+                            messages=[
+                                {'role': 'system', 'content': ctx['prompt']},
+                                {'role': 'user', 'content': (
+                                    f"Condense {chap['title']} to around {target_words} words while preserving all key facts and structure. "
+                                    "Keep exact H2 headings, retain numbered/bullet formatting, and remove repetition."
+                                )}
+                            ],
+                            options={'num_ctx': 8192, 'num_predict': 1800, 'temperature': 0.1}
+                        )
+                        content = condense['message']['content']
+
                     h = doc.add_heading(chap['title'], level=1)
                     h.runs[0].font.color.rgb = RGBColor(*theme_color)
-                    DocumentBuilder.process_content(doc, res['message']['content'], theme_color, chap['title'])
+                    DocumentBuilder.process_content(doc, content, theme_color, chap['title'])
                     if i < len(UNIVERSAL_STRUCTURE) - 1: doc.add_page_break()
                 except Exception as e:
                     logger.error(f"Generation Error for {chap['title']}: {e}")
