@@ -475,40 +475,6 @@ class ProposalGenerator:
     def _word_count(text: str) -> int:
         return len(re.findall(r'\b\w+\b', text))
 
-    def build_preview_outline(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-        client = payload.get('nama_perusahaan', '').strip() or 'Klien'
-        project = payload.get('konteks_organisasi', '').strip() or 'Inisiatif belum diisi'
-        notes = payload.get('permasalahan', '').strip() or 'Belum ada detail pain points.'
-        project_type = payload.get('jenis_proyek', 'Implementation')
-        service_type = payload.get('jenis_proposal', 'Konsultan')
-        timeline = payload.get('estimasi_waktu', 'TBD')
-        budget = payload.get('estimasi_biaya', 'Menyesuaikan ruang lingkup')
-        needs = payload.get('klasifikasi_kebutuhan', '-')
-        frameworks = payload.get('potensi_framework', '-')
-
-        highlights = {
-            'c_1': f"Fokus konteks organisasi {client}, mandat proyek '{project}', dan driver bisnis utama.",
-            'c_2': f"Merangkum pain points utama: {notes}",
-            'c_3': f"Klasifikasi kebutuhan ({needs}) dan pemetaan jenis proyek {project_type}.",
-            'c_4': f"Pendekatan berbasis acuan/framework: {frameworks}.",
-            'c_5': f"Metodologi kerja untuk engagement {service_type} beserta tahapan implementasi.",
-            'c_6': "Desain solusi dan deliverable agar kebutuhan klien dapat tercapai.",
-            'c_7': f"Timeline pelaksanaan {timeline} termasuk aktivitas fase dan milestone.",
-            'c_8': "Mekanisme tata kelola, keputusan, kontrol progres, dan quality gate.",
-            'c_9': "Struktur tim, peran kunci, kapabilitas, pengalaman, dan sertifikasi.",
-            'c_10': f"Model pembiayaan, terms komersial, dan estimasi biaya awal {budget}."
-        }
-
-        return [
-            {
-                'id': chap['id'],
-                'title': chap['title'],
-                'subsections': chap['subs'],
-                'preview': highlights.get(chap['id'], 'Ringkasan bab disesuaikan konteks input user.')
-            }
-            for chap in UNIVERSAL_STRUCTURE
-        ]
-
     def _fetch_chapter_context(self, chap, client, project, budget, service_type, project_goal, project_type, timeline, notes, regulations, firm_data, research_futures) -> Dict[str, Any]:
         try:
             global_data = research_futures['profile'].result(timeout=5)

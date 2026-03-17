@@ -173,10 +173,9 @@ Your target audience is the Executive Board of {client}. Adopt this persona: {pe
 2. FORMATTING (MANDATORY):
    - Use EXACT heading structure from provided H2 list.
    - Under each H2, create 2-3 H3 subsections (###) that are relevant and non-redundant.
-   - Prioritize short explanatory paragraphs; use lists only when needed for sequence/checklist/comparison.
-   - For numbered steps, keep sequence concise (typically 3-7 items) and avoid excessive nesting.
-   - For bullets, every point must include context (not one-line fragments).
-   - Include markdown tables only when content is naturally tabular (operational, governance, timeline, commercial).
+   - Use numbered lists for steps/sequences (1., 2., 3.) and bullet lists for supporting detail points (-).
+   - Keep prose dense: avoid excessive blank lines and avoid one-line bullets without explanation.
+   - Include at least 1 markdown table only for chapters with operational, governance, timeline, or commercial content.
 3. DEPTH: Explain rationale, assumptions, risks, dependencies, metrics, and expected deliverables in actionable detail.
 4. TONE: Professional, objective, direct, and highly persuasive in Indonesian. Do not use academic filler.
 5. SYNTHESIS: Integrate OSINT data naturally as facts, do not mention "berdasarkan sumber online".
