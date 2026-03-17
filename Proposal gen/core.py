@@ -260,9 +260,12 @@ class LogoManager:
             font = ImageFont.truetype("DejaVuSans-Bold.ttf", 110)
         except Exception:
             font = ImageFont.load_default()
-        bbox = draw.textbbox((0, 0), initials, font=font)
-        w = bbox[2] - bbox[0]
-        h = bbox[3] - bbox[1]
+        try:
+            bbox = draw.textbbox((0, 0), initials, font=font)
+            w = bbox[2] - bbox[0]
+            h = bbox[3] - bbox[1]
+        except Exception:
+            w, h = draw.textsize(initials, font=font)
         draw.text(((320 - w) / 2, (320 - h) / 2 - 6), initials, fill=(15, 23, 42), font=font)
         out = io.BytesIO()
         canvas.save(out, format='PNG')
@@ -462,6 +465,10 @@ class ProposalGenerator:
         return int(m.group(1)) if m else 700
 
     @staticmethod
+    def _max_words(chap: Dict[str, Any]) -> int:
+        return int(ProposalGenerator._target_words(chap) * 1.3)
+
+    @staticmethod
     def _word_count(text: str) -> int:
         return len(re.findall(r'\b\w+\b', text))
 
@@ -488,7 +495,7 @@ class ProposalGenerator:
             # ==========================================================
             extra = (
                 "[GLOBAL] Proposal ini wajib mempertahankan kedalaman konten tingkat eksekutif dan total dokumen target 20-25 halaman. "
-                "Setiap bab harus memiliki konteks spesifik klien, poin yang dapat ditindaklanjuti, dan tidak generik. Gunakan kombinasi numbering dan bullet yang rapi di setiap H2."
+                "Setiap bab harus memiliki konteks spesifik klien, poin yang dapat ditindaklanjuti, dan tidak generik. Gunakan kombinasi numbering dan bullet yang rapi di setiap H2, namun tetap padat dan tidak banyak whitespace."
             )
             if chap['id'] == 'c_1':
                 extra += f" [CRITICAL] Fokus pada latar belakang organisasi '{client}' dan tujuan proyek: '{project}'. Soroti driver bisnis utama: [{project_goal}]."
@@ -623,13 +630,27 @@ class ProposalGenerator:
                                 {'role': 'system', 'content': ctx['prompt']},
                                 {'role': 'user', 'content': (
                                     f"Revise and expand {chap['title']} to be more detailed. Minimum {target_words} words. "
-                                    "Keep exact H2 headings, add at least 3 H3 under each H2, use numbered lists for sequence "
-                                    "and bullets for supporting details, include practical examples and metrics."
+                                    "Keep exact H2 headings, add 2-3 H3 under each H2, use numbered lists for sequence "
+                                    "and bullets for supporting details with short explanations, include practical examples and metrics."
                                 )}
                             ],
                             options={'num_ctx': 8192, 'num_predict': 2600, 'temperature': 0.2}
                         )
                         content = expand['message']['content']
+
+                    if self._word_count(content) > self._max_words(chap):
+                        condense = self.ollama.chat(
+                            model=LLM_MODEL,
+                            messages=[
+                                {'role': 'system', 'content': ctx['prompt']},
+                                {'role': 'user', 'content': (
+                                    f"Condense {chap['title']} to around {target_words} words while preserving all key facts and structure. "
+                                    "Keep exact H2 headings, retain numbered/bullet formatting, and remove repetition."
+                                )}
+                            ],
+                            options={'num_ctx': 8192, 'num_predict': 1800, 'temperature': 0.1}
+                        )
+                        content = condense['message']['content']
 
                     h = doc.add_heading(chap['title'], level=1)
                     h.runs[0].font.color.rgb = RGBColor(*theme_color)
