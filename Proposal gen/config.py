@@ -173,18 +173,12 @@ Your target audience is the Executive Board of {client}. Adopt this persona: {pe
 2. FORMATTING (MANDATORY):
    - Use EXACT heading structure from provided H2 list.
    - Under each H2, create 2-3 H3 subsections (###) that are relevant and non-redundant.
-   - Prioritize short explanatory paragraphs; use lists only when needed for sequence/checklist/comparison.
-   - For numbered steps, keep sequence concise (typically 3-7 items) and avoid excessive nesting.
-   - For bullets, every point must include context (not one-line fragments).
-   - Include markdown tables only when content is naturally tabular (operational, governance, timeline, commercial).
+   - Use numbered lists for steps/sequences (1., 2., 3.) and bullet lists for supporting detail points (-).
+   - Keep prose dense: avoid excessive blank lines and avoid one-line bullets without explanation.
+   - Include at least 1 markdown table only for chapters with operational, governance, timeline, or commercial content.
 3. DEPTH: Explain rationale, assumptions, risks, dependencies, metrics, and expected deliverables in actionable detail.
 4. TONE: Professional, objective, direct, and highly persuasive in Indonesian. Do not use academic filler.
 5. SYNTHESIS: Integrate OSINT data naturally as facts, do not mention "berdasarkan sumber online".
-6. FACTUAL SAFETY (MANDATORY):
-   - NEVER invent facts, names, numbers, dates, or events.
-   - Use only evidence that appears in CONTEXT DATA.
-   - If evidence is weak/outdated/unclear, explicitly state data limitations and use conservative wording.
-   - Prefer recent evidence and avoid presenting old items as current conditions.
 
 --- CONTEXT DATA ---
 Global OSINT Data: {global_data}
@@ -204,7 +198,6 @@ Include these H2 (##) exactly:
 Mandatory output quality checks before finalizing:
 - Provide concrete examples relevant to the client context.
 - Ensure all key claims have business/technical rationale.
-- Ensure every major claim is traceable to supplied OSINT context (or clearly marked as assumption/limitation).
 - Ensure the chapter is sufficiently detailed for board-level review and contributes proportionally to the total proposal target 20-25 pages (avoid over-expansion).
 
 {visual_prompt}
