@@ -402,9 +402,12 @@ class DocumentBuilder:
                 p = doc.add_paragraph()
                 DocumentBuilder._process_inline_html(p, element)
             elif element.name in ['ul', 'ol']:
-                style = 'List Bullet' if element.name == 'ul' else 'List Number'
-                for li in element.find_all('li'):
-                    p = doc.add_paragraph(style=style)
+                # Render list markers manually to prevent DOCX auto-number continuation across chapters.
+                direct_items = element.find_all('li', recursive=False)
+                for idx, li in enumerate(direct_items, start=1):
+                    p = doc.add_paragraph()
+                    marker = f"{idx}. " if element.name == 'ol' else "• "
+                    p.add_run(marker).bold = True
                     DocumentBuilder._process_inline_html(p, li)
             elif element.name == 'table':
                 rows = element.find_all('tr')
