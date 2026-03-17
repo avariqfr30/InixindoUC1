@@ -176,29 +176,84 @@ class Researcher:
         except requests.RequestException as e:
             logger.warning(f"Serper API Error: {e}")
             return []
+    @staticmethod
+    def _extract_year(text: str) -> Optional[int]:
+        if not text:
+            return None
+        years = re.findall(r'\b(20\d{2})\b', text)
+        if not years:
+            return None
+        return max(int(y) for y in years)
+
+    @staticmethod
+    def _is_recent(item: Dict[str, Any], max_age_years: int = 2) -> bool:
+        merged = " ".join([
+            str(item.get('date', '')),
+            str(item.get('snippet', '')),
+            str(item.get('title', '')),
+        ])
+        year = Researcher._extract_year(merged)
+        if year is None:
+            return True
+        return year >= (datetime.now().year - max_age_years)
+
+    @staticmethod
+    def _format_evidence(items: List[Dict[str, Any]], label: str, fallback: str) -> str:
+        if not items:
+            return f"[{label}] {fallback}"
+        lines = []
+        for i, item in enumerate(items, start=1):
+            title = item.get('title', 'Sumber tanpa judul')
+            snippet = (item.get('snippet', '') or '').strip()
+            link = item.get('link', '-')
+            date = item.get('date', '-')
+            if not snippet:
+                continue
+            lines.append(f"[{label} #{i}] {title} | date={date} | source={link} | fakta={snippet}")
+        return "\n".join(lines) if lines else f"[{label}] {fallback}"
+
 
     @staticmethod
     @lru_cache(maxsize=128)
     def get_entity_profile(entity_name: str) -> str:
-        res = Researcher.search(f'"{entity_name}" profil perusahaan OR "tentang kami" -saham -loker', limit=3)
-        return "\n".join([i.get('snippet', '') for i in res]) if res else f"{entity_name}"
+        res = Researcher.search(f'"{entity_name}" profil perusahaan OR "tentang kami" -saham -loker', limit=6)
+        filtered = [i for i in res if Researcher._is_recent(i, max_age_years=3)]
+        return Researcher._format_evidence(
+            filtered[:4],
+            label="OSINT_PROFILE",
+            fallback=f"Data profil terbaru untuk {entity_name} terbatas; gunakan informasi umum yang terverifikasi saja."
+        )
 
     @staticmethod
     @lru_cache(maxsize=128)
     def get_latest_client_news(client_name: str) -> str:
-        res = Researcher.search(f'"{client_name}" berita inovasi 2026', limit=3)
-        return "\n".join([i.get('snippet', '') for i in res])
+        current_year = datetime.now().year
+        prev_year = current_year - 1
+        res = Researcher.search(
+            f'"{client_name}" berita inovasi OR transformasi digital {current_year} OR {prev_year}',
+            limit=8
+        )
+        filtered = [i for i in res if Researcher._is_recent(i, max_age_years=2)]
+        return Researcher._format_evidence(
+            filtered[:4],
+            label="OSINT_NEWS",
+            fallback=f"Berita terbaru {client_name} tidak cukup kuat; jangan membuat klaim spesifik tanpa bukti."
+        )
 
     @staticmethod
     @lru_cache(maxsize=128)
     def get_regulatory_data(regulations_string: str) -> str:
         if not regulations_string:
-            return "Tidak ada regulasi spesifik."
-        
-        # If multiple frameworks, do a combined broad search
-        query = f'Ringkasan implementasi standar {regulations_string.replace(",", " OR ")}'
-        res = Researcher.search(query, limit=3)
-        return "\n".join([i.get('snippet', '') for i in res]) if res else f"Standar umum: {regulations_string}."
+            return "[OSINT_REG] Tidak ada regulasi spesifik dari input user."
+
+        query = f'Ringkasan implementasi standar {regulations_string.replace(",", " OR ")} site:.go.id OR site:iso.org'
+        res = Researcher.search(query, limit=8)
+        filtered = [i for i in res if Researcher._is_recent(i, max_age_years=5)]
+        return Researcher._format_evidence(
+            filtered[:5],
+            label="OSINT_REG",
+            fallback=f"Data regulasi untuk {regulations_string} terbatas; nyatakan asumsi dan batasan data secara eksplisit."
+        )
 
 
 # =====================================================================
