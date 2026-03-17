@@ -13,6 +13,7 @@ import pandas as pd
 import chromadb
 from chromadb.config import Settings
 import concurrent.futures
+from datetime import datetime
 from functools import lru_cache
 from typing import Dict, List, Any, Tuple, Optional
 
@@ -438,28 +439,36 @@ class ProposalGenerator:
             visual_prompt = ""
             if chap.get('visual_intent') == "gantt":
                 visual_prompt = f"Mandatory Timeline Visual: [[GANTT: Jadwal Pelaksanaan | Bulan | Fase 1,0,2; Fase 2,2,4]]. Total timeline: {timeline}."
+            elif chap.get('visual_intent') == "flowchart":
+                visual_prompt = "Tambahkan alur tahapan metodologi dalam bentuk bullet bertingkat yang jelas (fase -> aktivitas -> output)."
 
             # ==========================================================
             # DYNAMIC INSTRUCTIONS: Injecting the UI Choices
             # ==========================================================
-            extra = ""
+            extra = (
+                "[GLOBAL] Proposal ini wajib mempertahankan kedalaman konten tingkat eksekutif dan total dokumen target 20-25 halaman. "
+                "Setiap bab harus memiliki konteks spesifik klien, poin yang dapat ditindaklanjuti, dan tidak generik."
+            )
             if chap['id'] == 'c_1':
-                extra = f"[CRITICAL] Align Context heavily with the primary goal: '{project}'. The strategic drivers for this project are: [{project_goal}]. Do not write generic theory."
+                extra += f" [CRITICAL] Fokus pada latar belakang organisasi '{client}' dan tujuan proyek: '{project}'. Soroti driver bisnis utama: [{project_goal}]."
             elif chap['id'] == 'c_2':
-                extra = f"[CRITICAL] Focus strictly on these pain points: '{notes}'. Root cause analysis must be bulleted and punchy."
+                extra += f" [CRITICAL] Jabarkan kebutuhan/keinginan klien berdasarkan pain points berikut: '{notes}'. Gunakan analisis masalah yang tajam dan ringkas."
             elif chap['id'] == 'c_3':
-                # Influenced by service_type & project_goal
-                extra = f"[CRITICAL] Present the solution specifically as a '{service_type}' engagement. Ensure it addresses the strategic drivers: [{project_goal}]. Type of execution: '{project_type}'."
+                extra += f" [CRITICAL] Klasifikasikan kebutuhan ke Problem/Opportunity/Directive berdasarkan input: '{project_goal}'. Tetapkan jenis proyek: '{project_type}'."
             elif chap['id'] == 'c_4':
-                # Enforcing the checkboxes for Frameworks
-                extra = f"[CRITICAL] You MUST structure this chapter around these chosen frameworks/regulations: '{regulations}'. Use bullet points to map them directly to the client's needs."
+                extra += f" [CRITICAL] Gunakan framework/regulasi terpilih berikut sebagai acuan utama: '{regulations}'. Petakan langsung ke kebutuhan klien."
             elif chap['id'] == 'c_5':
-                extra = f"[CRITICAL] Methodology must fit exactly inside a {timeline} timeline. Base the phases on standard '{project_type}' processes: {firm_data['methodology']}."
+                extra += f" [CRITICAL] Jelaskan alasan pemilihan metodologi untuk engagement '{service_type}' dan gunakan baseline metodologi internal: {firm_data['methodology']}."
             elif chap['id'] == 'c_6':
-                # Influenced by service_type
-                extra = f"[CRITICAL] Outline a Team Structure tailored for a '{service_type}' engagement. Core roles included: {firm_data['team']}."
+                extra += f" [CRITICAL] Turunkan metodologi menjadi solution design yang konkret: output, deliverable, dan target state yang dapat dieksekusi."
             elif chap['id'] == 'c_7':
-                extra = f"[CRITICAL] State the Estimated Budget explicitly: {budget}. Include these Commercial Terms: {firm_data['commercial']}. Must use a Markdown table."
+                extra += f" [CRITICAL] Timeline harus sinkron dengan durasi proyek: '{timeline}'. Tampilkan aktivitas per fase, milestone, dan deliverable yang terukur."
+            elif chap['id'] == 'c_8':
+                extra += " [CRITICAL] Definisikan model tata kelola proyek: forum keputusan, frekuensi rapat, eskalasi isu, quality gate, dan kontrol progres."
+            elif chap['id'] == 'c_9':
+                extra += f" [CRITICAL] Uraikan struktur tim proyek untuk model layanan '{service_type}' dengan kapabilitas kunci, pengalaman, dan sertifikasi relevan. Referensi komposisi inti: {firm_data['team']}."
+            elif chap['id'] == 'c_10':
+                extra += f" [CRITICAL] Wajib menyajikan model pembiayaan dengan angka estimasi: {budget}. Sertakan termin pembayaran, model kerja, asumsi, eksklusi, dan terms komersial: {firm_data['commercial']}. Gunakan tabel markdown."
 
             prompt = PROPOSAL_SYSTEM_PROMPT.format(
                 client=client, 
@@ -508,13 +517,44 @@ class ProposalGenerator:
         doc = Document()
         StyleEngine.apply_document_styles(doc)
         
-        # Simple Cover Generation
-        for _ in range(5): doc.add_paragraph()
-        p = doc.add_paragraph(client.upper())
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p.runs[0].bold = True
-        p.runs[0].font.size = Pt(28)
-        p.runs[0].font.color.rgb = RGBColor(*theme_color)
+        # Personalized Cover Generation
+        for _ in range(2):
+            doc.add_paragraph()
+
+        if logo_stream:
+            cover_logo = doc.add_paragraph()
+            cover_logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            cover_logo.add_run().add_picture(logo_stream, width=Inches(1.8))
+
+        title = doc.add_paragraph("ARSITEKTUR PROPOSAL")
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_run = title.runs[0]
+        title_run.bold = True
+        title_run.font.size = Pt(30)
+        title_run.font.color.rgb = RGBColor(*theme_color)
+
+        subtitle = doc.add_paragraph(f"{service_type} – {project_type}")
+        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        subtitle.runs[0].font.size = Pt(14)
+
+        doc.add_paragraph()
+        client_line = doc.add_paragraph(f"Untuk: {client}")
+        client_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        client_line.runs[0].bold = True
+        client_line.runs[0].font.size = Pt(16)
+
+        project_line = doc.add_paragraph(f"Inisiatif: {project}")
+        project_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        meta = doc.add_paragraph(
+            f"Durasi: {timeline} | Estimasi Investasi: {budget or 'Menyesuaikan ruang lingkup'} | Tanggal: {datetime.now().strftime('%d %B %Y')}"
+        )
+        meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        firm_info = self.firm_api.get_firm_profile().get('contact_info', WRITER_FIRM_NAME)
+        contact = doc.add_paragraph(f"Disusun oleh {WRITER_FIRM_NAME}\n{firm_info}")
+        contact.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
         doc.add_page_break()
         
         for i, chap in enumerate(UNIVERSAL_STRUCTURE):
@@ -527,7 +567,7 @@ class ProposalGenerator:
                             {'role': 'system', 'content': ctx['prompt']}, 
                             {'role': 'user', 'content': f"Write content for {chap['title']}."}
                         ],
-                        options={'num_ctx': 4096, 'num_predict': 1024, 'temperature': 0.3}  
+                        options={'num_ctx': 8192, 'num_predict': 1600, 'temperature': 0.25}  
                     )
                     h = doc.add_heading(chap['title'], level=1)
                     h.runs[0].font.color.rgb = RGBColor(*theme_color)
