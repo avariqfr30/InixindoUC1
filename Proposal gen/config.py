@@ -83,64 +83,90 @@ MOCK_FIRM_STANDARDS = {
 }
 
 # =====================================================================
-# PROPOSAL STRUCTURE (CONCISE & DENSE TARGET)
+# PROPOSAL STRUCTURE (TARGET: 20-25 PAGES TOTAL)
 # =====================================================================
 UNIVERSAL_STRUCTURE = [
     {
         "id": "c_1", "title": "BAB I – KONTEKS ORGANISASI",
-        "subs": ["1.1 Latar Belakang Singkat", "1.2 Visi & Objektif"],
+        "subs": ["1.1 Latar Belakang Perusahaan", "1.2 Dinamika dan Visi Saat Ini"],
         "keywords": "context background vision strategy",
-        "length_intent": "Target: 150 words. Write directly and concisely using bullet points. Focus purely on facts from OSINT."
+        "length_intent": "Provide a thorough background using the OSINT data. Detail the market conditions and the macro-level vision. (Target: 500 words)."
     },
     {
         "id": "c_2", "title": "BAB II – PERMASALAHAN",
-        "subs": ["2.1 Tantangan Utama", "2.2 Dampak Bisnis"],
-        "keywords": "problem pain points bottleneck issue",
-        "length_intent": "Target: 200 words. Provide a direct, unpadded Root Cause Analysis. List impacts using bullet points."
+        "subs": ["2.1 Tantangan Utama dan Root Cause Analysis", "2.2 Dampak Terhadap Bisnis dan Risiko Masa Depan"],
+        "keywords": "problem pain points bottleneck issue root cause",
+        "length_intent": "Perform a focused Root Cause Analysis (RCA). Theorize why it is happening structurally and quantify the business risks. (Target: 600 words)."
     },
     {
-        "id": "c_3", "title": "BAB III – SOLUSI & PENDEKATAN",
-        "subs": ["3.1 Arsitektur Solusi", "3.2 Nilai Tambah"],
-        "keywords": "solution approach architecture",
-        "length_intent": "Target: 200 words. Explain technical implementation practically without academic theory."
+        "id": "c_3", "title": "BAB III – SOLUSI DAN PENDEKATAN",
+        "subs": ["3.1 Klasifikasi Kebutuhan Strategis", "3.2 Arsitektur Pendekatan Solusi"],
+        "keywords": "solution approach diagnostic strategic implementation architecture",
+        "length_intent": "Deliver a technical explanation of the proposed solution. Break down how the solution resolves the Root Causes. (Target: 600 words)."
     },
     {
-        "id": "c_4", "title": "BAB IV – KERANGKA KERJA & KEPATUHAN",
-        "subs": ["4.1 Framework Terpilih", "4.2 Pemenuhan Regulasi"],
-        "keywords": "framework iso cobit regulation compliance",
-        "length_intent": "Target: 150 words. State exactly how the framework maps to the client's needs."
+        "id": "c_4", "title": "BAB IV – POTENSI KERANGKA KERJA",
+        "subs": ["4.1 Pemetaan Framework Global", "4.2 Pemenuhan Kepatuhan dan Regulasi Nasional"],
+        "keywords": "framework iso cobit itil regulation compliance",
+        "length_intent": "Provide an authoritative breakdown of EVERY requested framework based on the OSINT data. Explain practical implementation. (Target: 500 words)."
     },
     {
-        "id": "c_5", "title": "BAB V – METODOLOGI & WAKTU",
-        "subs": ["5.1 Fase Pelaksanaan", "5.2 Jadwal Estimasi"],
-        "keywords": "methodology timeline schedule phase",
-        "length_intent": "Target: 200 words. Highly structured, step-by-step methodology breakdown. No filler.",
+        "id": "c_5", "title": "BAB V – MANFAAT",
+        "subs": ["5.1 Efisiensi dan Optimalisasi Operasional", "5.2 ROI, Skalabilitas, dan Nilai Tambah Bisnis"],
+        "keywords": "benefit roi advantage growth efficiency scalability",
+        "length_intent": "Write a strong business case. Include hypothetical percentages and long-term strategic advantages. (Target: 400 words)."
+    },
+    {
+        "id": "c_6", "title": "BAB VI – METODOLOGI",
+        "subs": ["6.1 Rincian Pendekatan Pelaksanaan Berfase", "6.2 Manajemen Risiko dan Jaminan Kualitas"],
+        "keywords": "methodology quality assurance process framework risk mitigation",
+        "length_intent": "Explain the inputs, processes, and expected outputs of every phase. Detail how risks are mitigated. (Target: 600 words).",
+        "visual_intent": "flowchart"
+    },
+    {
+        "id": "c_7", "title": "BAB VII – TAHAPAN DAN WAKTU",
+        "subs": ["7.1 Penjabaran Jadwal Pelaksanaan", "7.2 Milestone Kritis dan Kriteria Penerimaan"],
+        "keywords": "timeline phase schedule milestone sprint",
+        "length_intent": "Provide a narrative describing what happens in the timeline phases. Define Acceptance Criteria. (Target: 400 words).",
         "visual_intent": "gantt"
     },
     {
-        "id": "c_6", "title": "BAB VI – TIM & KAPABILITAS",
-        "subs": ["6.1 Struktur Tim", "6.2 Portofolio Firm"],
-        "keywords": "team expert role portfolio",
-        "length_intent": "Target: 150 words. Confident list of roles and past successes."
+        "id": "c_8", "title": "BAB VIII – TIM DAN KAPABILITAS",
+        "subs": ["8.1 Struktur Organisasi Tata Kelola Proyek", "8.2 Profil Peran dan Rekam Jejak Firm"],
+        "keywords": "team expert role structure director manager portfolio",
+        "length_intent": "Detail the governance structure. Firmly assert the firm's historical excellence using the dynamically provided API and OSINT data. (Target: 500 words)."
     },
     {
-        "id": "c_7", "title": "BAB VII – ESTIMASI BIAYA & PENUTUP",
-        "subs": ["7.1 Investasi", "7.2 Kesimpulan & Langkah Lanjut"],
-        "keywords": "budget cost investment closing",
-        "length_intent": "Target: 200 words. Include a markdown table for pricing. Provide a decisive 2-sentence closing."
+        "id": "c_9", "title": "BAB IX – ESTIMASI BIAYA",
+        "subs": ["9.1 Rincian Investasi Komprehensif", "9.2 Ketentuan Komersial dan Asumsi Legal"],
+        "keywords": "budget cost commercial investment terms assumption legal",
+        "length_intent": "Provide a Markdown table for costs. Detail the assumptions, exclusions, and commercial terms. (Target: 400 words)."
+    },
+    {
+        "id": "c_10", "title": "BAB X – PENUTUP",
+        "subs": ["10.1 Kesimpulan Eksekutif", "10.2 Rencana Tindak Lanjut (Next Steps)"],
+        "keywords": "closing commitment next steps",
+        "length_intent": "Write a strong executive conclusion. End with a call to action and the exact firm contact details provided in the dynamic instructions. (Target: 200 words)."
     }
 ]
 
 PERSONAS = {
-    "default": "Principal Management Consultant",
     "c_1": "Senior Business Analyst",
+    "c_2": "Principal Enterprise Architect",
     "c_3": "Chief Technology Officer",
-    "c_7": "Commercial Director"
+    "c_4": "Lead Compliance & Governance Auditor",
+    "c_5": "Chief Financial Officer",
+    "c_6": "Senior Delivery Director",
+    "c_7": "Master Project Manager",
+    "c_8": "Partner/Managing Director",
+    "c_9": "Commercial Lead",
+    "c_10": "Senior Account Executive",
+    "default": "Principal Management Consultant"
 }
 
 PROPOSAL_SYSTEM_PROMPT = """
-You are an elite Principal Consultant at {writer_firm}.
-Your audience is the Executive Board of {client}. Adopt this persona: {persona}.
+You are an elite Principal Consultant and Technical Writer at {writer_firm}.
+Your target audience is the Executive Board of {client}. Adopt this persona: {persona}.
 
 --- STRICT WRITING RULES ---
 1. NO FLUFF: Write strictly "singkat, padat, tidak bertele-tele" (concise, dense, non-theoretical).
