@@ -87,80 +87,80 @@ MOCK_FIRM_STANDARDS = {
 # =====================================================================
 UNIVERSAL_STRUCTURE = [
     {
-        "id": "c_1", "title": "BAB I – KONTEKS ORGANISASI",
-        "subs": ["1.1 Latar Belakang Perusahaan", "1.2 Dinamika dan Visi Saat Ini"],
-        "keywords": "context background vision strategy",
-        "length_intent": "Provide a thorough background using the OSINT data. Detail the market conditions and the macro-level vision. (Target: 500 words)."
+        "id": "c_1", "title": "BAB I – KONTEKS KLIEN",
+        "subs": ["1.1 Latar Belakang Organisasi Klien", "1.2 Alasan Permintaan Jasa Konsultasi"],
+        "keywords": "client context background organizational profile",
+        "length_intent": "Jelaskan latar belakang organisasi klien yang menjadi dasar kebutuhan konsultasi, termasuk kondisi internal-eksternal yang relevan. (Target: 450 words)."
     },
     {
         "id": "c_2", "title": "BAB II – PERMASALAHAN",
-        "subs": ["2.1 Tantangan Utama dan Root Cause Analysis", "2.2 Dampak Terhadap Bisnis dan Risiko Masa Depan"],
-        "keywords": "problem pain points bottleneck issue root cause",
-        "length_intent": "Perform a focused Root Cause Analysis (RCA). Theorize why it is happening structurally and quantify the business risks. (Target: 600 words)."
+        "subs": ["2.1 Kebutuhan atau Keinginan Klien", "2.2 Rumusan Masalah yang Harus Diselesaikan"],
+        "keywords": "problem statement pain points client needs",
+        "length_intent": "Tangkap dengan jelas apa yang benar-benar dibutuhkan atau diinginkan klien serta konteks masalah inti yang harus diselesaikan. (Target: 500 words)."
     },
     {
-        "id": "c_3", "title": "BAB III – SOLUSI DAN PENDEKATAN",
-        "subs": ["3.1 Klasifikasi Kebutuhan Strategis", "3.2 Arsitektur Pendekatan Solusi"],
-        "keywords": "solution approach diagnostic strategic implementation architecture",
-        "length_intent": "Deliver a technical explanation of the proposed solution. Break down how the solution resolves the Root Causes. (Target: 600 words)."
+        "id": "c_3", "title": "BAB III – KLASIFIKASI KEBUTUHAN",
+        "subs": ["3.1 Klasifikasi Problem/Opportunity/Directive", "3.2 Tujuan Utama dan Jenis Proyek"],
+        "keywords": "needs classification problem opportunity directive project objective",
+        "length_intent": "Klasifikasikan kebutuhan klien ke dalam problem/opportunity/directive lalu tetapkan tujuan proyek dan jenis proyek yang paling tepat. (Target: 450 words)."
     },
     {
-        "id": "c_4", "title": "BAB IV – POTENSI KERANGKA KERJA",
-        "subs": ["4.1 Pemetaan Framework Global", "4.2 Pemenuhan Kepatuhan dan Regulasi Nasional"],
-        "keywords": "framework iso cobit itil regulation compliance",
-        "length_intent": "Provide an authoritative breakdown of EVERY requested framework based on the OSINT data. Explain practical implementation. (Target: 500 words)."
+        "id": "c_4", "title": "BAB IV – PENDEKATAN",
+        "subs": ["4.1 Acuan Prinsip/Framework/Teori/Regulasi", "4.2 Standar Penyelesaian Masalah"],
+        "keywords": "approach framework principle theory regulation standard",
+        "length_intent": "Uraikan acuan dan prinsip yang digunakan (framework/teori/regulasi/standar) sebagai landasan menyelesaikan masalah klien. (Target: 450 words)."
     },
     {
-        "id": "c_5", "title": "BAB V – MANFAAT",
-        "subs": ["5.1 Efisiensi dan Optimalisasi Operasional", "5.2 ROI, Skalabilitas, dan Nilai Tambah Bisnis"],
-        "keywords": "benefit roi advantage growth efficiency scalability",
-        "length_intent": "Write a strong business case. Include hypothetical percentages and long-term strategic advantages. (Target: 400 words)."
-    },
-    {
-        "id": "c_6", "title": "BAB VI – METODOLOGI",
-        "subs": ["6.1 Rincian Pendekatan Pelaksanaan Berfase", "6.2 Manajemen Risiko dan Jaminan Kualitas"],
-        "keywords": "methodology quality assurance process framework risk mitigation",
-        "length_intent": "Explain the inputs, processes, and expected outputs of every phase. Detail how risks are mitigated. (Target: 600 words).",
+        "id": "c_5", "title": "BAB V – METODOLOGI",
+        "subs": ["5.1 Alasan Pemilihan Metodologi", "5.2 Langkah Kerja dengan Framework Terpilih"],
+        "keywords": "methodology rationale implementation steps framework",
+        "length_intent": "Jelaskan mengapa metodologi tersebut dipilih dan bagaimana langkah kerja detail menggunakan framework tersebut. (Target: 550 words).",
         "visual_intent": "flowchart"
     },
     {
-        "id": "c_7", "title": "BAB VII – TAHAPAN DAN WAKTU",
-        "subs": ["7.1 Penjabaran Jadwal Pelaksanaan", "7.2 Milestone Kritis dan Kriteria Penerimaan"],
-        "keywords": "timeline phase schedule milestone sprint",
-        "length_intent": "Provide a narrative describing what happens in the timeline phases. Define Acceptance Criteria. (Target: 400 words).",
+        "id": "c_6", "title": "BAB VI – SOLUTION DESIGN",
+        "subs": ["6.1 Solusi/Output Metodologi yang Dibangun", "6.2 Kesesuaian Solusi terhadap Kebutuhan Klien"],
+        "keywords": "solution design output deliverables target state",
+        "length_intent": "Jelaskan desain solusi (output metodologi) yang akan dibangun atau diterapkan agar kebutuhan klien dapat tercapai. (Target: 550 words)."
+    },
+    {
+        "id": "c_7", "title": "BAB VII – TIMELINE PEKERJAAN",
+        "subs": ["7.1 Aktivitas per Fase", "7.2 Waktu Pelaksanaan dan Deliverable Tiap Fase"],
+        "keywords": "timeline phase schedule milestone deliverable",
+        "length_intent": "Jelaskan aktivitas yang dilakukan, kapan dilakukan, pada fase apa, serta deliverable pada setiap fase pekerjaan. (Target: 450 words).",
         "visual_intent": "gantt"
     },
     {
-        "id": "c_8", "title": "BAB VIII – TIM DAN KAPABILITAS",
-        "subs": ["8.1 Struktur Organisasi Tata Kelola Proyek", "8.2 Profil Peran dan Rekam Jejak Firm"],
-        "keywords": "team expert role structure director manager portfolio",
-        "length_intent": "Detail the governance structure. Firmly assert the firm's historical excellence using the dynamically provided API and OSINT data. (Target: 500 words)."
+        "id": "c_8", "title": "BAB VIII – TATA KELOLA PROYEK",
+        "subs": ["8.1 Mekanisme Pengambilan Keputusan", "8.2 Mekanisme Pengendalian Proyek"],
+        "keywords": "project governance decision making controls monitoring",
+        "length_intent": "Jelaskan tata kelola proyek, termasuk mekanisme pengambilan keputusan dan pengendalian agar proyek berjalan efektif. (Target: 450 words)."
     },
     {
-        "id": "c_9", "title": "BAB IX – ESTIMASI BIAYA",
-        "subs": ["9.1 Rincian Investasi Komprehensif", "9.2 Ketentuan Komersial dan Asumsi Legal"],
-        "keywords": "budget cost commercial investment terms assumption legal",
-        "length_intent": "Provide a Markdown table for costs. Detail the assumptions, exclusions, and commercial terms. (Target: 400 words)."
+        "id": "c_9", "title": "BAB IX – STRUKTUR & TEAM PROYEK",
+        "subs": ["9.1 Struktur Tim Proyek", "9.2 Kapabilitas, Pengalaman, dan Sertifikasi"],
+        "keywords": "project team structure capability experience certification",
+        "length_intent": "Tunjukkan struktur dan komposisi tim proyek beserta kapabilitas, pengalaman, dan sertifikasi untuk membangun kepercayaan klien. (Target: 450 words)."
     },
     {
-        "id": "c_10", "title": "BAB X – PENUTUP",
-        "subs": ["10.1 Kesimpulan Eksekutif", "10.2 Rencana Tindak Lanjut (Next Steps)"],
-        "keywords": "closing commitment next steps",
-        "length_intent": "Write a strong executive conclusion. End with a call to action and the exact firm contact details provided in the dynamic instructions. (Target: 200 words)."
+        "id": "c_10", "title": "BAB X – MODEL PEMBIAYAAN",
+        "subs": ["10.1 Biaya dan Tahapan Pembayaran", "10.2 Model Pekerjaan dan Batasan Pekerjaan"],
+        "keywords": "commercial pricing payment terms scope boundaries",
+        "length_intent": "Jelaskan model bisnis proyek yang mencakup biaya, tahapan pembayaran, model pekerjaan, dan batasan pekerjaan secara jelas dan tegas. (Target: 450 words)."
     }
 ]
 
 PERSONAS = {
     "c_1": "Senior Business Analyst",
     "c_2": "Principal Enterprise Architect",
-    "c_3": "Chief Technology Officer",
+    "c_3": "Lead Strategy Consultant",
     "c_4": "Lead Compliance & Governance Auditor",
-    "c_5": "Chief Financial Officer",
-    "c_6": "Senior Delivery Director",
+    "c_5": "Senior Delivery Director",
+    "c_6": "Chief Solution Architect",
     "c_7": "Master Project Manager",
-    "c_8": "Partner/Managing Director",
-    "c_9": "Commercial Lead",
-    "c_10": "Senior Account Executive",
+    "c_8": "Program Governance Lead",
+    "c_9": "Partner/Managing Director",
+    "c_10": "Commercial Lead",
     "default": "Principal Management Consultant"
 }
 
