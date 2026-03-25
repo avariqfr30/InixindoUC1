@@ -692,7 +692,7 @@ class ProposalGenerator:
                                     "and bullets for supporting details with short explanations, include practical examples and metrics."
                                 )}
                             ],
-                            options={'num_ctx': 8192, 'num_predict': 2600, 'temperature': 0.2}
+                            options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.3, 'top_p': 0.85, 'repeat_penalty': 1.15}
                         )
                         content = expand['message']['content']
 
