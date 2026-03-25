@@ -706,7 +706,7 @@ class ProposalGenerator:
                                     "Keep exact H2 headings, retain numbered/bullet formatting, and remove repetition."
                                 )}
                             ],
-                            options={'num_ctx': 8192, 'num_predict': 1800, 'temperature': 0.1}
+                            options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.3, 'top_p': 0.85, 'repeat_penalty': 1.15}
                         )
                         content = condense['message']['content']
 
