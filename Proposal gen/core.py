@@ -677,7 +677,7 @@ class ProposalGenerator:
                             {'role': 'system', 'content': ctx['prompt']},
                             {'role': 'user', 'content': f"Write content for {chap['title']}."}
                         ],
-                        options={'num_ctx': 8192, 'num_predict': 2200, 'temperature': 0.2}
+                        options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.3, 'top_p': 0.85, 'repeat_penalty': 1.15}
                     )
                     content = res['message']['content']
                     target_words = self._target_words(chap)
