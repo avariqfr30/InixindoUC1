@@ -12,7 +12,7 @@ from chromadb.config import Settings
 import concurrent.futures
 from datetime import datetime
 from functools import lru_cache
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Dict, List, Any, Tuple, Optional, Set
 from urllib.parse import urlparse
 
 import matplotlib
@@ -1217,6 +1217,48 @@ class ProposalGenerator:
         while len(cache) > max_size:
             cache.pop(next(iter(cache)))
 
+    @staticmethod
+    def _normalize_external_citation(domain: str, year: str) -> str:
+        domain_clean = (domain or "").strip().lower()
+        year_clean = (year or "").strip().lower()
+        if year_clean in {"nd", "n.d", "n.d"}:
+            year_clean = "n.d."
+        return f"({domain_clean}, {year_clean})"
+
+    @classmethod
+    def _extract_external_citations(cls, text: str) -> List[str]:
+        pattern = r"\(([A-Za-z0-9.-]+\.[A-Za-z]{2,}),\s*(\d{4}|n\.d\.)\)"
+        citations = []
+        for domain, year in re.findall(pattern, text or "", flags=re.IGNORECASE):
+            citations.append(cls._normalize_external_citation(domain, year))
+        return citations
+
+    @classmethod
+    def _collect_allowed_external_citations(cls, research_bundle: Dict[str, str]) -> Set[str]:
+        if not research_bundle:
+            return set()
+        merged = "\n".join([
+            str(research_bundle.get("profile", "")),
+            str(research_bundle.get("news", "")),
+            str(research_bundle.get("regulations", "")),
+        ])
+        return set(cls._extract_external_citations(merged))
+
+    @classmethod
+    def _clean_external_citations(cls, content: str, allowed_external_citations: Set[str]) -> str:
+        allowed = set(allowed_external_citations or set())
+        pattern = r"\(([A-Za-z0-9.-]+\.[A-Za-z]{2,}),\s*(\d{4}|n\.d\.)\)"
+
+        def replace_invalid(match: re.Match) -> str:
+            citation = cls._normalize_external_citation(match.group(1), match.group(2))
+            return match.group(0) if citation in allowed else ""
+
+        cleaned = re.sub(pattern, replace_invalid, content or "", flags=re.IGNORECASE)
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+        cleaned = re.sub(r"\(\s*\)", "", cleaned)
+        cleaned = re.sub(r"\s+([,.;:])", r"\1", cleaned)
+        return cleaned
+
     def _resolve_chapters(self, chapter_id: Optional[str]) -> List[Dict[str, Any]]:
         normalized_id = (chapter_id or "").strip()
         if not normalized_id or normalized_id.lower() in {"all", "semua"}:
@@ -1395,6 +1437,7 @@ class ProposalGenerator:
             global_data = research_bundle.get('profile', '')
             client_news = research_bundle.get('news', '')
             regulation_data = research_bundle.get('regulations', '')
+            allowed_external_citations = self._collect_allowed_external_citations(research_bundle)
 
             ctx_key = self._cache_key("chapter_ctx", client, project, budget, chapter.get('id', ''), chapter.get('keywords', ''))
             cached_ctx = self._chapter_context_cache.get(ctx_key)
@@ -1455,11 +1498,19 @@ class ProposalGenerator:
                     f"Gunakan tone hangat, profesional, dan meyakinkan."
                 )
 
-            extra += (
-                f" [CITATION] Untuk klaim dari OSINT, gunakan sitasi APA in-text dengan domain dan tahun "
-                f"(contoh: (kompas.com, 2025)). Untuk klaim dari data internal, gunakan (Data Internal, {current_year}). "
-                "Dilarang memakai sitasi placeholder seperti (OSINT #1) atau (RAG Semantic)."
-            )
+            if allowed_external_citations:
+                allowed_list = ", ".join(sorted(allowed_external_citations))
+                extra += (
+                    f" [CITATION] Sitasi eksternal hanya boleh memakai daftar ini: {allowed_list}. "
+                    f"Untuk klaim dari data internal, gunakan (Data Internal, {current_year}). "
+                    "Dilarang membuat domain/sitasi eksternal baru di luar daftar dan dilarang memakai placeholder sitasi."
+                )
+            else:
+                extra += (
+                    f" [CITATION] Tidak ada sumber eksternal tervalidasi untuk bab ini. "
+                    f"Dilarang menulis sitasi domain eksternal apa pun. Gunakan (Data Internal, {current_year}) "
+                    "untuk klaim yang berasal dari data internal."
+                )
 
             internal_citation_note = f"Gunakan sitasi internal: (Data Internal, {current_year})."
             structured_row_data_with_note = (
@@ -1502,7 +1553,8 @@ class ProposalGenerator:
         chapter: Dict[str, Any],
         content: str,
         client: str,
-        target_words: Optional[int] = None
+        target_words: Optional[int] = None,
+        allowed_external_citations: Optional[Set[str]] = None
     ) -> Dict[str, Any]:
         target_words = int(target_words or self._target_words(chapter))
         floor = max(140, int(self._chapter_floor_words(chapter.get("id", ""), for_compression=False) * 0.8))
@@ -1534,6 +1586,17 @@ class ProposalGenerator:
         if not has_client_ref:
             issues.append("missing_client_ref")
 
+        invalid_external_citations: List[str] = []
+        if allowed_external_citations is not None:
+            cited_external = sorted(set(self._extract_external_citations(content)))
+            allowed = set(allowed_external_citations)
+            if not allowed and cited_external:
+                invalid_external_citations = cited_external
+            elif allowed:
+                invalid_external_citations = [citation for citation in cited_external if citation not in allowed]
+            if invalid_external_citations:
+                issues.append("citation_policy")
+
         return {
             "issues": issues,
             "word_count": word_count,
@@ -1541,6 +1604,7 @@ class ProposalGenerator:
             "min_words": min_words,
             "max_words": max_words,
             "missing_h2": missing_h2,
+            "invalid_external_citations": invalid_external_citations,
         }
 
     def _ensure_required_headings(self, chapter: Dict[str, Any], content: str) -> str:
@@ -1675,8 +1739,10 @@ class ProposalGenerator:
         chapter: Dict[str, Any],
         prompt: str,
         client: str,
-        target_words: int
+        target_words: int,
+        allowed_external_citations: Optional[Set[str]] = None
     ) -> str:
+        allowed = set(allowed_external_citations or set())
         # First draft pass for a chapter.
         res = self.ollama.chat(
             model=LLM_MODEL,
@@ -1690,19 +1756,31 @@ class ProposalGenerator:
             ],
             options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.25, 'top_p': 0.85, 'repeat_penalty': 1.1}
         )
-        content = (res.get('message', {}).get('content', '') or '').strip()
-        report = self._evaluate_chapter_quality(chapter, content, client, target_words=target_words)
-        hard_check_keys = {"missing_h2", "too_short", "too_long", "list_structure", "missing_visual"}
+        content = self._clean_external_citations((res.get('message', {}).get('content', '') or '').strip(), allowed)
+        report = self._evaluate_chapter_quality(
+            chapter,
+            content,
+            client,
+            target_words=target_words,
+            allowed_external_citations=allowed
+        )
+        hard_check_keys = {"missing_h2", "too_short", "too_long", "list_structure", "missing_visual", "citation_policy"}
         hard_issues = [i for i in report["issues"] if i in hard_check_keys]
         if not hard_issues:
             return content
 
         # Retry once when hard checks fail.
+        citation_policy_note = (
+            f"Allowed external citations: {', '.join(sorted(allowed)) if allowed else 'none'}.\n"
+            f"Invalid external citations found: {', '.join(report.get('invalid_external_citations', [])) or '-'}.\n"
+            "Hapus semua sitasi eksternal yang tidak ada di daftar allowed.\n"
+        )
         retry_prompt = (
             f"Perbaiki draft {chapter['title']} agar lulus hard quality checks.\n"
             f"Issues: {', '.join(hard_issues)}\n"
             f"Word count: {report['word_count']} (target {report['target_words']}, range {report['min_words']}-{report['max_words']}).\n"
             f"Missing H2: {', '.join(report['missing_h2']) if report['missing_h2'] else '-'}\n"
+            f"{citation_policy_note}"
             "Pertahankan fakta dan konteks. Keluarkan versi final saja.\n\n"
             f"DRAFT:\n{content}"
         )
@@ -1717,14 +1795,35 @@ class ProposalGenerator:
             )
             improved = (retry.get('message', {}).get('content', '') or '').strip()
             if improved:
-                content = improved
+                content = self._clean_external_citations(improved, allowed)
         except Exception:
             pass
 
-        final_report = self._evaluate_chapter_quality(chapter, content, client, target_words=target_words)
+        final_report = self._evaluate_chapter_quality(
+            chapter,
+            content,
+            client,
+            target_words=target_words,
+            allowed_external_citations=allowed
+        )
         if final_report.get("missing_h2"):
             content = self._ensure_required_headings(chapter, content)
-            final_report = self._evaluate_chapter_quality(chapter, content, client, target_words=target_words)
+            final_report = self._evaluate_chapter_quality(
+                chapter,
+                content,
+                client,
+                target_words=target_words,
+                allowed_external_citations=allowed
+            )
+        if "citation_policy" in final_report.get("issues", []):
+            content = self._clean_external_citations(content, allowed)
+            final_report = self._evaluate_chapter_quality(
+                chapter,
+                content,
+                client,
+                target_words=target_words,
+                allowed_external_citations=allowed
+            )
 
         if final_report["issues"]:
             logger.warning(f"Quality checks not fully satisfied for {chapter['title']}: {', '.join(final_report['issues'])}")
@@ -1735,8 +1834,10 @@ class ProposalGenerator:
         chapter: Dict[str, Any],
         prompt: str,
         content: str,
-        target_words: int
+        target_words: int,
+        allowed_external_citations: Optional[Set[str]] = None
     ) -> str:
+        allowed = set(allowed_external_citations or set())
         try:
             res = self.ollama.chat(
                 model=LLM_MODEL,
@@ -1752,9 +1853,9 @@ class ProposalGenerator:
                 options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.15, 'top_p': 0.8, 'repeat_penalty': 1.1}
             )
             revised = (res.get('message', {}).get('content', '') or '').strip()
-            return revised or content
+            return self._clean_external_citations(revised or content, allowed)
         except Exception:
-            return content
+            return self._clean_external_citations(content, allowed)
 
     def _fit_into_word_budget(
         self,
@@ -1762,7 +1863,8 @@ class ProposalGenerator:
         chapter_prompts: Dict[str, str],
         chapter_map: Dict[str, Dict[str, Any]],
         chapter_targets: Dict[str, int],
-        max_words: int
+        max_words: int,
+        allowed_external_citations: Optional[Set[str]] = None
     ) -> Dict[str, str]:
         outputs = dict(chapter_outputs)
 
@@ -1804,7 +1906,13 @@ class ProposalGenerator:
 
                 target = max(minimum, current_words - min(reducible, max(120, overflow)))
                 target = min(target, max(minimum, int(chapter_targets.get(cid, target) * 0.95)))
-                compressed = self._tighten_chapter(chapter, prompt, outputs[cid], target)
+                compressed = self._tighten_chapter(
+                    chapter,
+                    prompt,
+                    outputs[cid],
+                    target,
+                    allowed_external_citations=allowed_external_citations
+                )
                 if compressed == outputs[cid]:
                     continue
                 outputs[cid] = compressed
@@ -1826,7 +1934,13 @@ class ProposalGenerator:
                 target = max(minimum, int(current_words * ratio))
                 if target >= current_words - 60:
                     continue
-                outputs[cid] = self._tighten_chapter(chapter, prompt, text, target)
+                outputs[cid] = self._tighten_chapter(
+                    chapter,
+                    prompt,
+                    text,
+                    target,
+                    allowed_external_citations=allowed_external_citations
+                )
 
         return outputs
 
@@ -1851,6 +1965,7 @@ class ProposalGenerator:
         firm_profile = self.firm_api.get_firm_profile()
         base_client = re.sub(r'\b(Cabang|Branch|Tbk)\b.*$|^(PT\.|CV\.)', '', client, flags=re.IGNORECASE).strip()
         research_bundle = self._get_research_bundle(base_client, regulations)
+        allowed_external_citations = self._collect_allowed_external_citations(research_bundle)
         proposal_contract = self._build_proposal_contract(
             client=client,
             project=project,
@@ -1890,25 +2005,37 @@ class ProposalGenerator:
                     chapter=chapter,
                     prompt=ctx['prompt'],
                     client=client,
-                    target_words=chapter_targets.get(chapter['id'], self._target_words(chapter))
+                    target_words=chapter_targets.get(chapter['id'], self._target_words(chapter)),
+                    allowed_external_citations=allowed_external_citations
                 )
             except Exception as e:
                 logger.error(f"Generation Error for {chapter['title']}: {e}")
+
+        chapter_outputs = {
+            chapter_id: self._clean_external_citations(content, allowed_external_citations)
+            for chapter_id, content in chapter_outputs.items()
+        }
 
         chapter_outputs = self._fit_into_word_budget(
             chapter_outputs=chapter_outputs,
             chapter_prompts=chapter_prompts,
             chapter_map=chapter_map,
             chapter_targets=chapter_targets,
-            max_words=content_word_budget
+            max_words=content_word_budget,
+            allowed_external_citations=allowed_external_citations
         )
         chapter_outputs = self._apply_global_coherence(chapter_outputs, selected_chapters, client, project)
+        chapter_outputs = {
+            chapter_id: self._clean_external_citations(content, allowed_external_citations)
+            for chapter_id, content in chapter_outputs.items()
+        }
         chapter_outputs = self._fit_into_word_budget(
             chapter_outputs=chapter_outputs,
             chapter_prompts=chapter_prompts,
             chapter_map=chapter_map,
             chapter_targets=chapter_targets,
-            max_words=content_word_budget
+            max_words=content_word_budget,
+            allowed_external_citations=allowed_external_citations
         )
         generated_words = sum(self._word_count(t) for t in chapter_outputs.values() if t)
         estimated_pages = self._estimated_pages(generated_words)
@@ -1922,7 +2049,8 @@ class ProposalGenerator:
                 chapter_prompts=chapter_prompts,
                 chapter_map=chapter_map,
                 chapter_targets=chapter_targets,
-                max_words=tighter_budget
+                max_words=tighter_budget,
+                allowed_external_citations=allowed_external_citations
             )
 
         try:
