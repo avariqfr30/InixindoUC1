@@ -138,7 +138,7 @@
         <div id="step-success" class="hidden" style="text-align:center; padding: 20px;">
             <div style="font-size: 50px; margin-bottom: 15px;">✅</div>
             <h2>Selesai!</h2>
-            <p class="sub">Dokumen berhasil disusun menggunakan format ringkas.</p>
+            <p id="success-message" class="sub">Dokumen berhasil disusun menggunakan format ringkas.</p>
             <button type="button" onclick="location.reload()" class="secondary">Buat Baru</button>
         </div>
     </div>
@@ -148,6 +148,7 @@
             loader: document.getElementById('loader'),
             configStep: document.getElementById('step-config'),
             successStep: document.getElementById('step-success'),
+            successMessage: document.getElementById('success-message'),
             selPerusahaan: document.getElementById('select-perusahaan'),
             selProposal: document.getElementById('select-proposal'),
             selProyek: document.getElementById('select-proyek'),
@@ -169,6 +170,13 @@
             financeSummary: document.getElementById('finance-summary'),
             financeOptions: document.getElementById('finance-options'),
             spinner: document.getElementById('spinner')
+        };
+
+        const showScreen = (screen) => {
+            [ui.loader, ui.configStep, ui.successStep].forEach(el => el.classList.add('hidden'));
+            if (screen === 'loader') ui.loader.classList.remove('hidden');
+            if (screen === 'config') ui.configStep.classList.remove('hidden');
+            if (screen === 'success') ui.successStep.classList.remove('hidden');
         };
 
         // UI Logic for the "Lainnya" Checkbox
@@ -213,10 +221,10 @@
                 const data = await res.json();
                 ui.selPerusahaan.innerHTML = `<option value="" disabled selected>Pilih Klien...</option>`;
                 data.forEach(d => ui.selPerusahaan.add(new Option(d, d)));
-                ui.loader.classList.add('hidden');
-                ui.configStep.classList.remove('hidden');
+                showScreen('config');
             } catch (e) {
                 document.getElementById('loader-text').innerText = "Gagal memuat database.";
+                showScreen('loader');
             }
         }
         init();
@@ -322,7 +330,14 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)
                 });
-                if (!res.ok) throw new Error();
+                if (!res.ok) {
+                    let message = "Gagal generate dokumen.";
+                    try {
+                        const errData = await res.json();
+                        if (errData && errData.error) message = errData.error;
+                    } catch (_) {}
+                    throw new Error(message);
+                }
                 
                 const blob = await res.blob();
                 const url = window.URL.createObjectURL(blob);
@@ -330,11 +345,14 @@
                 a.href = url;
                 a.download = `Proposal_Ringkas_${payload.nama_perusahaan.replace(/\s+/g, '_')}.docx`;
                 a.click();
+                window.URL.revokeObjectURL(url);
                 
-                ui.configStep.classList.add('hidden');
-                ui.successStep.classList.remove('hidden');
+                ui.successMessage.innerText = `Proposal untuk ${payload.nama_perusahaan} selesai dibuat dan siap diunduh.`;
+                showScreen('success');
             } catch (e) {
-                alert("Gagal generate dokumen. Periksa console/log server.");
+                alert(e.message || "Gagal generate dokumen. Periksa console/log server.");
+                showScreen('config');
+            } finally {
                 ui.btnGenerate.disabled = false;
                 ui.spinner.classList.remove('active');
             }
