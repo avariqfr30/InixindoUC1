@@ -53,18 +53,21 @@ def preview_outline():
 @app.route('/generate', methods=['POST'])
 def generate_doc():
     data = request.json
-    
-    doc, filename = generator.run(
-        client=data.get('nama_perusahaan', ''),
-        project=data.get('konteks_organisasi', ''),
-        budget=data.get('estimasi_biaya', ''),
-        service_type=data.get('jenis_proposal', 'Konsultan'),
-        project_goal=data.get('klasifikasi_kebutuhan', 'Problem'),
-        project_type=data.get('jenis_proyek', 'Implementation'),
-        timeline=data.get('estimasi_waktu', 'TBD'),
-        notes=data.get('permasalahan', ''),
-        regulations=data.get('potensi_framework', '')
-    )
+    try:
+        doc, filename = generator.run(
+            client=data.get('nama_perusahaan', ''),
+            project=data.get('konteks_organisasi', ''),
+            budget=data.get('estimasi_biaya', ''),
+            service_type=data.get('jenis_proposal', 'Konsultan'),
+            project_goal=data.get('klasifikasi_kebutuhan', 'Problem'),
+            project_type=data.get('jenis_proyek', 'Implementation'),
+            timeline=data.get('estimasi_waktu', 'TBD'),
+            notes=data.get('permasalahan', ''),
+            regulations=data.get('potensi_framework', ''),
+            chapter_id=data.get('chapter_id')
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     
     out = io.BytesIO()
     doc.save(out)

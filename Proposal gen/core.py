@@ -530,6 +530,62 @@ class ProposalGenerator:
     def _word_count(text: str) -> int:
         return len(re.findall(r'\b\w+\b', text))
 
+    def _resolve_chapters(self, chapter_id: Optional[str]) -> List[Dict[str, Any]]:
+        normalized_id = (chapter_id or "").strip()
+        if not normalized_id or normalized_id.lower() in {"all", "semua"}:
+            return UNIVERSAL_STRUCTURE
+
+        selected = [chap for chap in UNIVERSAL_STRUCTURE if chap["id"] == normalized_id]
+        if selected:
+            return selected
+
+        normalized = normalized_id.lower()
+        selected = [chap for chap in UNIVERSAL_STRUCTURE if chap["title"].strip().lower() == normalized]
+        if selected:
+            return selected
+
+        raise ValueError(f"Unknown chapter_id: {normalized_id}")
+
+    def build_preview_outline(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        chapter_id = (data or {}).get("chapter_id")
+        try:
+            chapters = self._resolve_chapters(chapter_id)
+        except ValueError:
+            chapters = UNIVERSAL_STRUCTURE
+
+        client = (data or {}).get("nama_perusahaan", "Klien")
+        objective = (data or {}).get("konteks_organisasi", "").strip() or "tujuan proyek belum diisi"
+        issues = (data or {}).get("permasalahan", "").strip() or "pain points belum diisi"
+        need_type = (data or {}).get("klasifikasi_kebutuhan", "").strip() or "belum dipilih"
+        project_type = (data or {}).get("jenis_proyek", "").strip() or "belum dipilih"
+        service_type = (data or {}).get("jenis_proposal", "").strip() or "belum dipilih"
+        frameworks = (data or {}).get("potensi_framework", "").strip() or "belum dipilih"
+        timeline = (data or {}).get("estimasi_waktu", "").strip() or "belum ditentukan"
+        budget = (data or {}).get("estimasi_biaya", "").strip() or "belum ditentukan"
+
+        preview_map = {
+            "c_1": f"Menetapkan konteks organisasi {client} dan objektif inisiatif: {objective}.",
+            "c_2": f"Mengurai kebutuhan dan akar masalah klien berdasarkan pain points: {issues}.",
+            "c_3": f"Mengkategorikan kebutuhan ke {need_type} lalu memvalidasi jenis proyek {project_type}.",
+            "c_4": f"Menautkan kebutuhan klien dengan framework/regulasi utama: {frameworks}.",
+            "c_5": f"Menjelaskan pemilihan metodologi delivery untuk layanan {service_type}.",
+            "c_6": "Mendetailkan target state, output, dan deliverable solusi yang dapat dieksekusi.",
+            "c_7": f"Menyusun rencana fase, milestone, dan deliverable berdasarkan durasi {timeline}.",
+            "c_8": "Merumuskan governance proyek: forum keputusan, eskalasi isu, dan quality gate.",
+            "c_9": f"Menetapkan struktur tim dan kapabilitas yang dibutuhkan untuk model {service_type}.",
+            "c_10": f"Mendefinisikan model pembiayaan, termin pembayaran, dan batasan scope dengan estimasi {budget}.",
+        }
+
+        return [
+            {
+                "id": chap["id"],
+                "title": chap["title"],
+                "preview": preview_map.get(chap["id"], "Ringkasan konten bab akan disesuaikan dengan konteks klien."),
+                "subsections": chap["subs"],
+            }
+            for chap in chapters
+        ]
+
     def _fetch_chapter_context(self, chap, client, project, budget, service_type, project_goal, project_type, timeline, notes, regulations, firm_data, research_futures) -> Dict[str, Any]:
         try:
             global_data = research_futures['profile'].result(timeout=5)
@@ -595,7 +651,64 @@ class ProposalGenerator:
         except Exception as e:
             return {"prompt": "", "success": False, "error": str(e)}
 
-    def run(self, client: str, project: str, budget: str = "", service_type: str = "Konsultan", project_goal: str = "Problem", project_type: str = "Implementation", timeline: str = "TBD", notes: str = "", regulations: str = "") -> Tuple[Document, str]:
+    def _generate_chapter_content(self, chap: Dict[str, Any], prompt: str) -> str:
+        res = self.ollama.chat(
+            model=LLM_MODEL,
+            messages=[
+                {'role': 'system', 'content': prompt},
+                {'role': 'user', 'content': f"Write content for {chap['title']}."}
+            ],
+            options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.3, 'top_p': 0.85, 'repeat_penalty': 1.15}
+        )
+        content = res['message']['content']
+        target_words = self._target_words(chap)
+
+        if self._word_count(content) < int(target_words * 0.8):
+            expand = self.ollama.chat(
+                model=LLM_MODEL,
+                messages=[
+                    {'role': 'system', 'content': prompt},
+                    {'role': 'user', 'content': (
+                        f"Revise and expand {chap['title']} to be more detailed. Minimum {target_words} words. "
+                        "Keep exact H2 headings, add 2-3 H3 under each H2, use numbered lists for sequence "
+                        "and bullets for supporting details with short explanations, include practical examples and metrics."
+                    )}
+                ],
+                options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.3, 'top_p': 0.85, 'repeat_penalty': 1.15}
+            )
+            content = expand['message']['content']
+
+        if self._word_count(content) > self._max_words(chap):
+            condense = self.ollama.chat(
+                model=LLM_MODEL,
+                messages=[
+                    {'role': 'system', 'content': prompt},
+                    {'role': 'user', 'content': (
+                        f"Condense {chap['title']} to around {target_words} words while preserving all key facts and structure. "
+                        "Keep exact H2 headings, retain numbered/bullet formatting, and remove repetition."
+                    )}
+                ],
+                options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.3, 'top_p': 0.85, 'repeat_penalty': 1.15}
+            )
+            content = condense['message']['content']
+
+        return content
+
+    def run(
+        self,
+        client: str,
+        project: str,
+        budget: str = "",
+        service_type: str = "Konsultan",
+        project_goal: str = "Problem",
+        project_type: str = "Implementation",
+        timeline: str = "TBD",
+        notes: str = "",
+        regulations: str = "",
+        chapter_id: Optional[str] = None
+    ) -> Tuple[Document, str]:
+        selected_chapters = self._resolve_chapters(chapter_id)
+
         firm_data = self.firm_api.get_project_standards(project_type)
         base_client = re.sub(r'\b(Cabang|Branch|Tbk)\b.*$|^(PT\.|CV\.)', '', client, flags=re.IGNORECASE).strip()
 
@@ -606,13 +719,13 @@ class ProposalGenerator:
         }
         logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client) 
         
-        # Passing ALL the variables to _fetch_chapter_context
+        # Build context only for selected chapter(s) to keep generation efficient.
         context_futures = {
             chap['id']: self.io_pool.submit(
                 self._fetch_chapter_context, 
                 chap, client, project, budget, service_type, project_goal, project_type, timeline, notes, regulations, firm_data, research_futures
             )
-            for chap in UNIVERSAL_STRUCTURE
+            for chap in selected_chapters
         }
 
         try:
@@ -643,7 +756,12 @@ class ProposalGenerator:
         title_run.font.size = Pt(30)
         title_run.font.color.rgb = RGBColor(*theme_color)
 
-        subtitle = doc.add_paragraph(f"{service_type} – {project_type}")
+        if len(selected_chapters) == 1:
+            subtitle_text = f"{selected_chapters[0]['title']} ({service_type} – {project_type})"
+        else:
+            subtitle_text = f"{service_type} – {project_type}"
+
+        subtitle = doc.add_paragraph(subtitle_text)
         subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
         subtitle.runs[0].font.size = Pt(14)
 
@@ -667,54 +785,22 @@ class ProposalGenerator:
 
         doc.add_page_break()
         
-        for i, chap in enumerate(UNIVERSAL_STRUCTURE):
+        for i, chap in enumerate(selected_chapters):
             ctx = context_futures[chap['id']].result()
             if ctx['success']:
                 try:
-                    res = self.ollama.chat(
-                        model=LLM_MODEL,
-                        messages=[
-                            {'role': 'system', 'content': ctx['prompt']},
-                            {'role': 'user', 'content': f"Write content for {chap['title']}."}
-                        ],
-                        options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.3, 'top_p': 0.85, 'repeat_penalty': 1.15}
-                    )
-                    content = res['message']['content']
-                    target_words = self._target_words(chap)
-                    if self._word_count(content) < int(target_words * 0.8):
-                        expand = self.ollama.chat(
-                            model=LLM_MODEL,
-                            messages=[
-                                {'role': 'system', 'content': ctx['prompt']},
-                                {'role': 'user', 'content': (
-                                    f"Revise and expand {chap['title']} to be more detailed. Minimum {target_words} words. "
-                                    "Keep exact H2 headings, add 2-3 H3 under each H2, use numbered lists for sequence "
-                                    "and bullets for supporting details with short explanations, include practical examples and metrics."
-                                )}
-                            ],
-                            options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.3, 'top_p': 0.85, 'repeat_penalty': 1.15}
-                        )
-                        content = expand['message']['content']
-
-                    if self._word_count(content) > self._max_words(chap):
-                        condense = self.ollama.chat(
-                            model=LLM_MODEL,
-                            messages=[
-                                {'role': 'system', 'content': ctx['prompt']},
-                                {'role': 'user', 'content': (
-                                    f"Condense {chap['title']} to around {target_words} words while preserving all key facts and structure. "
-                                    "Keep exact H2 headings, retain numbered/bullet formatting, and remove repetition."
-                                )}
-                            ],
-                            options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.3, 'top_p': 0.85, 'repeat_penalty': 1.15}
-                        )
-                        content = condense['message']['content']
-
+                    content = self._generate_chapter_content(chap, ctx['prompt'])
                     h = doc.add_heading(chap['title'], level=1)
                     h.runs[0].font.color.rgb = RGBColor(*theme_color)
                     DocumentBuilder.process_content(doc, content, theme_color, chap['title'])
-                    if i < len(UNIVERSAL_STRUCTURE) - 1: doc.add_page_break()
+                    if i < len(selected_chapters) - 1:
+                        doc.add_page_break()
                 except Exception as e:
                     logger.error(f"Generation Error for {chap['title']}: {e}")
 
-        return doc, f"Proposal_{client}_{project}".replace(" ", "_")
+        base_name = f"Proposal_{client}_{project}"
+        if len(selected_chapters) == 1:
+            chapter_slug = re.sub(r'[^A-Za-z0-9]+', '_', selected_chapters[0]['title']).strip('_')
+            base_name = f"{base_name}_{chapter_slug}"
+
+        return doc, base_name.replace(" ", "_")
