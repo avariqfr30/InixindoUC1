@@ -2,7 +2,7 @@
 import os
 
 # Backend mode and internal API settings.
-DEMO_MODE = os.getenv("DEMO_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
+DEMO_MODE = os.getenv("DEMO_MODE", "true").strip().lower() in {"1", "true", "yes", "on"}
 FIRM_API_URL = "https://api.perusahaan-anda.com/v1"
 API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "isi_token_disini_nanti")
 
