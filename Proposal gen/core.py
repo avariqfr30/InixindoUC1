@@ -13,6 +13,7 @@ import concurrent.futures
 from datetime import datetime
 from functools import lru_cache
 from typing import Dict, List, Any, Tuple, Optional
+from urllib.parse import urlparse
 
 import matplotlib
 matplotlib.use('Agg')
@@ -229,19 +230,41 @@ class Researcher:
         return year >= (datetime.now().year - max_age_years)
 
     @staticmethod
+    def _source_name(link: str) -> str:
+        try:
+            host = urlparse(link or "").netloc.lower().strip()
+            host = host.replace("www.", "")
+            return host or "sumber daring"
+        except Exception:
+            return "sumber daring"
+
+    @staticmethod
+    def _citation_year(item: Dict[str, Any]) -> str:
+        merged = " ".join([
+            str(item.get('date', '')),
+            str(item.get('snippet', '')),
+            str(item.get('title', '')),
+        ])
+        year = Researcher._extract_year(merged)
+        return str(year) if year else "n.d."
+
+    @staticmethod
     def _format_evidence(items: List[Dict[str, Any]], label: str, fallback: str) -> str:
         if not items:
-            return f"[{label}] {fallback}"
+            return f"{fallback} (sumber daring, n.d.)"
         lines = []
         for i, item in enumerate(items, start=1):
             title = item.get('title', 'Sumber tanpa judul')
             snippet = (item.get('snippet', '') or '').strip()
             link = item.get('link', '-')
-            date = item.get('date', '-')
             if not snippet:
                 continue
-            lines.append(f"[{label} #{i}] {title} | date={date} | source={link} | fakta={snippet}")
-        return "\n".join(lines) if lines else f"[{label}] {fallback}"
+            source_name = Researcher._source_name(link)
+            citation = f"({source_name}, {Researcher._citation_year(item)})"
+            lines.append(
+                f"Sumber eksternal {i}: fakta={snippet} | sumber={title} | url={link} | sitasi_apa={citation}"
+            )
+        return "\n".join(lines) if lines else f"{fallback} (sumber daring, n.d.)"
 
 
     @staticmethod
@@ -275,7 +298,7 @@ class Researcher:
     @lru_cache(maxsize=128)
     def get_regulatory_data(regulations_string: str) -> str:
         if not regulations_string:
-            return "[OSINT_REG] Tidak ada regulasi spesifik dari input user."
+            return "Tidak ada regulasi spesifik dari input user."
 
         query = f'Ringkasan implementasi standar {regulations_string.replace(",", " OR ")} site:.go.id OR site:iso.org'
         res = Researcher.search(query, limit=8)
@@ -1070,9 +1093,9 @@ class ProposalGenerator:
             }
         except Exception:
             bundle = {
-                "profile": f"[OSINT_PROFILE] Data profil terbaru {base_client} terbatas.",
-                "news": f"[OSINT_NEWS] Data berita terbaru {base_client} terbatas.",
-                "regulations": "[OSINT_REG] Data regulasi terbatas."
+                "profile": f"Data profil terbaru {base_client} terbatas (sumber daring, n.d.).",
+                "news": f"Data berita terbaru {base_client} terbatas (sumber daring, n.d.).",
+                "regulations": "Data regulasi terbatas (sumber daring, n.d.)."
             }
 
         self._cache_put(self._research_cache, key, bundle, max_size=96)
@@ -1168,6 +1191,7 @@ class ProposalGenerator:
         target_words: int
     ) -> Dict[str, Any]:
         try:
+            current_year = datetime.now().year
             global_data = research_bundle.get('profile', '')
             client_news = research_bundle.get('news', '')
             regulation_data = research_bundle.get('regulations', '')
@@ -1231,6 +1255,18 @@ class ProposalGenerator:
                     f"Gunakan tone hangat, profesional, dan meyakinkan."
                 )
 
+            extra += (
+                f" [CITATION] Untuk klaim dari OSINT, gunakan sitasi APA in-text dengan domain dan tahun "
+                f"(contoh: (kompas.com, 2025)). Untuk klaim dari data internal, gunakan (Data Internal, {current_year}). "
+                "Dilarang memakai sitasi placeholder seperti (OSINT #1) atau (RAG Semantic)."
+            )
+
+            internal_citation_note = f"Gunakan sitasi internal: (Data Internal, {current_year})."
+            structured_row_data_with_note = (
+                f"{structured_row_data}\n{internal_citation_note}" if structured_row_data else internal_citation_note
+            )
+            rag_data_with_note = f"{rag_data}\n{internal_citation_note}" if rag_data else internal_citation_note
+
             prompt = PROPOSAL_SYSTEM_PROMPT.format(
                 client=client, 
                 writer_firm=WRITER_FIRM_NAME, 
@@ -1238,8 +1274,9 @@ class ProposalGenerator:
                 global_data=global_data, 
                 client_news=client_news, 
                 regulation_data=regulation_data,
-                structured_row_data=structured_row_data,
-                rag_data=rag_data, 
+                structured_row_data=structured_row_data_with_note,
+                rag_data=rag_data_with_note,
+                current_year=current_year,
                 visual_prompt=visual_prompt, 
                 extra_instructions=extra,
                 chapter_title=chapter['title'], 

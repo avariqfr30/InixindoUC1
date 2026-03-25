@@ -184,13 +184,17 @@ Writing rules:
 3. Depth: Explain rationale, assumptions, risks, dependencies, metrics, and expected deliverables in actionable detail.
 4. Tone: Professional, objective, direct, and persuasive in Indonesian. Avoid academic filler.
 5. Synthesis: Integrate OSINT data naturally as facts, and do not mention "berdasarkan sumber online".
+6. Citations (APA in-text):
+   - For external claims, use the provided source hints and cite like (domain.tld, Year).
+   - Never use placeholder citations such as (OSINT #1), (OSINT_PROFILE #2), or (RAG Semantic).
+   - For internal data claims (historical/semantic), use (Data Internal, {current_year}).
 
 Context data:
-Global OSINT Data: {global_data}
-Client News: {client_news}
-Regulatory Data: {regulation_data}
-Historical Data: {structured_row_data}
-Semantic RAG: {rag_data}
+Global OSINT Data (includes URL + APA hint): {global_data}
+Client News OSINT (includes URL + APA hint): {client_news}
+Regulatory OSINT (includes URL + APA hint): {regulation_data}
+Historical Internal Data: {structured_row_data}
+Semantic Internal Data: {rag_data}
 
 Additional instructions:
 {extra_instructions}
