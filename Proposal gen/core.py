@@ -442,6 +442,22 @@ class ChartEngine:
 
 class DocumentBuilder:
     @staticmethod
+    def _append_text_run(paragraph, text: str, bold: bool = False, italic: bool = False) -> None:
+        cleaned = re.sub(r'\s+', ' ', text or '').strip()
+        if not cleaned:
+            return
+
+        # Keep spacing between runs stable so marker/text and inline formatting stay aligned.
+        if paragraph.runs:
+            last_text = paragraph.runs[-1].text or ""
+            if last_text and not last_text.endswith((" ", "\t", "\n", "(", "[", "/")) and not cleaned.startswith((".", ",", ";", ":", ")", "]", "%")):
+                cleaned = " " + cleaned
+
+        run = paragraph.add_run(cleaned)
+        run.bold = bold
+        run.italic = italic
+
+    @staticmethod
     def parse_html_to_docx(doc: Document, html_content: str, theme_color: Tuple[int, int, int]) -> None:
         soup = BeautifulSoup(html_content, 'html.parser')
         for element in soup.children:
@@ -449,6 +465,8 @@ class DocumentBuilder:
             if element.name in ['h1', 'h2', 'h3']:
                 level = int(element.name[1])
                 p = doc.add_heading(element.get_text().strip(), level=level)
+                if level == 1:
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 for run in p.runs:
                     run.font.color.rgb = RGBColor(*theme_color)
                     run.font.name = 'Arial'
@@ -460,8 +478,15 @@ class DocumentBuilder:
                 # Render list markers manually to prevent DOCX auto-number continuation across chapters.
                 direct_items = element.find_all('li', recursive=False)
                 for idx, li in enumerate(direct_items, start=1):
+                    # Skip empty markers (prevents orphan numbers like "3." on its own line).
+                    if not li.get_text(" ", strip=True):
+                        continue
                     p = doc.add_paragraph()
-                    marker = f"{idx}. " if element.name == 'ol' else "• "
+                    p.paragraph_format.left_indent = Cm(0.63)
+                    p.paragraph_format.first_line_indent = Cm(-0.38)
+                    p.paragraph_format.space_before = Pt(0)
+                    p.paragraph_format.space_after = Pt(4)
+                    marker = f"{idx}.\t" if element.name == 'ol' else "•\t"
                     p.add_run(marker).bold = True
                     DocumentBuilder._process_inline_html(p, li)
             elif element.name == 'table':
@@ -482,10 +507,16 @@ class DocumentBuilder:
     @staticmethod
     def _process_inline_html(paragraph, element):
         for child in element.children:
-            if child.name in ['strong', 'b']: paragraph.add_run(child.get_text()).bold = True
-            elif child.name in ['em', 'i']: paragraph.add_run(child.get_text()).italic = True
-            elif child.name is None: paragraph.add_run(str(child))
-            else: DocumentBuilder._process_inline_html(paragraph, child)
+            if child.name in ['strong', 'b']:
+                DocumentBuilder._append_text_run(paragraph, child.get_text(" ", strip=True), bold=True)
+            elif child.name in ['em', 'i']:
+                DocumentBuilder._append_text_run(paragraph, child.get_text(" ", strip=True), italic=True)
+            elif child.name == 'br':
+                paragraph.add_run("\n")
+            elif child.name is None:
+                DocumentBuilder._append_text_run(paragraph, str(child))
+            else:
+                DocumentBuilder._process_inline_html(paragraph, child)
 
     @staticmethod
     def process_content(doc: Document, raw_text: str, theme_color: Tuple[int, int, int], chapter_title: str) -> None:
@@ -589,6 +620,7 @@ class ProposalGenerator:
             "c_8": "Merumuskan governance proyek: forum keputusan, eskalasi isu, dan quality gate.",
             "c_9": f"Menetapkan struktur tim dan kapabilitas yang dibutuhkan untuk model {service_type}.",
             "c_10": f"Mendefinisikan model pembiayaan, termin pembayaran, dan batasan scope dengan estimasi {budget}.",
+            "c_closing": f"Menutup proposal dengan apresiasi kemitraan, kontak resmi {WRITER_FIRM_NAME}, dan langkah tindak lanjut bersama {client}.",
         }
 
         return [
@@ -712,6 +744,7 @@ class ProposalGenerator:
         notes: str,
         regulations: str,
         firm_data: Dict[str, str],
+        firm_profile: Dict[str, str],
         research_bundle: Dict[str, str],
         proposal_contract: str
     ) -> Dict[str, Any]:
@@ -772,6 +805,15 @@ class ProposalGenerator:
                 extra += f" [CRITICAL] Uraikan struktur tim proyek untuk model layanan '{service_type}' dengan kapabilitas kunci, pengalaman, dan sertifikasi relevan. Referensi komposisi inti: {firm_data['team']}."
             elif chap['id'] == 'c_10':
                 extra += f" [CRITICAL] Wajib menyajikan model pembiayaan dengan angka estimasi: {budget}. Sertakan termin pembayaran, model kerja, asumsi, eksklusi, dan terms komersial: {firm_data['commercial']}. Gunakan tabel markdown."
+            elif chap['id'] == 'c_closing':
+                contact_info = firm_profile.get('contact_info', WRITER_FIRM_NAME)
+                extra += (
+                    f" [CRITICAL] Ini adalah bab penutup proposal. Jangan pernah menulis label 'BAB XI' atau variasinya. "
+                    f"Tunjukkan apresiasi profesional kepada klien '{client}', tegaskan komitmen kolaborasi jangka panjang, "
+                    f"dan berikan langkah tindak lanjut yang jelas dan actionable. "
+                    f"Wajib cantumkan informasi kontak resmi berikut secara lengkap dan akurat: {contact_info}. "
+                    f"Gunakan tone hangat, profesional, dan meyakinkan."
+                )
 
             prompt = PROPOSAL_SYSTEM_PROMPT.format(
                 client=client, 
@@ -1038,6 +1080,7 @@ class ProposalGenerator:
         selected_chapters = self._resolve_chapters(chapter_id)
 
         firm_data = self.firm_api.get_project_standards(project_type)
+        firm_profile = self.firm_api.get_firm_profile()
         base_client = re.sub(r'\b(Cabang|Branch|Tbk)\b.*$|^(PT\.|CV\.)', '', client, flags=re.IGNORECASE).strip()
         research_bundle = self._get_research_bundle(base_client, regulations)
         proposal_contract = self._build_proposal_contract(
@@ -1060,7 +1103,7 @@ class ProposalGenerator:
             chap['id']: self.io_pool.submit(
                 self._fetch_chapter_context,
                 chap, client, project, budget, service_type, project_goal, project_type, timeline,
-                notes, regulations, firm_data, research_bundle, proposal_contract
+                notes, regulations, firm_data, firm_profile, research_bundle, proposal_contract
             )
             for chap in selected_chapters
         }
@@ -1128,7 +1171,7 @@ class ProposalGenerator:
         )
         meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        firm_info = self.firm_api.get_firm_profile().get('contact_info', WRITER_FIRM_NAME)
+        firm_info = firm_profile.get('contact_info', WRITER_FIRM_NAME)
         contact = doc.add_paragraph(f"Disusun oleh {WRITER_FIRM_NAME}\n{firm_info}")
         contact.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
@@ -1141,6 +1184,7 @@ class ProposalGenerator:
                 continue
             rendered_any = True
             h = doc.add_heading(chap['title'], level=1)
+            h.alignment = WD_ALIGN_PARAGRAPH.CENTER
             h.runs[0].font.color.rgb = RGBColor(*theme_color)
             DocumentBuilder.process_content(doc, content, theme_color, chap['title'])
 

@@ -11,7 +11,7 @@ FIRM_API_URL = "https://api.perusahaan-anda.com/v1"
 API_AUTH_TOKEN = "isi_token_disini_nanti" # <-- Paste real token here
 
 # --- CREDENTIALS & HOSTS ---
-SERPER_API_KEY = "YOUR_SERPER_API_KEY"    # <-- Paste real Serper key here
+SERPER_API_KEY = "SERPER_API"    # <-- Paste real Serper key here
 OLLAMA_HOST = "http://127.0.0.1:11434"
 
 # --- MODELS & DB ---
@@ -147,6 +147,12 @@ UNIVERSAL_STRUCTURE = [
         "subs": ["10.1 Biaya dan Tahapan Pembayaran", "10.2 Model Pekerjaan dan Batasan Pekerjaan"],
         "keywords": "commercial pricing payment terms scope boundaries",
         "length_intent": "Jelaskan model bisnis proyek yang mencakup biaya, tahapan pembayaran, model pekerjaan, dan batasan pekerjaan secara jelas dan tegas. (Target: 700 words)."
+    },
+    {
+        "id": "c_closing", "title": "PENUTUP & APRESIASI KEMITRAAN",
+        "subs": ["Apresiasi dan Komitmen Kemitraan", "Informasi Kontak dan Langkah Lanjutan"],
+        "keywords": "closing appreciation partnership contact next steps",
+        "length_intent": "Tutup proposal dengan apresiasi profesional, pernyataan komitmen kemitraan, informasi kontak lengkap, dan ajakan langkah tindak lanjut yang jelas. (Target: 350 words)."
     }
 ]
 
@@ -161,6 +167,7 @@ PERSONAS = {
     "c_8": "Program Governance Lead",
     "c_9": "Partner/Managing Director",
     "c_10": "Commercial Lead",
+    "c_closing": "Client Engagement Partner",
     "default": "Principal Management Consultant"
 }
 
