@@ -1,7 +1,6 @@
 """
 Configuration and constants for the Proposal Generator Engine.
 """
-import os
 
 # =====================================================================
 # SYSTEM MODE & API ADAPTER
@@ -18,6 +17,13 @@ OLLAMA_HOST = "http://127.0.0.1:11434"
 LLM_MODEL = "gpt-oss:120b-cloud" 
 EMBED_MODEL = "bge-m3:latest"
 DB_URI = "sqlite:///projects.db" 
+
+# --- DOCUMENT BUDGET GUARD ---
+# Guardrails used by the generator to keep proposal length within maximum pages.
+MAX_PROPOSAL_PAGES = 25
+ESTIMATED_WORDS_PER_PAGE = 230
+RESERVED_NON_CONTENT_PAGES = 2
+PAGE_SAFETY_BUFFER = 1
 
 # --- FIRM IDENTITY ---
 WRITER_FIRM_NAME = "Inixindo Jogja" 
@@ -83,7 +89,7 @@ MOCK_FIRM_STANDARDS = {
 }
 
 # =====================================================================
-# PROPOSAL STRUCTURE (TARGET: 20-25 PAGES TOTAL)
+# PROPOSAL STRUCTURE (MAX: 25 PAGES TOTAL)
 # =====================================================================
 UNIVERSAL_STRUCTURE = [
     {
@@ -205,7 +211,7 @@ Include these H2 (##) exactly:
 Mandatory output quality checks before finalizing:
 - Provide concrete examples relevant to the client context.
 - Ensure all key claims have business/technical rationale.
-- Ensure the chapter is sufficiently detailed for board-level review and contributes proportionally to the total proposal target 20-25 pages (avoid over-expansion).
+- Ensure the chapter is sufficiently detailed for board-level review and contributes proportionally to a total proposal maximum 25 pages (avoid over-expansion).
 
 {visual_prompt}
 DO NOT write greetings or introductions. Output strictly the chapter content.

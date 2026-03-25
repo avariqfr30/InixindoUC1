@@ -21,9 +21,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import textwrap
 from PIL import Image, ImageDraw, ImageFont, ImageStat
-from difflib import SequenceMatcher
 
 from sqlalchemy import create_engine
 import markdown
@@ -33,17 +31,16 @@ from docx import Document
 from docx.image.exceptions import UnrecognizedImageError
 from docx.shared import Pt, RGBColor, Inches, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
-from docx.oxml.ns import qn
-from docx.oxml import OxmlElement
 
 from ollama import Client 
 from chromadb.utils import embedding_functions
 
 from config import (
-    SERPER_API_KEY, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL, DB_URI,
+    SERPER_API_KEY, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL,
     WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE, 
     PERSONAS, PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING, 
-    DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, MOCK_FIRM_STANDARDS, MOCK_FIRM_PROFILE
+    DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, MOCK_FIRM_STANDARDS, MOCK_FIRM_PROFILE,
+    MAX_PROPOSAL_PAGES, ESTIMATED_WORDS_PER_PAGE, RESERVED_NON_CONTENT_PAGES, PAGE_SAFETY_BUFFER
 )
 
 logger = logging.getLogger(__name__)
@@ -542,6 +539,12 @@ class DocumentBuilder:
 
 
 class ProposalGenerator:
+    DEFAULT_CHAPTER_TARGET_WORDS = 700
+    BASE_CHAPTER_FLOOR_WORDS = 220
+    CLOSING_CHAPTER_FLOOR_WORDS = 170
+    BASE_COMPRESSION_FLOOR_WORDS = 240
+    CLOSING_COMPRESSION_FLOOR_WORDS = 180
+
     def __init__(self, kb_instance: KnowledgeBase) -> None:
         self.ollama = Client(host=OLLAMA_HOST)
         self.kb = kb_instance
@@ -554,15 +557,68 @@ class ProposalGenerator:
     @staticmethod
     def _target_words(chap: Dict[str, Any]) -> int:
         m = re.search(r'Target:\s*(\d+)\s*words', chap.get('length_intent', ''), re.IGNORECASE)
-        return int(m.group(1)) if m else 700
-
-    @staticmethod
-    def _max_words(chap: Dict[str, Any]) -> int:
-        return int(ProposalGenerator._target_words(chap) * 1.3)
+        return int(m.group(1)) if m else ProposalGenerator.DEFAULT_CHAPTER_TARGET_WORDS
 
     @staticmethod
     def _word_count(text: str) -> int:
         return len(re.findall(r'\b\w+\b', text))
+
+    @staticmethod
+    def _rewrite_length_intent(length_intent: str, target_words: int) -> str:
+        if not length_intent:
+            return f"Target: {target_words} words."
+        if re.search(r'Target:\s*\d+\s*words', length_intent, re.IGNORECASE):
+            return re.sub(
+                r'Target:\s*\d+\s*words',
+                f"Target: {int(target_words)} words",
+                length_intent,
+                flags=re.IGNORECASE
+            )
+        return f"{length_intent.rstrip('.')} (Target: {int(target_words)} words)."
+
+    def _content_word_budget(self) -> int:
+        usable_pages = max(1, MAX_PROPOSAL_PAGES - RESERVED_NON_CONTENT_PAGES - PAGE_SAFETY_BUFFER)
+        return int(usable_pages * ESTIMATED_WORDS_PER_PAGE)
+
+    @classmethod
+    def _chapter_floor_words(cls, chapter_id: str, for_compression: bool = False) -> int:
+        if chapter_id == "c_closing":
+            return cls.CLOSING_COMPRESSION_FLOOR_WORDS if for_compression else cls.CLOSING_CHAPTER_FLOOR_WORDS
+        return cls.BASE_COMPRESSION_FLOOR_WORDS if for_compression else cls.BASE_CHAPTER_FLOOR_WORDS
+
+    def _chapter_word_targets(self, chapters: List[Dict[str, Any]]) -> Dict[str, int]:
+        base_targets = {chap["id"]: self._target_words(chap) for chap in chapters}
+        total_base = sum(base_targets.values())
+        budget = self._content_word_budget()
+        if total_base <= 0:
+            return {chap["id"]: 500 for chap in chapters}
+        if total_base <= budget:
+            return base_targets
+
+        # Scale down proportionally while preserving readability floor.
+        scaled: Dict[str, int] = {}
+        for chap in chapters:
+            base = base_targets[chap["id"]]
+            floor = self._chapter_floor_words(chap["id"], for_compression=False)
+            scaled[chap["id"]] = max(floor, int(base * budget / total_base))
+
+        # Trim any remaining overflow from longest chapters first.
+        overflow = sum(scaled.values()) - budget
+        if overflow > 0:
+            ordered_ids = sorted(scaled.keys(), key=lambda cid: scaled[cid], reverse=True)
+            for cid in ordered_ids:
+                if overflow <= 0:
+                    break
+                floor = self._chapter_floor_words(cid, for_compression=False)
+                reducible = max(0, scaled[cid] - floor)
+                cut = min(reducible, overflow)
+                scaled[cid] -= cut
+                overflow -= cut
+        return scaled
+
+    def _estimated_pages(self, total_words: int) -> int:
+        content_pages = max(1, (total_words + ESTIMATED_WORDS_PER_PAGE - 1) // ESTIMATED_WORDS_PER_PAGE)
+        return RESERVED_NON_CONTENT_PAGES + content_pages
 
     @staticmethod
     def _cache_key(*parts: Any) -> str:
@@ -746,7 +802,8 @@ class ProposalGenerator:
         firm_data: Dict[str, str],
         firm_profile: Dict[str, str],
         research_bundle: Dict[str, str],
-        proposal_contract: str
+        proposal_contract: str,
+        target_words: int
     ) -> Dict[str, Any]:
         try:
             global_data = research_bundle.get('profile', '')
@@ -777,12 +834,9 @@ class ProposalGenerator:
             elif chap.get('visual_intent') == "flowchart":
                 visual_prompt = "Tambahkan alur tahapan metodologi dalam bentuk bullet bertingkat yang jelas (fase -> aktivitas -> output)."
 
-            # ==========================================================
-            # DYNAMIC INSTRUCTIONS: Injecting the UI Choices
-            # ==========================================================
             extra = (
                 f"[PROPOSAL CONTRACT]\n{proposal_contract}\n"
-                "[GLOBAL] Proposal ini wajib mempertahankan kedalaman konten tingkat eksekutif dan total dokumen target 20-25 halaman. "
+                f"[GLOBAL] Proposal ini wajib mempertahankan kedalaman konten tingkat eksekutif dan total dokumen maksimal {MAX_PROPOSAL_PAGES} halaman. "
                 "Setiap bab harus memiliki konteks spesifik klien, poin yang dapat ditindaklanjuti, dan tidak generik. Gunakan kombinasi numbering dan bullet yang rapi di setiap H2, namun tetap padat dan tidak banyak whitespace."
             )
             if chap['id'] == 'c_1':
@@ -828,7 +882,7 @@ class ProposalGenerator:
                 extra_instructions=extra,
                 chapter_title=chap['title'], 
                 sub_chapters=subs, 
-                length_intent=chap.get('length_intent')
+                length_intent=self._rewrite_length_intent(chap.get('length_intent', ''), target_words)
             )
             return {"prompt": prompt, "success": True}
         except Exception as e:
@@ -844,10 +898,17 @@ class ProposalGenerator:
             return True
         return any(re.search(rf"\b{re.escape(tok)}\b", content, re.IGNORECASE) for tok in tokens[:3])
 
-    def _chapter_quality_report(self, chap: Dict[str, Any], content: str, client: str) -> Dict[str, Any]:
-        target_words = self._target_words(chap)
-        min_words = max(280, int(target_words * 0.75))
-        max_words = max(min_words + 120, int(target_words * 1.35))
+    def _chapter_quality_report(
+        self,
+        chap: Dict[str, Any],
+        content: str,
+        client: str,
+        target_words: Optional[int] = None
+    ) -> Dict[str, Any]:
+        target_words = int(target_words or self._target_words(chap))
+        floor = max(140, int(self._chapter_floor_words(chap.get("id", ""), for_compression=False) * 0.8))
+        min_words = max(floor, int(target_words * 0.72))
+        max_words = max(min_words + 90, int(target_words * 1.25))
         word_count = self._word_count(content)
         missing_h2 = [
             sub for sub in chap.get('subs', [])
@@ -1010,8 +1071,14 @@ class ProposalGenerator:
 
         return revised
 
-    def _generate_chapter_content(self, chap: Dict[str, Any], prompt: str, client: str) -> str:
-        # One primary generation call per chapter.
+    def _generate_chapter_content(
+        self,
+        chap: Dict[str, Any],
+        prompt: str,
+        client: str,
+        target_words: int
+    ) -> str:
+        # Main generation call for one chapter.
         res = self.ollama.chat(
             model=LLM_MODEL,
             messages=[
@@ -1025,7 +1092,7 @@ class ProposalGenerator:
             options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.25, 'top_p': 0.85, 'repeat_penalty': 1.1}
         )
         content = (res.get('message', {}).get('content', '') or '').strip()
-        report = self._chapter_quality_report(chap, content, client)
+        report = self._chapter_quality_report(chap, content, client, target_words=target_words)
         hard_check_keys = {"missing_h2", "too_short", "too_long", "list_structure", "missing_visual"}
         hard_issues = [i for i in report["issues"] if i in hard_check_keys]
         if not hard_issues:
@@ -1055,29 +1122,131 @@ class ProposalGenerator:
         except Exception:
             pass
 
-        final_report = self._chapter_quality_report(chap, content, client)
+        final_report = self._chapter_quality_report(chap, content, client, target_words=target_words)
         if final_report.get("missing_h2"):
             content = self._ensure_required_headings(chap, content)
-            final_report = self._chapter_quality_report(chap, content, client)
+            final_report = self._chapter_quality_report(chap, content, client, target_words=target_words)
 
         if final_report["issues"]:
             logger.warning(f"Quality checks not fully satisfied for {chap['title']}: {', '.join(final_report['issues'])}")
         return content
 
+    def _compress_chapter_content(
+        self,
+        chap: Dict[str, Any],
+        prompt: str,
+        content: str,
+        target_words: int
+    ) -> str:
+        try:
+            res = self.ollama.chat(
+                model=LLM_MODEL,
+                messages=[
+                    {'role': 'system', 'content': prompt},
+                    {'role': 'user', 'content': (
+                        f"Rapikan dan padatkan konten {chap['title']} menjadi sekitar {target_words} kata. "
+                        "Pertahankan semua heading H2 wajib, poin kunci, dan keterbacaan eksekutif. "
+                        "Hapus repetisi dan kalimat pengisi.\n\n"
+                        f"KONTEN SAAT INI:\n{content}"
+                    )}
+                ],
+                options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.15, 'top_p': 0.8, 'repeat_penalty': 1.1}
+            )
+            revised = (res.get('message', {}).get('content', '') or '').strip()
+            return revised or content
+        except Exception:
+            return content
+
+    def _enforce_word_budget(
+        self,
+        chapter_outputs: Dict[str, str],
+        chapter_prompts: Dict[str, str],
+        chapter_map: Dict[str, Dict[str, Any]],
+        chapter_targets: Dict[str, int],
+        max_words: int
+    ) -> Dict[str, str]:
+        outputs = dict(chapter_outputs)
+
+        def total_words() -> int:
+            return sum(self._word_count(text) for text in outputs.values() if text)
+
+        current = total_words()
+        if current <= max_words:
+            return outputs
+
+        for _ in range(3):
+            current = total_words()
+            if current <= max_words:
+                break
+
+            overflow = current - max_words
+            changed = False
+            chapter_order = sorted(
+                [cid for cid, text in outputs.items() if text],
+                key=lambda cid: self._word_count(outputs[cid]),
+                reverse=True
+            )
+
+            for cid in chapter_order:
+                if overflow <= 0:
+                    break
+                chap = chapter_map.get(cid)
+                if not chap:
+                    continue
+                prompt = chapter_prompts.get(cid)
+                if not prompt:
+                    continue
+
+                current_words = self._word_count(outputs[cid])
+                minimum = self._chapter_floor_words(cid, for_compression=True)
+                reducible = max(0, current_words - minimum)
+                if reducible < 80:
+                    continue
+
+                target = max(minimum, current_words - min(reducible, max(120, overflow)))
+                target = min(target, max(minimum, int(chapter_targets.get(cid, target) * 0.95)))
+                compressed = self._compress_chapter_content(chap, prompt, outputs[cid], target)
+                if compressed == outputs[cid]:
+                    continue
+                outputs[cid] = compressed
+                overflow = total_words() - max_words
+                changed = True
+
+            if not changed:
+                break
+
+        if total_words() > max_words:
+            ratio = max_words / max(total_words(), 1)
+            for cid, text in list(outputs.items()):
+                chap = chapter_map.get(cid)
+                prompt = chapter_prompts.get(cid)
+                if not chap or not prompt or not text:
+                    continue
+                minimum = self._chapter_floor_words(cid, for_compression=True)
+                current_words = self._word_count(text)
+                target = max(minimum, int(current_words * ratio))
+                if target >= current_words - 60:
+                    continue
+                outputs[cid] = self._compress_chapter_content(chap, prompt, text, target)
+
+        return outputs
+
     def run(
         self,
         client: str,
         project: str,
-        budget: str = "",
-        service_type: str = "Konsultan",
-        project_goal: str = "Problem",
-        project_type: str = "Implementation",
-        timeline: str = "TBD",
-        notes: str = "",
-        regulations: str = "",
+        budget: str,
+        service_type: str,
+        project_goal: str,
+        project_type: str,
+        timeline: str,
+        notes: str,
+        regulations: str,
         chapter_id: Optional[str] = None
     ) -> Tuple[Document, str]:
         selected_chapters = self._resolve_chapters(chapter_id)
+        chapter_targets = self._chapter_word_targets(selected_chapters)
+        content_word_budget = self._content_word_budget()
 
         firm_data = self.firm_api.get_project_standards(project_type)
         firm_profile = self.firm_api.get_firm_profile()
@@ -1103,22 +1272,59 @@ class ProposalGenerator:
             chap['id']: self.io_pool.submit(
                 self._fetch_chapter_context,
                 chap, client, project, budget, service_type, project_goal, project_type, timeline,
-                notes, regulations, firm_data, firm_profile, research_bundle, proposal_contract
+                notes, regulations, firm_data, firm_profile, research_bundle, proposal_contract,
+                chapter_targets.get(chap['id'], self._target_words(chap))
             )
             for chap in selected_chapters
         }
 
+        chapter_map = {chap['id']: chap for chap in selected_chapters}
+        chapter_prompts: Dict[str, str] = {}
         chapter_outputs: Dict[str, str] = {}
         for chap in selected_chapters:
             ctx = context_futures[chap['id']].result()
             if not ctx['success']:
                 continue
+            chapter_prompts[chap['id']] = ctx['prompt']
             try:
-                chapter_outputs[chap['id']] = self._generate_chapter_content(chap, ctx['prompt'], client)
+                chapter_outputs[chap['id']] = self._generate_chapter_content(
+                    chap=chap,
+                    prompt=ctx['prompt'],
+                    client=client,
+                    target_words=chapter_targets.get(chap['id'], self._target_words(chap))
+                )
             except Exception as e:
                 logger.error(f"Generation Error for {chap['title']}: {e}")
 
+        chapter_outputs = self._enforce_word_budget(
+            chapter_outputs=chapter_outputs,
+            chapter_prompts=chapter_prompts,
+            chapter_map=chapter_map,
+            chapter_targets=chapter_targets,
+            max_words=content_word_budget
+        )
         chapter_outputs = self._apply_global_coherence(chapter_outputs, selected_chapters, client, project)
+        chapter_outputs = self._enforce_word_budget(
+            chapter_outputs=chapter_outputs,
+            chapter_prompts=chapter_prompts,
+            chapter_map=chapter_map,
+            chapter_targets=chapter_targets,
+            max_words=content_word_budget
+        )
+        generated_words = sum(self._word_count(t) for t in chapter_outputs.values() if t)
+        estimated_pages = self._estimated_pages(generated_words)
+        if estimated_pages > MAX_PROPOSAL_PAGES:
+            logger.warning(
+                f"Estimated page count is above limit ({estimated_pages}>{MAX_PROPOSAL_PAGES}); applying one more compacting pass."
+            )
+            tighter_budget = max(int(content_word_budget * 0.94), 4000)
+            chapter_outputs = self._enforce_word_budget(
+                chapter_outputs=chapter_outputs,
+                chapter_prompts=chapter_prompts,
+                chapter_map=chapter_map,
+                chapter_targets=chapter_targets,
+                max_words=tighter_budget
+            )
 
         try:
             logo_stream, theme_color = logo_future.result(timeout=8)
