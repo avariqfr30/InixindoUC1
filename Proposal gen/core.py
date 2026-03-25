@@ -516,6 +516,9 @@ class ProposalGenerator:
         self.kb = kb_instance
         self.io_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
         self.firm_api = FirmAPIClient()
+        self._research_cache: Dict[str, Dict[str, str]] = {}
+        self._proposal_contract_cache: Dict[str, str] = {}
+        self._chapter_context_cache: Dict[str, Dict[str, str]] = {}
 
     @staticmethod
     def _target_words(chap: Dict[str, Any]) -> int:
@@ -529,6 +532,18 @@ class ProposalGenerator:
     @staticmethod
     def _word_count(text: str) -> int:
         return len(re.findall(r'\b\w+\b', text))
+
+    @staticmethod
+    def _cache_key(*parts: Any) -> str:
+        return "||".join([str(p).strip().lower() for p in parts])
+
+    @staticmethod
+    def _cache_put(cache: Dict[str, Any], key: str, value: Any, max_size: int = 128) -> None:
+        if key in cache:
+            cache.pop(key, None)
+        cache[key] = value
+        while len(cache) > max_size:
+            cache.pop(next(iter(cache)))
 
     def _resolve_chapters(self, chapter_id: Optional[str]) -> List[Dict[str, Any]]:
         normalized_id = (chapter_id or "").strip()
@@ -586,14 +601,139 @@ class ProposalGenerator:
             for chap in chapters
         ]
 
-    def _fetch_chapter_context(self, chap, client, project, budget, service_type, project_goal, project_type, timeline, notes, regulations, firm_data, research_futures) -> Dict[str, Any]:
+    def _get_research_bundle(self, base_client: str, regulations: str) -> Dict[str, str]:
+        key = self._cache_key("research", base_client, regulations)
+        cached = self._research_cache.get(key)
+        if cached:
+            return cached
+
+        futures = {
+            "profile": self.io_pool.submit(Researcher.get_entity_profile, base_client),
+            "news": self.io_pool.submit(Researcher.get_latest_client_news, base_client),
+            "regulations": self.io_pool.submit(Researcher.get_regulatory_data, regulations)
+        }
         try:
-            global_data = research_futures['profile'].result(timeout=5)
-            client_news = research_futures['news'].result(timeout=5)
-            regulation_data = research_futures['regulations'].result(timeout=5)
-            
-            structured_row_data = self.kb.get_exact_context(client, project, budget)
-            rag_data = self.kb.query(client, project, chap['keywords'])
+            bundle = {
+                "profile": futures["profile"].result(timeout=8),
+                "news": futures["news"].result(timeout=8),
+                "regulations": futures["regulations"].result(timeout=8),
+            }
+        except Exception:
+            bundle = {
+                "profile": f"[OSINT_PROFILE] Data profil terbaru {base_client} terbatas.",
+                "news": f"[OSINT_NEWS] Data berita terbaru {base_client} terbatas.",
+                "regulations": "[OSINT_REG] Data regulasi terbatas."
+            }
+
+        self._cache_put(self._research_cache, key, bundle, max_size=96)
+        return bundle
+
+    def _build_proposal_contract(
+        self,
+        client: str,
+        project: str,
+        budget: str,
+        service_type: str,
+        project_goal: str,
+        project_type: str,
+        timeline: str,
+        notes: str,
+        regulations: str,
+        selected_chapters: List[Dict[str, Any]],
+        research_bundle: Dict[str, str],
+        firm_data: Dict[str, str]
+    ) -> str:
+        cache_key = self._cache_key(
+            "contract", client, project, budget, service_type, project_goal,
+            project_type, timeline, notes, regulations, "|".join([c["id"] for c in selected_chapters])
+        )
+        cached = self._proposal_contract_cache.get(cache_key)
+        if cached:
+            return cached
+
+        chapter_titles = ", ".join([c["title"] for c in selected_chapters])
+        prompt = f"""
+        Buat "Proposal Contract" ringkas untuk menjaga kualitas dan koherensi lintas bab.
+        Konteks:
+        - Klien: {client}
+        - Inisiatif: {project}
+        - Service Type: {service_type}
+        - Jenis Proyek: {project_type}
+        - Kebutuhan: {project_goal}
+        - Durasi: {timeline}
+        - Estimasi Biaya: {budget}
+        - Pain Points: {notes}
+        - Framework: {regulations}
+        - Bab yang ditulis: {chapter_titles}
+        - Baseline Metodologi: {firm_data.get('methodology', '')}
+        - Baseline Team: {firm_data.get('team', '')}
+        - Baseline Commercial: {firm_data.get('commercial', '')}
+        - Profil OSINT: {research_bundle.get('profile', '')}
+        - Berita OSINT: {research_bundle.get('news', '')}
+
+        OUTPUT WAJIB (tanpa markdown code block, <= 220 kata):
+        1) Narasi Inti (1-2 kalimat)
+        2) Terminologi Kanonis (maks 6 istilah)
+        3) Prinsip Konsistensi Antarbab (maks 5 butir)
+        4) Larangan Gaya Tulis (maks 3 butir)
+        """
+        try:
+            res = self.ollama.chat(
+                model=LLM_MODEL,
+                messages=[{'role': 'user', 'content': prompt}],
+                options={'num_ctx': 16384, 'num_predict': 700, 'temperature': 0.15}
+            )
+            contract = (res.get('message', {}).get('content', '') or '').strip()
+        except Exception:
+            contract = ""
+
+        if not contract:
+            contract = (
+                "Narasi Inti: Proposal harus menjawab kebutuhan bisnis klien secara konkret, terukur, dan eksekutabel.\n"
+                "Terminologi Kanonis: deliverable, milestone, target state, governance, quality gate, risiko.\n"
+                "Prinsip Konsistensi Antarbab: istilah konsisten, alur masalah-ke-solusi jelas, "
+                "timeline sinkron dengan deliverable, tata kelola tegas, hindari repetisi.\n"
+                "Larangan Gaya Tulis: filler generik, klaim tanpa dasar, paragraf tanpa tindakan."
+            )
+
+        self._cache_put(self._proposal_contract_cache, cache_key, contract, max_size=96)
+        return contract
+
+    def _fetch_chapter_context(
+        self,
+        chap: Dict[str, Any],
+        client: str,
+        project: str,
+        budget: str,
+        service_type: str,
+        project_goal: str,
+        project_type: str,
+        timeline: str,
+        notes: str,
+        regulations: str,
+        firm_data: Dict[str, str],
+        research_bundle: Dict[str, str],
+        proposal_contract: str
+    ) -> Dict[str, Any]:
+        try:
+            global_data = research_bundle.get('profile', '')
+            client_news = research_bundle.get('news', '')
+            regulation_data = research_bundle.get('regulations', '')
+
+            ctx_key = self._cache_key("chapter_ctx", client, project, budget, chap.get('id', ''), chap.get('keywords', ''))
+            cached_ctx = self._chapter_context_cache.get(ctx_key)
+            if cached_ctx:
+                structured_row_data = cached_ctx.get("structured_row_data", "")
+                rag_data = cached_ctx.get("rag_data", "")
+            else:
+                structured_row_data = self.kb.get_exact_context(client, project, budget)
+                rag_data = self.kb.query(client, project, chap['keywords'])
+                self._cache_put(
+                    self._chapter_context_cache,
+                    ctx_key,
+                    {"structured_row_data": structured_row_data, "rag_data": rag_data},
+                    max_size=256
+                )
             
             persona = PERSONAS.get(chap.get('id', 'default'), PERSONAS['default'])
             subs = "\n".join([f"- {s}" for s in chap['subs']])
@@ -608,6 +748,7 @@ class ProposalGenerator:
             # DYNAMIC INSTRUCTIONS: Injecting the UI Choices
             # ==========================================================
             extra = (
+                f"[PROPOSAL CONTRACT]\n{proposal_contract}\n"
                 "[GLOBAL] Proposal ini wajib mempertahankan kedalaman konten tingkat eksekutif dan total dokumen target 20-25 halaman. "
                 "Setiap bab harus memiliki konteks spesifik klien, poin yang dapat ditindaklanjuti, dan tidak generik. Gunakan kombinasi numbering dan bullet yang rapi di setiap H2, namun tetap padat dan tidak banyak whitespace."
             )
@@ -651,47 +792,234 @@ class ProposalGenerator:
         except Exception as e:
             return {"prompt": "", "success": False, "error": str(e)}
 
-    def _generate_chapter_content(self, chap: Dict[str, Any], prompt: str) -> str:
+    @staticmethod
+    def _contains_client_reference(content: str, client: str) -> bool:
+        tokens = [
+            t for t in re.findall(r"[A-Za-z0-9]{3,}", client)
+            if t.lower() not in {"pt", "cv", "tbk"}
+        ]
+        if not tokens:
+            return True
+        return any(re.search(rf"\b{re.escape(tok)}\b", content, re.IGNORECASE) for tok in tokens[:3])
+
+    def _chapter_quality_report(self, chap: Dict[str, Any], content: str, client: str) -> Dict[str, Any]:
+        target_words = self._target_words(chap)
+        min_words = max(280, int(target_words * 0.75))
+        max_words = max(min_words + 120, int(target_words * 1.35))
+        word_count = self._word_count(content)
+        missing_h2 = [
+            sub for sub in chap.get('subs', [])
+            if not re.search(rf"(?im)^\s*##\s*{re.escape(sub)}\s*$", content)
+        ]
+        has_numbered_list = bool(re.search(r"(?m)^\s*\d+\.\s+\S+", content))
+        has_bullet_list = bool(re.search(r"(?m)^\s*[-*]\s+\S+", content))
+        has_client_ref = self._contains_client_reference(content, client)
+        has_required_visual = True
+        if chap.get('visual_intent') == "gantt":
+            has_required_visual = "[[GANTT:" in content
+
+        issues = []
+        if missing_h2:
+            issues.append("missing_h2")
+        if word_count < min_words:
+            issues.append("too_short")
+        if word_count > max_words:
+            issues.append("too_long")
+        if not has_numbered_list or not has_bullet_list:
+            issues.append("list_structure")
+        if not has_required_visual:
+            issues.append("missing_visual")
+        if not has_client_ref:
+            issues.append("missing_client_ref")
+
+        return {
+            "issues": issues,
+            "word_count": word_count,
+            "target_words": target_words,
+            "min_words": min_words,
+            "max_words": max_words,
+            "missing_h2": missing_h2,
+        }
+
+    def _ensure_required_headings(self, chap: Dict[str, Any], content: str) -> str:
+        missing_h2 = [
+            sub for sub in chap.get('subs', [])
+            if not re.search(rf"(?im)^\s*##\s*{re.escape(sub)}\s*$", content)
+        ]
+        if not missing_h2:
+            return content
+
+        patched = content.rstrip()
+        for heading in missing_h2:
+            patched += (
+                f"\n\n## {heading}\n"
+                "### Rincian Inti\n"
+                "1. Aktivitas utama pada bagian ini disesuaikan langsung dengan kebutuhan bisnis klien.\n"
+                "- Risiko, dependensi, dan indikator keberhasilan dijabarkan secara terukur untuk eksekusi.\n"
+            )
+        return patched
+
+    @staticmethod
+    def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if not match:
+            return None
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _chapter_excerpt(text: str, max_words: int = 170) -> str:
+        words = re.findall(r"\S+", text)
+        if len(words) <= max_words:
+            return " ".join(words)
+        head = " ".join(words[:110])
+        tail = " ".join(words[-60:])
+        return f"{head} ... {tail}"
+
+    def _apply_global_coherence(
+        self,
+        chapter_outputs: Dict[str, str],
+        selected_chapters: List[Dict[str, Any]],
+        client: str,
+        project: str
+    ) -> Dict[str, str]:
+        if len(chapter_outputs) < 2:
+            return chapter_outputs
+
+        snippets = []
+        for chap in selected_chapters:
+            content = chapter_outputs.get(chap['id'])
+            if content:
+                snippets.append(f"[{chap['id']}] {chap['title']} :: {self._chapter_excerpt(content)}")
+        if len(snippets) < 2:
+            return chapter_outputs
+
+        snippets_text = "\n".join(snippets)
+        prompt = f"""
+        Audit koherensi proposal lintas bab untuk klien {client} dan inisiatif {project}.
+        Ringkasan bab:
+        {snippets_text}
+
+        Keluarkan JSON murni tanpa markdown:
+        {{
+          "canonical_terms": [
+            {{"preferred": "target state", "variants": ["kondisi target", "sasaran akhir"]}}
+          ],
+          "bridge_sentences": [
+            {{"chapter_id": "c_2", "sentence": "Rumusan masalah ini menjadi dasar klasifikasi kebutuhan pada bab berikutnya."}}
+          ]
+        }}
+
+        Aturan:
+        - Maksimal 6 canonical_terms.
+        - Maksimal 6 bridge_sentences.
+        - sentence <= 25 kata.
+        """
+        try:
+            res = self.ollama.chat(
+                model=LLM_MODEL,
+                messages=[
+                    {'role': 'system', 'content': 'You output strictly valid JSON.'},
+                    {'role': 'user', 'content': prompt}
+                ],
+                options={'num_ctx': 16384, 'num_predict': 900, 'temperature': 0.1}
+            )
+            directives = self._extract_json_object(res.get('message', {}).get('content', ''))
+        except Exception:
+            directives = None
+
+        if not directives:
+            return chapter_outputs
+
+        canonical_terms = directives.get("canonical_terms", [])
+        bridge_sentences = directives.get("bridge_sentences", [])
+        revised = dict(chapter_outputs)
+
+        for chap_id, text in revised.items():
+            updated = text
+            for item in canonical_terms:
+                preferred = str(item.get("preferred", "")).strip()
+                variants = item.get("variants", []) or []
+                if not preferred:
+                    continue
+                for variant in variants:
+                    variant_text = str(variant).strip()
+                    if not variant_text or variant_text.lower() == preferred.lower():
+                        continue
+                    updated = re.sub(rf"(?i)\b{re.escape(variant_text)}\b", preferred, updated)
+            revised[chap_id] = updated
+
+        for item in bridge_sentences:
+            chap_id = str(item.get("chapter_id", "")).strip()
+            sentence = str(item.get("sentence", "")).strip()
+            if not chap_id or chap_id not in revised or not sentence:
+                continue
+            if sentence in revised[chap_id]:
+                continue
+            revised[chap_id] = revised[chap_id].rstrip() + f"\n\n- {sentence}"
+
+        return revised
+
+    def _generate_chapter_content(self, chap: Dict[str, Any], prompt: str, client: str) -> str:
+        # One primary generation call per chapter.
         res = self.ollama.chat(
             model=LLM_MODEL,
             messages=[
                 {'role': 'system', 'content': prompt},
-                {'role': 'user', 'content': f"Write content for {chap['title']}."}
+                {'role': 'user', 'content': (
+                    f"Tulis konten untuk {chap['title']} dalam satu draft final. "
+                    "Pastikan hard checks terpenuhi: H2 wajib lengkap, word range sesuai target, "
+                    "ada numbered list dan bullet list, serta konten tetap konkret dan action-oriented."
+                )}
             ],
-            options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.3, 'top_p': 0.85, 'repeat_penalty': 1.15}
+            options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.25, 'top_p': 0.85, 'repeat_penalty': 1.1}
         )
-        content = res['message']['content']
-        target_words = self._target_words(chap)
+        content = (res.get('message', {}).get('content', '') or '').strip()
+        report = self._chapter_quality_report(chap, content, client)
+        hard_check_keys = {"missing_h2", "too_short", "too_long", "list_structure", "missing_visual"}
+        hard_issues = [i for i in report["issues"] if i in hard_check_keys]
+        if not hard_issues:
+            return content
 
-        if self._word_count(content) < int(target_words * 0.8):
-            expand = self.ollama.chat(
+        # Single retry only when hard checks fail.
+        retry_prompt = (
+            f"Perbaiki draft {chap['title']} agar lulus hard quality checks.\n"
+            f"Issues: {', '.join(hard_issues)}\n"
+            f"Word count: {report['word_count']} (target {report['target_words']}, range {report['min_words']}-{report['max_words']}).\n"
+            f"Missing H2: {', '.join(report['missing_h2']) if report['missing_h2'] else '-'}\n"
+            "Pertahankan fakta dan konteks. Keluarkan versi final saja.\n\n"
+            f"DRAFT:\n{content}"
+        )
+        try:
+            retry = self.ollama.chat(
                 model=LLM_MODEL,
                 messages=[
                     {'role': 'system', 'content': prompt},
-                    {'role': 'user', 'content': (
-                        f"Revise and expand {chap['title']} to be more detailed. Minimum {target_words} words. "
-                        "Keep exact H2 headings, add 2-3 H3 under each H2, use numbered lists for sequence "
-                        "and bullets for supporting details with short explanations, include practical examples and metrics."
-                    )}
+                    {'role': 'user', 'content': retry_prompt}
                 ],
-                options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.3, 'top_p': 0.85, 'repeat_penalty': 1.15}
+                options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.2, 'top_p': 0.85, 'repeat_penalty': 1.1}
             )
-            content = expand['message']['content']
+            improved = (retry.get('message', {}).get('content', '') or '').strip()
+            if improved:
+                content = improved
+        except Exception:
+            pass
 
-        if self._word_count(content) > self._max_words(chap):
-            condense = self.ollama.chat(
-                model=LLM_MODEL,
-                messages=[
-                    {'role': 'system', 'content': prompt},
-                    {'role': 'user', 'content': (
-                        f"Condense {chap['title']} to around {target_words} words while preserving all key facts and structure. "
-                        "Keep exact H2 headings, retain numbered/bullet formatting, and remove repetition."
-                    )}
-                ],
-                options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.3, 'top_p': 0.85, 'repeat_penalty': 1.15}
-            )
-            content = condense['message']['content']
+        final_report = self._chapter_quality_report(chap, content, client)
+        if final_report.get("missing_h2"):
+            content = self._ensure_required_headings(chap, content)
+            final_report = self._chapter_quality_report(chap, content, client)
 
+        if final_report["issues"]:
+            logger.warning(f"Quality checks not fully satisfied for {chap['title']}: {', '.join(final_report['issues'])}")
         return content
 
     def run(
@@ -711,22 +1039,43 @@ class ProposalGenerator:
 
         firm_data = self.firm_api.get_project_standards(project_type)
         base_client = re.sub(r'\b(Cabang|Branch|Tbk)\b.*$|^(PT\.|CV\.)', '', client, flags=re.IGNORECASE).strip()
+        research_bundle = self._get_research_bundle(base_client, regulations)
+        proposal_contract = self._build_proposal_contract(
+            client=client,
+            project=project,
+            budget=budget,
+            service_type=service_type,
+            project_goal=project_goal,
+            project_type=project_type,
+            timeline=timeline,
+            notes=notes,
+            regulations=regulations,
+            selected_chapters=selected_chapters,
+            research_bundle=research_bundle,
+            firm_data=firm_data
+        )
+        logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client)
 
-        research_futures = {
-            'profile': self.io_pool.submit(Researcher.get_entity_profile, base_client),
-            'news': self.io_pool.submit(Researcher.get_latest_client_news, base_client), 
-            'regulations': self.io_pool.submit(Researcher.get_regulatory_data, regulations)
-        }
-        logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client) 
-        
-        # Build context only for selected chapter(s) to keep generation efficient.
         context_futures = {
             chap['id']: self.io_pool.submit(
-                self._fetch_chapter_context, 
-                chap, client, project, budget, service_type, project_goal, project_type, timeline, notes, regulations, firm_data, research_futures
+                self._fetch_chapter_context,
+                chap, client, project, budget, service_type, project_goal, project_type, timeline,
+                notes, regulations, firm_data, research_bundle, proposal_contract
             )
             for chap in selected_chapters
         }
+
+        chapter_outputs: Dict[str, str] = {}
+        for chap in selected_chapters:
+            ctx = context_futures[chap['id']].result()
+            if not ctx['success']:
+                continue
+            try:
+                chapter_outputs[chap['id']] = self._generate_chapter_content(chap, ctx['prompt'], client)
+            except Exception as e:
+                logger.error(f"Generation Error for {chap['title']}: {e}")
+
+        chapter_outputs = self._apply_global_coherence(chapter_outputs, selected_chapters, client, project)
 
         try:
             logo_stream, theme_color = logo_future.result(timeout=8)
@@ -784,19 +1133,26 @@ class ProposalGenerator:
         contact.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         doc.add_page_break()
-        
+
+        rendered_any = False
         for i, chap in enumerate(selected_chapters):
-            ctx = context_futures[chap['id']].result()
-            if ctx['success']:
-                try:
-                    content = self._generate_chapter_content(chap, ctx['prompt'])
-                    h = doc.add_heading(chap['title'], level=1)
-                    h.runs[0].font.color.rgb = RGBColor(*theme_color)
-                    DocumentBuilder.process_content(doc, content, theme_color, chap['title'])
-                    if i < len(selected_chapters) - 1:
-                        doc.add_page_break()
-                except Exception as e:
-                    logger.error(f"Generation Error for {chap['title']}: {e}")
+            content = chapter_outputs.get(chap['id'], '').strip()
+            if not content:
+                continue
+            rendered_any = True
+            h = doc.add_heading(chap['title'], level=1)
+            h.runs[0].font.color.rgb = RGBColor(*theme_color)
+            DocumentBuilder.process_content(doc, content, theme_color, chap['title'])
+
+            has_next = any(
+                chapter_outputs.get(next_chap['id'], '').strip()
+                for next_chap in selected_chapters[i + 1:]
+            )
+            if has_next:
+                doc.add_page_break()
+
+        if not rendered_any:
+            doc.add_paragraph("Konten proposal belum berhasil digenerate. Mohon ulangi proses.")
 
         base_name = f"Proposal_{client}_{project}"
         if len(selected_chapters) == 1:
