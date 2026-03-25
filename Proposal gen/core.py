@@ -95,8 +95,27 @@ class FirmAPIClient:
         return match.group(0).strip() if match else ""
 
     def _build_profile_from_osint(self) -> Dict[str, str]:
-        query = f'"{WRITER_FIRM_NAME}" kontak email telp alamat'
-        hits = Researcher.search(query, limit=5)
+        current_year = datetime.now().year
+        query = (
+            f'"{WRITER_FIRM_NAME}" Yogyakarta kontak email telp alamat profil '
+            f'{current_year} OR {current_year - 1}'
+        )
+        raw_hits = Researcher.search(query, limit=8, recency_bucket="year")
+        hits = Researcher._filter_recent_entity_results(
+            raw_hits,
+            entity_name=WRITER_FIRM_NAME,
+            max_age_years=4,
+            strict_entity=True
+        )
+        if not hits:
+            fallback_query = f'"{WRITER_FIRM_NAME}" Yogyakarta pelatihan konsultasi kontak resmi'
+            fallback_hits = Researcher.search(fallback_query, limit=8)
+            hits = Researcher._filter_recent_entity_results(
+                fallback_hits,
+                entity_name=WRITER_FIRM_NAME,
+                max_age_years=6,
+                strict_entity=True
+            )
         merged = " ".join(
             [str(item.get("title", "")) + " " + str(item.get("snippet", "")) for item in hits]
         )
@@ -190,15 +209,31 @@ class KnowledgeBase:
 # Public research helper (Serper).
 class Researcher:
     @staticmethod
+    def _has_serper_key() -> bool:
+        key = (SERPER_API_KEY or "").strip()
+        if not key:
+            return False
+        placeholder_keys = {"YOUR_SERPER_API_KEY", "YOUR_SERPER", "SERPER_API"}
+        return key not in placeholder_keys
+
+    @staticmethod
     @lru_cache(maxsize=256)
-    def search(query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def search(query: str, limit: int = 5, recency_bucket: str = "") -> List[Dict[str, Any]]:
         """General web search using Serper.dev"""
-        if "YOUR_SERPER" in SERPER_API_KEY:
+        if not Researcher._has_serper_key():
             return []
         url = "https://google.serper.dev/search"
-        payload = json.dumps({"q": query, "gl": "id", "num": limit})
+        payload_data = {"q": query, "gl": "id", "num": limit}
+        recency_map = {
+            "week": "qdr:w",
+            "month": "qdr:m",
+            "year": "qdr:y",
+        }
+        if recency_bucket in recency_map:
+            payload_data["tbs"] = recency_map[recency_bucket]
+        payload = json.dumps(payload_data)
         headers = {
-            'X-API-KEY': SERPER_API_KEY,
+            'X-API-KEY': (SERPER_API_KEY or "").strip(),
             'Content-Type': 'application/json'
         }
         try:
@@ -208,6 +243,132 @@ class Researcher:
         except requests.RequestException as e:
             logger.warning(f"Serper API Error: {e}")
             return []
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        normalized = re.sub(r"[^a-z0-9]+", " ", (text or "").lower())
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    @staticmethod
+    def _entity_tokens(entity_name: str) -> List[str]:
+        legal_tokens = {"pt", "cv", "tbk", "inc", "ltd", "co", "corp", "persero", "company"}
+        tokens = [
+            token for token in re.findall(r"[a-z0-9]+", (entity_name or "").lower())
+            if len(token) >= 3 and token not in legal_tokens
+        ]
+        # Keep order while dropping duplicates.
+        ordered = []
+        seen = set()
+        for token in tokens:
+            if token in seen:
+                continue
+            ordered.append(token)
+            seen.add(token)
+        return ordered
+
+    @staticmethod
+    def _is_entity_match(item: Dict[str, Any], entity_name: str, strict: bool = False) -> bool:
+        if not entity_name:
+            return True
+
+        merged = " ".join([
+            str(item.get("title", "")),
+            str(item.get("snippet", "")),
+            str(item.get("link", "")),
+        ])
+        normalized_merged = Researcher._normalize_text(merged)
+        phrase = Researcher._normalize_text(entity_name)
+        tokens = Researcher._entity_tokens(entity_name)
+
+        if phrase and phrase in normalized_merged:
+            return True
+
+        if not tokens:
+            return False
+
+        merged_tokens = set(normalized_merged.split())
+        hits = sum(1 for token in tokens if token in merged_tokens)
+        if strict:
+            return hits == len(tokens)
+        if len(tokens) == 1:
+            return hits == 1
+        if len(tokens) == 2:
+            return hits == 2
+        return hits >= (len(tokens) - 1)
+
+    @staticmethod
+    def _extract_month(text: str) -> Optional[int]:
+        if not text:
+            return None
+        month_map = {
+            "jan": 1, "januari": 1, "january": 1,
+            "feb": 2, "februari": 2, "february": 2,
+            "mar": 3, "maret": 3, "march": 3,
+            "apr": 4, "april": 4,
+            "mei": 5, "may": 5,
+            "jun": 6, "juni": 6, "june": 6,
+            "jul": 7, "juli": 7, "july": 7,
+            "agu": 8, "agustus": 8, "aug": 8, "august": 8,
+            "sep": 9, "sept": 9, "september": 9,
+            "okt": 10, "oct": 10, "oktober": 10, "october": 10,
+            "nov": 11, "november": 11,
+            "des": 12, "dec": 12, "desember": 12, "december": 12,
+        }
+        lowered = (text or "").lower()
+        for key, month in month_map.items():
+            if re.search(rf"\b{re.escape(key)}\b", lowered):
+                return month
+        return None
+
+    @staticmethod
+    def _extract_day(text: str) -> Optional[int]:
+        if not text:
+            return None
+        match = re.search(r"\b([0-2]?\d|3[01])\b", text)
+        if not match:
+            return None
+        day = int(match.group(1))
+        if 1 <= day <= 31:
+            return day
+        return None
+
+    @staticmethod
+    def _published_sort_key(item: Dict[str, Any]) -> int:
+        merged = " ".join([
+            str(item.get("date", "")),
+            str(item.get("title", "")),
+            str(item.get("snippet", "")),
+        ])
+        year = Researcher._extract_year(merged) or 0
+        month = Researcher._extract_month(merged) or 1
+        day = Researcher._extract_day(str(item.get("date", ""))) or 1
+        return (year * 10_000) + (month * 100) + day
+
+    @staticmethod
+    def _sort_by_recency(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return sorted(items or [], key=Researcher._published_sort_key, reverse=True)
+
+    @staticmethod
+    def _filter_recent_entity_results(
+        items: List[Dict[str, Any]],
+        entity_name: str = "",
+        max_age_years: int = 2,
+        strict_entity: bool = False
+    ) -> List[Dict[str, Any]]:
+        filtered = []
+        for item in (items or []):
+            if not Researcher._is_recent(item, max_age_years=max_age_years):
+                continue
+            if entity_name and not Researcher._is_entity_match(item, entity_name, strict=strict_entity):
+                continue
+            filtered.append(item)
+        return Researcher._sort_by_recency(filtered)
+
+    @staticmethod
+    def _is_regulatory_domain(link: str) -> bool:
+        domain = Researcher._source_name(link)
+        trusted_suffixes = ("go.id", "iso.org", "ietf.org", "iec.ch", "nist.gov")
+        return any(domain.endswith(sfx) for sfx in trusted_suffixes)
     @staticmethod
     def _extract_year(text: str) -> Optional[int]:
         if not text:
@@ -270,8 +431,28 @@ class Researcher:
     @staticmethod
     @lru_cache(maxsize=128)
     def get_entity_profile(entity_name: str) -> str:
-        res = Researcher.search(f'"{entity_name}" profil perusahaan OR "tentang kami" -saham -loker', limit=6)
-        filtered = [i for i in res if Researcher._is_recent(i, max_age_years=3)]
+        current_year = datetime.now().year
+        strict_entity = Researcher._normalize_text(entity_name) == Researcher._normalize_text(WRITER_FIRM_NAME)
+        query = (
+            f'"{entity_name}" profil perusahaan OR "tentang kami" OR alamat OR kontak '
+            f'{current_year} OR {current_year - 1}'
+        )
+        res = Researcher.search(query, limit=8, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(
+            res,
+            entity_name=entity_name,
+            max_age_years=3,
+            strict_entity=strict_entity
+        )
+        if not filtered and strict_entity:
+            fallback_query = f'"{entity_name}" Yogyakarta pelatihan konsultasi kontak resmi'
+            fallback_res = Researcher.search(fallback_query, limit=8)
+            filtered = Researcher._filter_recent_entity_results(
+                fallback_res,
+                entity_name=entity_name,
+                max_age_years=6,
+                strict_entity=True
+            )
         return Researcher._format_evidence(
             filtered[:4],
             label="OSINT_PROFILE",
@@ -285,9 +466,15 @@ class Researcher:
         prev_year = current_year - 1
         res = Researcher.search(
             f'"{client_name}" berita inovasi OR transformasi digital {current_year} OR {prev_year}',
-            limit=8
+            limit=8,
+            recency_bucket="month"
         )
-        filtered = [i for i in res if Researcher._is_recent(i, max_age_years=2)]
+        filtered = Researcher._filter_recent_entity_results(
+            res,
+            entity_name=client_name,
+            max_age_years=2,
+            strict_entity=False
+        )
         return Researcher._format_evidence(
             filtered[:4],
             label="OSINT_NEWS",
@@ -301,8 +488,10 @@ class Researcher:
             return "Tidak ada regulasi spesifik dari input user."
 
         query = f'Ringkasan implementasi standar {regulations_string.replace(",", " OR ")} site:.go.id OR site:iso.org'
-        res = Researcher.search(query, limit=8)
-        filtered = [i for i in res if Researcher._is_recent(i, max_age_years=5)]
+        res = Researcher.search(query, limit=8, recency_bucket="year")
+        recent = [i for i in Researcher._sort_by_recency(res) if Researcher._is_recent(i, max_age_years=5)]
+        trusted = [i for i in recent if Researcher._is_regulatory_domain(str(i.get("link", "")))]
+        filtered = trusted if trusted else recent
         return Researcher._format_evidence(
             filtered[:5],
             label="OSINT_REG",
@@ -608,9 +797,16 @@ class FinancialAnalyzer:
         frameworks: str = "",
     ) -> Dict[str, Any]:
         year = datetime.now().year
-        finance_snippets = Researcher.search(
+        finance_results = Researcher.search(
             f'"{client_name}" laporan keuangan OR pendapatan OR pendanaan OR aset {year-2} OR {year-1} OR {year}',
-            limit=8
+            limit=10,
+            recency_bucket="year"
+        )
+        finance_snippets = Researcher._filter_recent_entity_results(
+            finance_results,
+            entity_name=client_name,
+            max_age_years=3,
+            strict_entity=False
         )
         keyword_context = self._compact_keywords(
             f"{objective} {notes} {project_goal} {frameworks} {project_type} {service_type}"
@@ -619,7 +815,11 @@ class FinancialAnalyzer:
             f'estimasi biaya proyek {project_type or "IT"} {service_type} {timeline} '
             f'Indonesia {keyword_context}'
         )
-        benchmark_snippets = Researcher.search(benchmark_query, limit=8)
+        benchmark_results = Researcher.search(benchmark_query, limit=10, recency_bucket="year")
+        benchmark_snippets = [
+            item for item in Researcher._sort_by_recency(benchmark_results)
+            if Researcher._is_recent(item, max_age_years=3)
+        ][:8]
 
         context_finance = "\n".join([item.get('snippet', '') for item in finance_snippets]) if finance_snippets else "-"
         context_benchmark = "\n".join([item.get('snippet', '') for item in benchmark_snippets]) if benchmark_snippets else "-"
@@ -713,7 +913,7 @@ class LogoManager:
 
     @staticmethod
     def get_logo_and_color(client_name: str) -> Tuple[Optional[io.BytesIO], Tuple[int, int, int]]:
-        if "YOUR_SERPER" in SERPER_API_KEY:
+        if not Researcher._has_serper_key():
             return LogoManager._create_fallback_logo(client_name), DEFAULT_COLOR
         try:
             url = "https://google.serper.dev/images"
