@@ -329,33 +329,191 @@ class FinancialAnalyzer:
         return values
 
     @classmethod
-    def _dynamic_budget_from_osint(cls, client_name: str, snippets: List[Dict[str, Any]]) -> Dict[str, Any]:
-        merged = " ".join(
-            [str(item.get("title", "")) + " " + str(item.get("snippet", "")) for item in (snippets or [])]
-        )
-        values = cls._extract_financial_values(merged)
-        values.sort()
+    def _duration_to_months(cls, timeline: str) -> Optional[float]:
+        text = (timeline or "").lower().strip()
+        if not text:
+            return None
 
-        if values:
-            median_value = values[len(values) // 2]
-            baseline = int(max(100_000_000, min(4_000_000_000, median_value * 0.0015)))
+        patterns = [
+            (r"(\d+(?:[.,]\d+)?)\s*(tahun|thn|year|years)", 12.0),
+            (r"(\d+(?:[.,]\d+)?)\s*(bulan|bln|month|months)", 1.0),
+            (r"(\d+(?:[.,]\d+)?)\s*(minggu|week|weeks)", 1.0 / 4.345),
+            (r"(\d+(?:[.,]\d+)?)\s*(hari|day|days)", 1.0 / 30.0),
+        ]
+
+        months = 0.0
+        found = False
+        for pattern, factor in patterns:
+            for match in re.finditer(pattern, text):
+                value = cls._parse_number(match.group(1))
+                if value is None:
+                    continue
+                months += value * factor
+                found = True
+
+        if found:
+            return max(months, 0.5)
+
+        single_number = re.search(r"(\d+(?:[.,]\d+)?)", text)
+        if single_number:
+            value = cls._parse_number(single_number.group(1))
+            if value is not None:
+                return max(value, 0.5)
+        return None
+
+    @classmethod
+    def _duration_multiplier(cls, timeline: str) -> float:
+        months = cls._duration_to_months(timeline)
+        if months is None:
+            return 1.0
+        raw = (months / 6.0) ** 0.45
+        return max(0.75, min(2.4, raw))
+
+    @classmethod
+    def _scope_multiplier(
+        cls,
+        project_type: str,
+        service_type: str,
+        project_goal: str,
+        objective: str,
+        notes: str,
+        frameworks: str
+    ) -> float:
+        project_weight = {
+            "diagnostic": 0.90,
+            "strategic": 1.00,
+            "transformation": 1.22,
+            "implementation": 1.35,
+        }
+        service_weight = {
+            "training": 0.85,
+            "konsultan": 1.10,
+            "training dan konsultan": 1.20,
+        }
+
+        base = project_weight.get((project_type or "").strip().lower(), 1.0)
+        base *= service_weight.get((service_type or "").strip().lower(), 1.0)
+
+        combined = " ".join([project_goal or "", objective or "", notes or "", frameworks or ""]).lower()
+        high_complexity = [
+            "multi", "integrasi", "core banking", "migrasi", "nasional", "enterprise",
+            "regulasi", "compliance", "24/7", "high availability", "multi-site", "multisite",
+        ]
+        medium_complexity = [
+            "dashboard", "governance", "kpi", "workflow", "automation",
+            "cloud", "api", "security", "audit", "change management",
+        ]
+        high_hits = sum(1 for token in high_complexity if token in combined)
+        medium_hits = sum(1 for token in medium_complexity if token in combined)
+        complexity_boost = min(0.55, (high_hits * 0.06) + (medium_hits * 0.025))
+
+        need_items = [part.strip() for part in re.split(r"[,+;/]| dan ", (project_goal or "").lower()) if part.strip()]
+        breadth_boost = min(0.25, max(0, len(need_items) - 1) * 0.05)
+
+        scope_multiplier = base * (1.0 + complexity_boost + breadth_boost)
+        return max(0.75, min(2.4, scope_multiplier))
+
+    @staticmethod
+    def _compact_keywords(text: str, max_terms: int = 7) -> str:
+        stopwords = {
+            "dan", "yang", "untuk", "dengan", "dari", "pada", "agar", "atau",
+            "the", "and", "for", "with", "from", "into", "this", "that",
+        }
+        tokens = re.findall(r"[A-Za-z0-9]{4,}", (text or "").lower())
+        seen = set()
+        out = []
+        for token in tokens:
+            if token in stopwords or token in seen:
+                continue
+            seen.add(token)
+            out.append(token)
+            if len(out) >= max_terms:
+                break
+        return " ".join(out)
+
+    @classmethod
+    def _dynamic_budget_from_osint(
+        cls,
+        client_name: str,
+        finance_snippets: List[Dict[str, Any]],
+        benchmark_snippets: List[Dict[str, Any]],
+        timeline: str = "",
+        project_type: str = "",
+        service_type: str = "",
+        project_goal: str = "",
+        objective: str = "",
+        notes: str = "",
+        frameworks: str = "",
+    ) -> Dict[str, Any]:
+        finance_text = " ".join(
+            [str(item.get("title", "")) + " " + str(item.get("snippet", "")) for item in (finance_snippets or [])]
+        )
+        benchmark_text = " ".join(
+            [str(item.get("title", "")) + " " + str(item.get("snippet", "")) for item in (benchmark_snippets or [])]
+        )
+
+        finance_values = sorted(cls._extract_financial_values(finance_text))
+        benchmark_values = sorted(cls._extract_financial_values(benchmark_text))
+
+        if finance_values:
+            finance_median = finance_values[len(finance_values) // 2]
+            financial_base = int(max(120_000_000, min(6_000_000_000, finance_median * 0.0015)))
+        else:
+            finance_median = None
+            financial_base = 350_000_000
+
+        if benchmark_values:
+            benchmark_median = benchmark_values[len(benchmark_values) // 2]
+            market_base = int(max(80_000_000, min(6_000_000_000, benchmark_median)))
+        else:
+            benchmark_median = None
+            market_base = financial_base
+
+        if finance_median and benchmark_median:
+            base_price = int((financial_base * 0.45) + (market_base * 0.55))
+        elif benchmark_median:
+            base_price = market_base
+        else:
+            base_price = financial_base
+
+        duration_factor = cls._duration_multiplier(timeline)
+        scope_factor = cls._scope_multiplier(
+            project_type=project_type,
+            service_type=service_type,
+            project_goal=project_goal,
+            objective=objective,
+            notes=notes,
+            frameworks=frameworks,
+        )
+        adjusted_base = int(base_price * duration_factor * scope_factor)
+        adjusted_base = int(max(120_000_000, min(9_000_000_000, adjusted_base)))
+
+        basic = int(adjusted_base * 0.72)
+        standard = max(basic + 40_000_000, adjusted_base)
+        enterprise = max(standard + 80_000_000, int(adjusted_base * 1.65))
+
+        months = cls._duration_to_months(timeline)
+        duration_note = f"{months:.1f} bulan" if months else "durasi belum spesifik"
+        if finance_median:
             analysis = (
-                f"Estimasi untuk {client_name} diturunkan dari sinyal finansial publik; "
-                f"nilai acuan terdeteksi sekitar {cls._format_idr(median_value)}."
+                f"Estimasi untuk {client_name} memakai sinyal finansial publik "
+                f"(acuan {cls._format_idr(finance_median)}) lalu disesuaikan oleh durasi ({duration_note}) "
+                f"dan skala/scope proyek."
             )
         else:
-            baseline = 300_000_000
             analysis = (
-                f"Data finansial publik {client_name} terbatas; estimasi dibuat konservatif "
-                "dengan rentang yang masih realistis untuk proyek konsultasi TI."
+                f"Data finansial publik {client_name} terbatas; estimasi dibuat dari benchmark OSINT "
+                f"dan disesuaikan oleh durasi ({duration_note}) serta skala/scope proyek."
             )
 
-        options = [
-            {"tier": "Basic", "price": cls._format_idr(int(baseline * 0.7))},
-            {"tier": "Standard", "price": cls._format_idr(baseline)},
-            {"tier": "Enterprise", "price": cls._format_idr(int(baseline * 1.8))},
-        ]
-        return {"analysis": analysis, "options": options}
+        return {
+            "analysis": analysis,
+            "options": [
+                {"tier": "Basic", "price": cls._format_idr(basic)},
+                {"tier": "Standard", "price": cls._format_idr(standard)},
+                {"tier": "Enterprise", "price": cls._format_idr(enterprise)},
+            ],
+        }
 
     @staticmethod
     def _is_valid_budget_payload(payload: Dict[str, Any]) -> bool:
@@ -380,17 +538,82 @@ class FinancialAnalyzer:
                 return False
         return True
 
-    def suggest_budget(self, client_name: str) -> Dict[str, Any]:
+    @staticmethod
+    def _merge_with_context_adjustment(
+        model_payload: Dict[str, Any],
+        context_payload: Dict[str, Any],
+        context_sensitive: bool
+    ) -> Dict[str, Any]:
+        if not context_sensitive:
+            return model_payload
+        analysis = str(model_payload.get("analysis", "")).strip()
+        if analysis:
+            analysis = (
+                f"{analysis} Rentang harga sudah disesuaikan lagi dengan durasi dan skala proyek dari input."
+            )
+        else:
+            analysis = context_payload.get("analysis", "")
+        return {
+            "analysis": analysis,
+            "options": context_payload.get("options", []),
+        }
+
+    def suggest_budget(
+        self,
+        client_name: str,
+        timeline: str = "",
+        project_type: str = "",
+        service_type: str = "",
+        project_goal: str = "",
+        objective: str = "",
+        notes: str = "",
+        frameworks: str = "",
+    ) -> Dict[str, Any]:
         year = datetime.now().year
-        snippets = Researcher.search(
+        finance_snippets = Researcher.search(
             f'"{client_name}" laporan keuangan OR pendapatan OR pendanaan OR aset {year-2} OR {year-1} OR {year}',
             limit=8
         )
-        context = "\n".join([s.get('snippet', '') for s in snippets]) if snippets else "Tidak ada data finansial yang dipublikasikan secara terbuka."
+        keyword_context = self._compact_keywords(
+            f"{objective} {notes} {project_goal} {frameworks} {project_type} {service_type}"
+        )
+        benchmark_query = (
+            f'estimasi biaya proyek {project_type or "IT"} {service_type} {timeline} '
+            f'Indonesia {keyword_context}'
+        )
+        benchmark_snippets = Researcher.search(benchmark_query, limit=8)
+
+        context_finance = "\n".join([item.get('snippet', '') for item in finance_snippets]) if finance_snippets else "-"
+        context_benchmark = "\n".join([item.get('snippet', '') for item in benchmark_snippets]) if benchmark_snippets else "-"
+        dynamic_estimate = self._dynamic_budget_from_osint(
+            client_name=client_name,
+            finance_snippets=finance_snippets,
+            benchmark_snippets=benchmark_snippets,
+            timeline=timeline,
+            project_type=project_type,
+            service_type=service_type,
+            project_goal=project_goal,
+            objective=objective,
+            notes=notes,
+            frameworks=frameworks,
+        )
 
         prompt = f"""
         Menganalisa kekuatan finansial perusahaan: {client_name}.
-        Data OSINT: {context}
+        Data finansial OSINT:
+        {context_finance}
+
+        Data benchmark biaya OSINT:
+        {context_benchmark}
+
+        Konteks proyek:
+        - Durasi: {timeline or '-'}
+        - Jenis Proyek: {project_type or '-'}
+        - Jenis Proposal/Layanan: {service_type or '-'}
+        - Klasifikasi Kebutuhan: {project_goal or '-'}
+        - Objective: {objective or '-'}
+        - Pain Points: {notes or '-'}
+        - Framework: {frameworks or '-'}
 
         Berdasarkan data di atas, estimasikan kapasitas finansial mereka dan berikan 3 opsi estimasi budget proyek TI/Konsultasi.
         FORMAT WAJIB JSON murni tanpa markdown, tanpa teks tambahan:
@@ -402,7 +625,7 @@ class FinancialAnalyzer:
                 {{"tier": "Enterprise", "price": "Rp <angka>"}}
             ]
         }}
-        Pastikan semua angka diturunkan dari sinyal data OSINT yang tersedia, bukan angka template tetap.
+        Pastikan angka mempertimbangkan durasi dan skala/scope proyek selain data OSINT.
         """
         try:
             res = self.ollama.chat(
@@ -412,17 +635,20 @@ class FinancialAnalyzer:
             )
             raw_text = res['message']['content']
             match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-            parsed = None
+            parsed = {}
             if match:
                 parsed = json.loads(match.group(0))
             else:
                 parsed = json.loads(raw_text)
             if self._is_valid_budget_payload(parsed):
-                return parsed
-            return self._dynamic_budget_from_osint(client_name, snippets)
+                context_sensitive = any(
+                    [timeline.strip(), project_type.strip(), service_type.strip(), project_goal.strip(), objective.strip(), notes.strip(), frameworks.strip()]
+                )
+                return self._merge_with_context_adjustment(parsed, dynamic_estimate, context_sensitive=context_sensitive)
+            return dynamic_estimate
         except Exception as e:
             logger.error(f"Financial Analyzer Error: {e}")
-            return self._dynamic_budget_from_osint(client_name, snippets)
+            return dynamic_estimate
 
 class LogoManager:
     @staticmethod

@@ -38,7 +38,16 @@ def suggest_budget():
     client_name = data.get('nama_perusahaan', '')
 
     analyzer = FinancialAnalyzer(proposal_generator.ollama)
-    result = analyzer.suggest_budget(client_name)
+    result = analyzer.suggest_budget(
+        client_name=client_name,
+        timeline=data.get('estimasi_waktu', ''),
+        project_type=data.get('jenis_proyek', ''),
+        service_type=data.get('jenis_proposal', ''),
+        project_goal=data.get('klasifikasi_kebutuhan', ''),
+        objective=data.get('konteks_organisasi', ''),
+        notes=data.get('permasalahan', ''),
+        frameworks=data.get('potensi_framework', ''),
+    )
     return jsonify(result)
 
 @app.route('/api/preview-outline', methods=['POST'])

@@ -246,6 +246,7 @@
         ui.btnAnalyze.addEventListener('click', async () => {
             const client = ui.selPerusahaan.value;
             if(!client) return alert("Pilih klien terlebih dahulu.");
+            const payload = getPayload();
             
             ui.btnAnalyze.innerText = "Menganalisis OSINT...";
             ui.btnAnalyze.disabled = true;
@@ -254,7 +255,7 @@
                 const res = await fetch('/api/suggest-budget', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ nama_perusahaan: client })
+                    body: JSON.stringify(payload)
                 });
                 const data = await res.json();
                 
