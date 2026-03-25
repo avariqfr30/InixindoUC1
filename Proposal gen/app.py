@@ -52,18 +52,33 @@ def preview_outline():
 
 @app.route('/generate', methods=['POST'])
 def generate_doc():
-    data = request.json
+    data = request.json or {}
+    required_fields = [
+        'nama_perusahaan',
+        'konteks_organisasi',
+        'estimasi_biaya',
+        'jenis_proposal',
+        'klasifikasi_kebutuhan',
+        'jenis_proyek',
+        'estimasi_waktu',
+        'permasalahan',
+        'potensi_framework',
+    ]
+    missing = [f for f in required_fields if not str(data.get(f, '')).strip()]
+    if missing:
+        return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
+
     try:
         doc, filename = generator.run(
-            client=data.get('nama_perusahaan', ''),
-            project=data.get('konteks_organisasi', ''),
-            budget=data.get('estimasi_biaya', ''),
-            service_type=data.get('jenis_proposal', 'Konsultan'),
-            project_goal=data.get('klasifikasi_kebutuhan', 'Problem'),
-            project_type=data.get('jenis_proyek', 'Implementation'),
-            timeline=data.get('estimasi_waktu', 'TBD'),
-            notes=data.get('permasalahan', ''),
-            regulations=data.get('potensi_framework', ''),
+            client=data['nama_perusahaan'],
+            project=data['konteks_organisasi'],
+            budget=data['estimasi_biaya'],
+            service_type=data['jenis_proposal'],
+            project_goal=data['klasifikasi_kebutuhan'],
+            project_type=data['jenis_proyek'],
+            timeline=data['estimasi_waktu'],
+            notes=data['permasalahan'],
+            regulations=data['potensi_framework'],
             chapter_id=data.get('chapter_id')
         )
     except ValueError as e:
