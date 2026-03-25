@@ -62,9 +62,24 @@ class FirmAPIClient:
             logger.error(f"Internal API Error: {e}")
             return {"methodology": "TBD", "team": "TBD", "commercial": "TBD"}
 
+    @staticmethod
+    def _default_firm_profile() -> Dict[str, str]:
+        contact_info = (MOCK_FIRM_PROFILE.get("contact_info") or "").strip()
+        portfolio = (MOCK_FIRM_PROFILE.get("portfolio_highlights") or "").strip()
+
+        if not contact_info:
+            contact_info = f"{WRITER_FIRM_NAME}\nKontak resmi akan disampaikan pada sesi kickoff."
+        if not portfolio:
+            portfolio = "Kapabilitas layanan menyesuaikan kebutuhan proyek klien."
+
+        return {
+            "contact_info": contact_info,
+            "portfolio_highlights": portfolio,
+        }
+
     def get_firm_profile(self) -> Dict[str, str]:
-        if self.demo_mode and (MOCK_FIRM_PROFILE.get("contact_info") or MOCK_FIRM_PROFILE.get("portfolio_highlights")):
-            return MOCK_FIRM_PROFILE
+        if self.demo_mode:
+            return self._default_firm_profile()
         try:
             res = requests.get(f"{self.base_url}/firm-profile", headers=self.headers, timeout=5)
             res.raise_for_status()
