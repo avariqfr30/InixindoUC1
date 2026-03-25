@@ -1,7 +1,4 @@
-"""
-Core business logic for API adapters, vector databases, OSINT capabilities,
-and document generation.
-"""
+"""Core logic for data access, research, and proposal document generation."""
 
 import os
 import io
@@ -32,23 +29,21 @@ from docx.image.exceptions import UnrecognizedImageError
 from docx.shared import Pt, RGBColor, Inches, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 
-from ollama import Client 
+from ollama import Client
 from chromadb.utils import embedding_functions
 
 from config import (
     SERPER_API_KEY, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL,
-    WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE, 
-    PERSONAS, PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING, 
+    WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE,
+    PERSONAS, PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING,
     DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, MOCK_FIRM_STANDARDS, MOCK_FIRM_PROFILE,
-    MAX_PROPOSAL_PAGES, ESTIMATED_WORDS_PER_PAGE, RESERVED_NON_CONTENT_PAGES, PAGE_SAFETY_BUFFER
+    MAX_PROPOSAL_PAGES, ESTIMATED_WORDS_PER_PAGE, RESERVED_NON_CONTENT_PAGES, PAGE_SAFETY_BUFFER,
 )
 
 logger = logging.getLogger(__name__)
 
 
-# =====================================================================
-# FIRM API ADAPTER
-# =====================================================================
+# Internal API adapter.
 class FirmAPIClient:
     def __init__(self) -> None:
         self.demo_mode = DEMO_MODE
@@ -57,7 +52,7 @@ class FirmAPIClient:
 
     def get_project_standards(self, project_type: str) -> Dict[str, str]:
         if self.demo_mode:
-            logger.info(f"[DEMO] Using Mock Data for type: {project_type}")
+            logger.info("Using demo standards for project type: %s", project_type)
             return MOCK_FIRM_STANDARDS.get(project_type, MOCK_FIRM_STANDARDS.get("Implementation"))
         try:
             res = requests.get(f"{self.base_url}/standards/{project_type}", headers=self.headers, timeout=5)
@@ -68,7 +63,7 @@ class FirmAPIClient:
             return {"methodology": "TBD", "team": "TBD", "commercial": "TBD"}
 
     def get_firm_profile(self) -> Dict[str, str]:
-        if self.demo_mode:
+        if self.demo_mode and (MOCK_FIRM_PROFILE.get("contact_info") or MOCK_FIRM_PROFILE.get("portfolio_highlights")):
             return MOCK_FIRM_PROFILE
         try:
             res = requests.get(f"{self.base_url}/firm-profile", headers=self.headers, timeout=5)
@@ -76,12 +71,38 @@ class FirmAPIClient:
             return res.json()
         except requests.RequestException as e:
             logger.error(f"Internal API Error: {e}")
-            return {"contact_info": "Kantor Pusat Terdaftar", "portfolio_highlights": "Penyedia Solusi IT"}
+            return self._build_profile_from_osint()
+
+    @staticmethod
+    def _extract_first(pattern: str, text: str) -> str:
+        match = re.search(pattern, text or "", flags=re.IGNORECASE)
+        return match.group(0).strip() if match else ""
+
+    def _build_profile_from_osint(self) -> Dict[str, str]:
+        query = f'"{WRITER_FIRM_NAME}" kontak email telp alamat'
+        hits = Researcher.search(query, limit=5)
+        merged = " ".join(
+            [str(item.get("title", "")) + " " + str(item.get("snippet", "")) for item in hits]
+        )
+
+        email = self._extract_first(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", merged)
+        phone = self._extract_first(r"(?:\+62|62|0)\d[\d\-\s()]{7,}\d", merged)
+        contact_parts = [WRITER_FIRM_NAME]
+        if email:
+            contact_parts.append(f"Email: {email}")
+        if phone:
+            contact_parts.append(f"Telp: {phone}")
+
+        if len(contact_parts) == 1:
+            contact_parts.append("Kontak resmi dapat diberikan saat sesi kickoff.")
+
+        return {
+            "contact_info": "\n".join(contact_parts),
+            "portfolio_highlights": "Kapabilitas layanan menyesuaikan kebutuhan proyek klien.",
+        }
 
 
-# =====================================================================
-# KNOWLEDGE BASE & VECTOR DB
-# =====================================================================
+# Knowledge base and vector index.
 class KnowledgeBase:
     def __init__(self, db_uri: str) -> None:
         self.engine = create_engine(db_uri)
@@ -150,9 +171,7 @@ class KnowledgeBase:
             return ""
 
 
-# =====================================================================
-# OSINT RESEARCHER (SERPER.DEV INTEGRATION)
-# =====================================================================
+# Public research helper (Serper).
 class Researcher:
     @staticmethod
     @lru_cache(maxsize=256)
@@ -253,15 +272,120 @@ class Researcher:
         )
 
 
-# =====================================================================
-# FINANCIAL ANALYZER (SMART PRICING)
-# =====================================================================
+# Budget estimator from public financial context.
 class FinancialAnalyzer:
     def __init__(self, ollama_client: Client):
         self.ollama = ollama_client
 
+    @staticmethod
+    def _format_idr(amount: int) -> str:
+        amount = max(0, int(amount))
+        return "Rp " + f"{amount:,}".replace(",", ".")
+
+    @staticmethod
+    def _parse_number(raw: str) -> Optional[float]:
+        value = (raw or "").strip()
+        if not value:
+            return None
+        if "." in value and "," in value:
+            value = value.replace(".", "").replace(",", ".")
+        elif "," in value and "." not in value:
+            value = value.replace(",", ".")
+        elif "." in value and re.fullmatch(r"\d{1,3}(?:\.\d{3})+", value):
+            value = value.replace(".", "")
+        try:
+            return float(value)
+        except ValueError:
+            return None
+
+    @classmethod
+    def _extract_financial_values(cls, text: str) -> List[int]:
+        if not text:
+            return []
+        pattern = re.compile(
+            r"(?i)(?P<rp>rp\.?\s*)?(?P<num>\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(?P<unit>triliun|miliar|juta|ribu)?"
+        )
+        multiplier = {
+            "triliun": 1_000_000_000_000,
+            "miliar": 1_000_000_000,
+            "juta": 1_000_000,
+            "ribu": 1_000,
+        }
+        values: List[int] = []
+        for match in pattern.finditer(text):
+            has_rp = bool(match.group("rp"))
+            unit = (match.group("unit") or "").lower()
+            base = cls._parse_number(match.group("num") or "")
+            if base is None:
+                continue
+            if not has_rp and not unit:
+                continue
+            amount = int(base * multiplier.get(unit, 1))
+            if amount <= 0:
+                continue
+            if amount < 1_000_000 and not unit:
+                continue
+            values.append(amount)
+        return values
+
+    @classmethod
+    def _dynamic_budget_from_osint(cls, client_name: str, snippets: List[Dict[str, Any]]) -> Dict[str, Any]:
+        merged = " ".join(
+            [str(item.get("title", "")) + " " + str(item.get("snippet", "")) for item in (snippets or [])]
+        )
+        values = cls._extract_financial_values(merged)
+        values.sort()
+
+        if values:
+            median_value = values[len(values) // 2]
+            baseline = int(max(100_000_000, min(4_000_000_000, median_value * 0.0015)))
+            analysis = (
+                f"Estimasi untuk {client_name} diturunkan dari sinyal finansial publik; "
+                f"nilai acuan terdeteksi sekitar {cls._format_idr(median_value)}."
+            )
+        else:
+            baseline = 300_000_000
+            analysis = (
+                f"Data finansial publik {client_name} terbatas; estimasi dibuat konservatif "
+                "dengan rentang yang masih realistis untuk proyek konsultasi TI."
+            )
+
+        options = [
+            {"tier": "Basic", "price": cls._format_idr(int(baseline * 0.7))},
+            {"tier": "Standard", "price": cls._format_idr(baseline)},
+            {"tier": "Enterprise", "price": cls._format_idr(int(baseline * 1.8))},
+        ]
+        return {"analysis": analysis, "options": options}
+
+    @staticmethod
+    def _is_valid_budget_payload(payload: Dict[str, Any]) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        options = payload.get("options")
+        analysis = payload.get("analysis")
+        if not isinstance(analysis, str) or not analysis.strip():
+            return False
+        if not isinstance(options, list) or len(options) < 3:
+            return False
+        for item in options[:3]:
+            if not isinstance(item, dict):
+                return False
+            tier = str(item.get("tier", "")).strip()
+            price = str(item.get("price", "")).strip()
+            if not tier or not price:
+                return False
+            if "<" in price or ">" in price:
+                return False
+            if not re.search(r"\d", price):
+                return False
+        return True
+
     def suggest_budget(self, client_name: str) -> Dict[str, Any]:
-        snippets = Researcher.search(f'"{client_name}" laporan keuangan OR "pendapatan" OR "pendanaan" OR "aset" 2023 OR 2024', limit=5)
+        year = datetime.now().year
+        snippets = Researcher.search(
+            f'"{client_name}" laporan keuangan OR pendapatan OR pendanaan OR aset {year-2} OR {year-1} OR {year}',
+            limit=8
+        )
         context = "\n".join([s.get('snippet', '') for s in snippets]) if snippets else "Tidak ada data finansial yang dipublikasikan secara terbuka."
 
         prompt = f"""
@@ -273,11 +397,12 @@ class FinancialAnalyzer:
         {{
             "analysis": "Ringkasan 1 kalimat kekuatan finansial berdasarkan data (atau sebutkan estimasi jika data terbatas).",
             "options": [
-                {{"tier": "Basic", "price": "Rp 100.000.000"}},
-                {{"tier": "Standard", "price": "Rp 350.000.000"}},
-                {{"tier": "Enterprise", "price": "Rp 800.000.000"}}
+                {{"tier": "Basic", "price": "Rp <angka>"}},
+                {{"tier": "Standard", "price": "Rp <angka>"}},
+                {{"tier": "Enterprise", "price": "Rp <angka>"}}
             ]
         }}
+        Pastikan semua angka diturunkan dari sinyal data OSINT yang tersedia, bukan angka template tetap.
         """
         try:
             res = self.ollama.chat(
@@ -287,19 +412,17 @@ class FinancialAnalyzer:
             )
             raw_text = res['message']['content']
             match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            parsed = None
             if match:
-                return json.loads(match.group(0))
-            return json.loads(raw_text)
+                parsed = json.loads(match.group(0))
+            else:
+                parsed = json.loads(raw_text)
+            if self._is_valid_budget_payload(parsed):
+                return parsed
+            return self._dynamic_budget_from_osint(client_name, snippets)
         except Exception as e:
             logger.error(f"Financial Analyzer Error: {e}")
-            return {
-                "analysis": "Data OSINT terbatas, menggunakan standar estimasi B2B.",
-                "options": [
-                    {"tier": "Basic", "price": "Rp 150.000.000"},
-                    {"tier": "Standard", "price": "Rp 300.000.000"},
-                    {"tier": "Enterprise", "price": "Rp 750.000.000"}
-                ]
-            }
+            return self._dynamic_budget_from_osint(client_name, snippets)
 
 class LogoManager:
     @staticmethod
@@ -342,7 +465,7 @@ class LogoManager:
                             stream = io.BytesIO(img_resp.content)
                             img = Image.open(stream)
                             
-                            # Ensure DOCX-compatible format by converting any source format (e.g. WEBP/SVG fallback) to PNG.
+                            # Normalize to PNG so python-docx can embed it reliably.
                             if img.mode in ("RGBA", "LA", "P"):
                                 normalized = Image.new("RGBA", img.size, (255, 255, 255, 0))
                                 normalized.paste(img, (0, 0), img if img.mode in ("RGBA", "LA") else None)
@@ -358,7 +481,7 @@ class LogoManager:
                                 factor = 120 / luminance
                                 dom_color = [max(0, min(255, int(c * factor))) for c in dom_color]
 
-                            # Return normalized PNG bytes instead of original content to avoid UnrecognizedImageError.
+                            # Use normalized bytes, not source bytes, to avoid format errors.
                             png_stream = io.BytesIO()
                             img.save(png_stream, format='PNG')
                             png_stream.seek(0)
@@ -370,9 +493,7 @@ class LogoManager:
         return LogoManager._create_fallback_logo(client_name), DEFAULT_COLOR
 
 
-# =====================================================================
-# RENDERING ENGINES
-# =====================================================================
+# Document rendering utilities.
 class StyleEngine:
     @staticmethod
     def apply_document_styles(doc: Document) -> None:
@@ -392,7 +513,7 @@ class StyleEngine:
 
 class ChartEngine:
     @staticmethod
-    def _get_plt_color(theme_color: Tuple[int, int, int]) -> Tuple[float, float, float]:
+    def _to_matplotlib_rgb(theme_color: Tuple[int, int, int]) -> Tuple[float, float, float]:
         return tuple(c/255 for c in theme_color)
 
     @staticmethod
@@ -413,7 +534,7 @@ class ChartEngine:
             
             fig, ax = plt.subplots(figsize=(8.5, max(4, len(tasks)*0.8)))
             for i, task in enumerate(tasks):
-                rect = patches.FancyBboxPatch((task['start'], i-0.3), task['dur'], 0.6, boxstyle="round,pad=0.02", ec="#ffffff", fc=ChartEngine._get_plt_color(theme_color), alpha=0.9, lw=1.5)
+                rect = patches.FancyBboxPatch((task['start'], i-0.3), task['dur'], 0.6, boxstyle="round,pad=0.02", ec="#ffffff", fc=ChartEngine._to_matplotlib_rgb(theme_color), alpha=0.9, lw=1.5)
                 ax.add_patch(rect)
                 ax.text(task['start'] + (task['dur'] / 2), i, f"{task['dur']:g} {unit_str}", ha='center', va='center', color='white', fontweight='bold', fontsize=9)
             
@@ -444,7 +565,7 @@ class DocumentBuilder:
         if not cleaned:
             return
 
-        # Keep spacing between runs stable so marker/text and inline formatting stay aligned.
+        # Keep spacing between text runs stable so inline formatting stays readable.
         if paragraph.runs:
             last_text = paragraph.runs[-1].text or ""
             if last_text and not last_text.endswith((" ", "\t", "\n", "(", "[", "/")) and not cleaned.startswith((".", ",", ";", ":", ")", "]", "%")):
@@ -472,10 +593,10 @@ class DocumentBuilder:
                 p = doc.add_paragraph()
                 DocumentBuilder._process_inline_html(p, element)
             elif element.name in ['ul', 'ol']:
-                # Render list markers manually to prevent DOCX auto-number continuation across chapters.
+                # Render markers manually to avoid auto-number carry-over across chapters.
                 direct_items = element.find_all('li', recursive=False)
                 for idx, li in enumerate(direct_items, start=1):
-                    # Skip empty markers (prevents orphan numbers like "3." on its own line).
+                    # Avoid orphan markers like "3." with no text.
                     if not li.get_text(" ", strip=True):
                         continue
                     p = doc.add_paragraph()
@@ -555,8 +676,8 @@ class ProposalGenerator:
         self._chapter_context_cache: Dict[str, Dict[str, str]] = {}
 
     @staticmethod
-    def _target_words(chap: Dict[str, Any]) -> int:
-        m = re.search(r'Target:\s*(\d+)\s*words', chap.get('length_intent', ''), re.IGNORECASE)
+    def _target_words(chapter: Dict[str, Any]) -> int:
+        m = re.search(r'Target:\s*(\d+)\s*words', chapter.get('length_intent', ''), re.IGNORECASE)
         return int(m.group(1)) if m else ProposalGenerator.DEFAULT_CHAPTER_TARGET_WORDS
 
     @staticmethod
@@ -587,22 +708,22 @@ class ProposalGenerator:
         return cls.BASE_COMPRESSION_FLOOR_WORDS if for_compression else cls.BASE_CHAPTER_FLOOR_WORDS
 
     def _chapter_word_targets(self, chapters: List[Dict[str, Any]]) -> Dict[str, int]:
-        base_targets = {chap["id"]: self._target_words(chap) for chap in chapters}
+        base_targets = {chapter["id"]: self._target_words(chapter) for chapter in chapters}
         total_base = sum(base_targets.values())
         budget = self._content_word_budget()
         if total_base <= 0:
-            return {chap["id"]: 500 for chap in chapters}
+            return {chapter["id"]: 500 for chapter in chapters}
         if total_base <= budget:
             return base_targets
 
-        # Scale down proportionally while preserving readability floor.
+        # Scale all chapters down proportionally while keeping minimum readable length.
         scaled: Dict[str, int] = {}
-        for chap in chapters:
-            base = base_targets[chap["id"]]
-            floor = self._chapter_floor_words(chap["id"], for_compression=False)
-            scaled[chap["id"]] = max(floor, int(base * budget / total_base))
+        for chapter in chapters:
+            base = base_targets[chapter["id"]]
+            floor = self._chapter_floor_words(chapter["id"], for_compression=False)
+            scaled[chapter["id"]] = max(floor, int(base * budget / total_base))
 
-        # Trim any remaining overflow from longest chapters first.
+        # If still over budget, cut from the longest chapters first.
         overflow = sum(scaled.values()) - budget
         if overflow > 0:
             ordered_ids = sorted(scaled.keys(), key=lambda cid: scaled[cid], reverse=True)
@@ -637,12 +758,12 @@ class ProposalGenerator:
         if not normalized_id or normalized_id.lower() in {"all", "semua"}:
             return UNIVERSAL_STRUCTURE
 
-        selected = [chap for chap in UNIVERSAL_STRUCTURE if chap["id"] == normalized_id]
+        selected = [chapter for chapter in UNIVERSAL_STRUCTURE if chapter["id"] == normalized_id]
         if selected:
             return selected
 
         normalized = normalized_id.lower()
-        selected = [chap for chap in UNIVERSAL_STRUCTURE if chap["title"].strip().lower() == normalized]
+        selected = [chapter for chapter in UNIVERSAL_STRUCTURE if chapter["title"].strip().lower() == normalized]
         if selected:
             return selected
 
@@ -681,12 +802,12 @@ class ProposalGenerator:
 
         return [
             {
-                "id": chap["id"],
-                "title": chap["title"],
-                "preview": preview_map.get(chap["id"], "Ringkasan konten bab akan disesuaikan dengan konteks klien."),
-                "subsections": chap["subs"],
+                "id": chapter["id"],
+                "title": chapter["title"],
+                "preview": preview_map.get(chapter["id"], "Ringkasan konten bab akan disesuaikan dengan konteks klien."),
+                "subsections": chapter["subs"],
             }
-            for chap in chapters
+            for chapter in chapters
         ]
 
     def _get_research_bundle(self, base_client: str, regulations: str) -> Dict[str, str]:
@@ -787,9 +908,9 @@ class ProposalGenerator:
         self._cache_put(self._proposal_contract_cache, cache_key, contract, max_size=96)
         return contract
 
-    def _fetch_chapter_context(
+    def _build_chapter_prompt(
         self,
-        chap: Dict[str, Any],
+        chapter: Dict[str, Any],
         client: str,
         project: str,
         budget: str,
@@ -810,14 +931,14 @@ class ProposalGenerator:
             client_news = research_bundle.get('news', '')
             regulation_data = research_bundle.get('regulations', '')
 
-            ctx_key = self._cache_key("chapter_ctx", client, project, budget, chap.get('id', ''), chap.get('keywords', ''))
+            ctx_key = self._cache_key("chapter_ctx", client, project, budget, chapter.get('id', ''), chapter.get('keywords', ''))
             cached_ctx = self._chapter_context_cache.get(ctx_key)
             if cached_ctx:
                 structured_row_data = cached_ctx.get("structured_row_data", "")
                 rag_data = cached_ctx.get("rag_data", "")
             else:
                 structured_row_data = self.kb.get_exact_context(client, project, budget)
-                rag_data = self.kb.query(client, project, chap['keywords'])
+                rag_data = self.kb.query(client, project, chapter['keywords'])
                 self._cache_put(
                     self._chapter_context_cache,
                     ctx_key,
@@ -825,13 +946,13 @@ class ProposalGenerator:
                     max_size=256
                 )
             
-            persona = PERSONAS.get(chap.get('id', 'default'), PERSONAS['default'])
-            subs = "\n".join([f"- {s}" for s in chap['subs']])
+            persona = PERSONAS.get(chapter.get('id', 'default'), PERSONAS['default'])
+            subs = "\n".join([f"- {s}" for s in chapter['subs']])
             
             visual_prompt = ""
-            if chap.get('visual_intent') == "gantt":
+            if chapter.get('visual_intent') == "gantt":
                 visual_prompt = f"Mandatory Timeline Visual: [[GANTT: Jadwal Pelaksanaan | Bulan | Fase 1,0,2; Fase 2,2,4]]. Total timeline: {timeline}."
-            elif chap.get('visual_intent') == "flowchart":
+            elif chapter.get('visual_intent') == "flowchart":
                 visual_prompt = "Tambahkan alur tahapan metodologi dalam bentuk bullet bertingkat yang jelas (fase -> aktivitas -> output)."
 
             extra = (
@@ -839,30 +960,30 @@ class ProposalGenerator:
                 f"[GLOBAL] Proposal ini wajib mempertahankan kedalaman konten tingkat eksekutif dan total dokumen maksimal {MAX_PROPOSAL_PAGES} halaman. "
                 "Setiap bab harus memiliki konteks spesifik klien, poin yang dapat ditindaklanjuti, dan tidak generik. Gunakan kombinasi numbering dan bullet yang rapi di setiap H2, namun tetap padat dan tidak banyak whitespace."
             )
-            if chap['id'] == 'c_1':
-                extra += f" [CRITICAL] Fokus pada latar belakang organisasi '{client}' dan tujuan proyek: '{project}'. Soroti driver bisnis utama: [{project_goal}]."
-            elif chap['id'] == 'c_2':
-                extra += f" [CRITICAL] Jabarkan kebutuhan/keinginan klien berdasarkan pain points berikut: '{notes}'. Gunakan analisis masalah yang tajam dan ringkas."
-            elif chap['id'] == 'c_3':
-                extra += f" [CRITICAL] Klasifikasikan kebutuhan ke Problem/Opportunity/Directive berdasarkan input: '{project_goal}'. Tetapkan jenis proyek: '{project_type}'."
-            elif chap['id'] == 'c_4':
-                extra += f" [CRITICAL] Gunakan framework/regulasi terpilih berikut sebagai acuan utama: '{regulations}'. Petakan langsung ke kebutuhan klien."
-            elif chap['id'] == 'c_5':
-                extra += f" [CRITICAL] Jelaskan alasan pemilihan metodologi untuk engagement '{service_type}' dan gunakan baseline metodologi internal: {firm_data['methodology']}."
-            elif chap['id'] == 'c_6':
-                extra += f" [CRITICAL] Turunkan metodologi menjadi solution design yang konkret: output, deliverable, dan target state yang dapat dieksekusi."
-            elif chap['id'] == 'c_7':
-                extra += f" [CRITICAL] Timeline harus sinkron dengan durasi proyek: '{timeline}'. Tampilkan aktivitas per fase, milestone, dan deliverable yang terukur."
-            elif chap['id'] == 'c_8':
-                extra += " [CRITICAL] Definisikan model tata kelola proyek: forum keputusan, frekuensi rapat, eskalasi isu, quality gate, dan kontrol progres."
-            elif chap['id'] == 'c_9':
-                extra += f" [CRITICAL] Uraikan struktur tim proyek untuk model layanan '{service_type}' dengan kapabilitas kunci, pengalaman, dan sertifikasi relevan. Referensi komposisi inti: {firm_data['team']}."
-            elif chap['id'] == 'c_10':
-                extra += f" [CRITICAL] Wajib menyajikan model pembiayaan dengan angka estimasi: {budget}. Sertakan termin pembayaran, model kerja, asumsi, eksklusi, dan terms komersial: {firm_data['commercial']}. Gunakan tabel markdown."
-            elif chap['id'] == 'c_closing':
+            if chapter['id'] == 'c_1':
+                extra += f" [FOCUS] Fokus pada latar belakang organisasi '{client}' dan tujuan proyek: '{project}'. Soroti driver bisnis utama: [{project_goal}]."
+            elif chapter['id'] == 'c_2':
+                extra += f" [FOCUS] Jabarkan kebutuhan/keinginan klien berdasarkan pain points berikut: '{notes}'. Gunakan analisis masalah yang tajam dan ringkas."
+            elif chapter['id'] == 'c_3':
+                extra += f" [FOCUS] Klasifikasikan kebutuhan ke Problem/Opportunity/Directive berdasarkan input: '{project_goal}'. Tetapkan jenis proyek: '{project_type}'."
+            elif chapter['id'] == 'c_4':
+                extra += f" [FOCUS] Gunakan framework/regulasi terpilih berikut sebagai acuan utama: '{regulations}'. Petakan langsung ke kebutuhan klien."
+            elif chapter['id'] == 'c_5':
+                extra += f" [FOCUS] Jelaskan alasan pemilihan metodologi untuk engagement '{service_type}' dan gunakan baseline metodologi internal: {firm_data['methodology']}."
+            elif chapter['id'] == 'c_6':
+                extra += f" [FOCUS] Turunkan metodologi menjadi solution design yang konkret: output, deliverable, dan target state yang dapat dieksekusi."
+            elif chapter['id'] == 'c_7':
+                extra += f" [FOCUS] Timeline harus sinkron dengan durasi proyek: '{timeline}'. Tampilkan aktivitas per fase, milestone, dan deliverable yang terukur."
+            elif chapter['id'] == 'c_8':
+                extra += " [FOCUS] Definisikan model tata kelola proyek: forum keputusan, frekuensi rapat, eskalasi isu, quality gate, dan kontrol progres."
+            elif chapter['id'] == 'c_9':
+                extra += f" [FOCUS] Uraikan struktur tim proyek untuk model layanan '{service_type}' dengan kapabilitas kunci, pengalaman, dan sertifikasi relevan. Referensi komposisi inti: {firm_data['team']}."
+            elif chapter['id'] == 'c_10':
+                extra += f" [FOCUS] Wajib menyajikan model pembiayaan dengan angka estimasi: {budget}. Sertakan termin pembayaran, model kerja, asumsi, eksklusi, dan terms komersial: {firm_data['commercial']}. Gunakan tabel markdown."
+            elif chapter['id'] == 'c_closing':
                 contact_info = firm_profile.get('contact_info', WRITER_FIRM_NAME)
                 extra += (
-                    f" [CRITICAL] Ini adalah bab penutup proposal. Jangan pernah menulis label 'BAB XI' atau variasinya. "
+                    f" [FOCUS] Ini adalah bab penutup proposal. Jangan pernah menulis label 'BAB XI' atau variasinya. "
                     f"Tunjukkan apresiasi profesional kepada klien '{client}', tegaskan komitmen kolaborasi jangka panjang, "
                     f"dan berikan langkah tindak lanjut yang jelas dan actionable. "
                     f"Wajib cantumkan informasi kontak resmi berikut secara lengkap dan akurat: {contact_info}. "
@@ -880,9 +1001,9 @@ class ProposalGenerator:
                 rag_data=rag_data, 
                 visual_prompt=visual_prompt, 
                 extra_instructions=extra,
-                chapter_title=chap['title'], 
+                chapter_title=chapter['title'], 
                 sub_chapters=subs, 
-                length_intent=self._rewrite_length_intent(chap.get('length_intent', ''), target_words)
+                length_intent=self._rewrite_length_intent(chapter.get('length_intent', ''), target_words)
             )
             return {"prompt": prompt, "success": True}
         except Exception as e:
@@ -898,27 +1019,27 @@ class ProposalGenerator:
             return True
         return any(re.search(rf"\b{re.escape(tok)}\b", content, re.IGNORECASE) for tok in tokens[:3])
 
-    def _chapter_quality_report(
+    def _evaluate_chapter_quality(
         self,
-        chap: Dict[str, Any],
+        chapter: Dict[str, Any],
         content: str,
         client: str,
         target_words: Optional[int] = None
     ) -> Dict[str, Any]:
-        target_words = int(target_words or self._target_words(chap))
-        floor = max(140, int(self._chapter_floor_words(chap.get("id", ""), for_compression=False) * 0.8))
+        target_words = int(target_words or self._target_words(chapter))
+        floor = max(140, int(self._chapter_floor_words(chapter.get("id", ""), for_compression=False) * 0.8))
         min_words = max(floor, int(target_words * 0.72))
         max_words = max(min_words + 90, int(target_words * 1.25))
         word_count = self._word_count(content)
         missing_h2 = [
-            sub for sub in chap.get('subs', [])
+            sub for sub in chapter.get('subs', [])
             if not re.search(rf"(?im)^\s*##\s*{re.escape(sub)}\s*$", content)
         ]
         has_numbered_list = bool(re.search(r"(?m)^\s*\d+\.\s+\S+", content))
         has_bullet_list = bool(re.search(r"(?m)^\s*[-*]\s+\S+", content))
         has_client_ref = self._contains_client_reference(content, client)
         has_required_visual = True
-        if chap.get('visual_intent') == "gantt":
+        if chapter.get('visual_intent') == "gantt":
             has_required_visual = "[[GANTT:" in content
 
         issues = []
@@ -944,9 +1065,9 @@ class ProposalGenerator:
             "missing_h2": missing_h2,
         }
 
-    def _ensure_required_headings(self, chap: Dict[str, Any], content: str) -> str:
+    def _ensure_required_headings(self, chapter: Dict[str, Any], content: str) -> str:
         missing_h2 = [
-            sub for sub in chap.get('subs', [])
+            sub for sub in chapter.get('subs', [])
             if not re.search(rf"(?im)^\s*##\s*{re.escape(sub)}\s*$", content)
         ]
         if not missing_h2:
@@ -998,10 +1119,10 @@ class ProposalGenerator:
             return chapter_outputs
 
         snippets = []
-        for chap in selected_chapters:
-            content = chapter_outputs.get(chap['id'])
+        for chapter in selected_chapters:
+            content = chapter_outputs.get(chapter['id'])
             if content:
-                snippets.append(f"[{chap['id']}] {chap['title']} :: {self._chapter_excerpt(content)}")
+                snippets.append(f"[{chapter['id']}] {chapter['title']} :: {self._chapter_excerpt(content)}")
         if len(snippets) < 2:
             return chapter_outputs
 
@@ -1071,20 +1192,20 @@ class ProposalGenerator:
 
         return revised
 
-    def _generate_chapter_content(
+    def _draft_chapter(
         self,
-        chap: Dict[str, Any],
+        chapter: Dict[str, Any],
         prompt: str,
         client: str,
         target_words: int
     ) -> str:
-        # Main generation call for one chapter.
+        # First draft pass for a chapter.
         res = self.ollama.chat(
             model=LLM_MODEL,
             messages=[
                 {'role': 'system', 'content': prompt},
                 {'role': 'user', 'content': (
-                    f"Tulis konten untuk {chap['title']} dalam satu draft final. "
+                    f"Tulis konten untuk {chapter['title']} dalam satu draft final. "
                     "Pastikan hard checks terpenuhi: H2 wajib lengkap, word range sesuai target, "
                     "ada numbered list dan bullet list, serta konten tetap konkret dan action-oriented."
                 )}
@@ -1092,15 +1213,15 @@ class ProposalGenerator:
             options={'num_ctx': 65536, 'num_predict': 4096, 'temperature': 0.25, 'top_p': 0.85, 'repeat_penalty': 1.1}
         )
         content = (res.get('message', {}).get('content', '') or '').strip()
-        report = self._chapter_quality_report(chap, content, client, target_words=target_words)
+        report = self._evaluate_chapter_quality(chapter, content, client, target_words=target_words)
         hard_check_keys = {"missing_h2", "too_short", "too_long", "list_structure", "missing_visual"}
         hard_issues = [i for i in report["issues"] if i in hard_check_keys]
         if not hard_issues:
             return content
 
-        # Single retry only when hard checks fail.
+        # Retry once when hard checks fail.
         retry_prompt = (
-            f"Perbaiki draft {chap['title']} agar lulus hard quality checks.\n"
+            f"Perbaiki draft {chapter['title']} agar lulus hard quality checks.\n"
             f"Issues: {', '.join(hard_issues)}\n"
             f"Word count: {report['word_count']} (target {report['target_words']}, range {report['min_words']}-{report['max_words']}).\n"
             f"Missing H2: {', '.join(report['missing_h2']) if report['missing_h2'] else '-'}\n"
@@ -1122,18 +1243,18 @@ class ProposalGenerator:
         except Exception:
             pass
 
-        final_report = self._chapter_quality_report(chap, content, client, target_words=target_words)
+        final_report = self._evaluate_chapter_quality(chapter, content, client, target_words=target_words)
         if final_report.get("missing_h2"):
-            content = self._ensure_required_headings(chap, content)
-            final_report = self._chapter_quality_report(chap, content, client, target_words=target_words)
+            content = self._ensure_required_headings(chapter, content)
+            final_report = self._evaluate_chapter_quality(chapter, content, client, target_words=target_words)
 
         if final_report["issues"]:
-            logger.warning(f"Quality checks not fully satisfied for {chap['title']}: {', '.join(final_report['issues'])}")
+            logger.warning(f"Quality checks not fully satisfied for {chapter['title']}: {', '.join(final_report['issues'])}")
         return content
 
-    def _compress_chapter_content(
+    def _tighten_chapter(
         self,
-        chap: Dict[str, Any],
+        chapter: Dict[str, Any],
         prompt: str,
         content: str,
         target_words: int
@@ -1144,7 +1265,7 @@ class ProposalGenerator:
                 messages=[
                     {'role': 'system', 'content': prompt},
                     {'role': 'user', 'content': (
-                        f"Rapikan dan padatkan konten {chap['title']} menjadi sekitar {target_words} kata. "
+                        f"Rapikan dan padatkan konten {chapter['title']} menjadi sekitar {target_words} kata. "
                         "Pertahankan semua heading H2 wajib, poin kunci, dan keterbacaan eksekutif. "
                         "Hapus repetisi dan kalimat pengisi.\n\n"
                         f"KONTEN SAAT INI:\n{content}"
@@ -1157,7 +1278,7 @@ class ProposalGenerator:
         except Exception:
             return content
 
-    def _enforce_word_budget(
+    def _fit_into_word_budget(
         self,
         chapter_outputs: Dict[str, str],
         chapter_prompts: Dict[str, str],
@@ -1190,8 +1311,8 @@ class ProposalGenerator:
             for cid in chapter_order:
                 if overflow <= 0:
                     break
-                chap = chapter_map.get(cid)
-                if not chap:
+                chapter = chapter_map.get(cid)
+                if not chapter:
                     continue
                 prompt = chapter_prompts.get(cid)
                 if not prompt:
@@ -1205,7 +1326,7 @@ class ProposalGenerator:
 
                 target = max(minimum, current_words - min(reducible, max(120, overflow)))
                 target = min(target, max(minimum, int(chapter_targets.get(cid, target) * 0.95)))
-                compressed = self._compress_chapter_content(chap, prompt, outputs[cid], target)
+                compressed = self._tighten_chapter(chapter, prompt, outputs[cid], target)
                 if compressed == outputs[cid]:
                     continue
                 outputs[cid] = compressed
@@ -1218,20 +1339,20 @@ class ProposalGenerator:
         if total_words() > max_words:
             ratio = max_words / max(total_words(), 1)
             for cid, text in list(outputs.items()):
-                chap = chapter_map.get(cid)
+                chapter = chapter_map.get(cid)
                 prompt = chapter_prompts.get(cid)
-                if not chap or not prompt or not text:
+                if not chapter or not prompt or not text:
                     continue
                 minimum = self._chapter_floor_words(cid, for_compression=True)
                 current_words = self._word_count(text)
                 target = max(minimum, int(current_words * ratio))
                 if target >= current_words - 60:
                     continue
-                outputs[cid] = self._compress_chapter_content(chap, prompt, text, target)
+                outputs[cid] = self._tighten_chapter(chapter, prompt, text, target)
 
         return outputs
 
-    def run(
+    def generate_document(
         self,
         client: str,
         project: str,
@@ -1269,34 +1390,34 @@ class ProposalGenerator:
         logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client)
 
         context_futures = {
-            chap['id']: self.io_pool.submit(
-                self._fetch_chapter_context,
-                chap, client, project, budget, service_type, project_goal, project_type, timeline,
+            chapter['id']: self.io_pool.submit(
+                self._build_chapter_prompt,
+                chapter, client, project, budget, service_type, project_goal, project_type, timeline,
                 notes, regulations, firm_data, firm_profile, research_bundle, proposal_contract,
-                chapter_targets.get(chap['id'], self._target_words(chap))
+                chapter_targets.get(chapter['id'], self._target_words(chapter))
             )
-            for chap in selected_chapters
+            for chapter in selected_chapters
         }
 
-        chapter_map = {chap['id']: chap for chap in selected_chapters}
+        chapter_map = {chapter['id']: chapter for chapter in selected_chapters}
         chapter_prompts: Dict[str, str] = {}
         chapter_outputs: Dict[str, str] = {}
-        for chap in selected_chapters:
-            ctx = context_futures[chap['id']].result()
+        for chapter in selected_chapters:
+            ctx = context_futures[chapter['id']].result()
             if not ctx['success']:
                 continue
-            chapter_prompts[chap['id']] = ctx['prompt']
+            chapter_prompts[chapter['id']] = ctx['prompt']
             try:
-                chapter_outputs[chap['id']] = self._generate_chapter_content(
-                    chap=chap,
+                chapter_outputs[chapter['id']] = self._draft_chapter(
+                    chapter=chapter,
                     prompt=ctx['prompt'],
                     client=client,
-                    target_words=chapter_targets.get(chap['id'], self._target_words(chap))
+                    target_words=chapter_targets.get(chapter['id'], self._target_words(chapter))
                 )
             except Exception as e:
-                logger.error(f"Generation Error for {chap['title']}: {e}")
+                logger.error(f"Generation Error for {chapter['title']}: {e}")
 
-        chapter_outputs = self._enforce_word_budget(
+        chapter_outputs = self._fit_into_word_budget(
             chapter_outputs=chapter_outputs,
             chapter_prompts=chapter_prompts,
             chapter_map=chapter_map,
@@ -1304,7 +1425,7 @@ class ProposalGenerator:
             max_words=content_word_budget
         )
         chapter_outputs = self._apply_global_coherence(chapter_outputs, selected_chapters, client, project)
-        chapter_outputs = self._enforce_word_budget(
+        chapter_outputs = self._fit_into_word_budget(
             chapter_outputs=chapter_outputs,
             chapter_prompts=chapter_prompts,
             chapter_map=chapter_map,
@@ -1318,7 +1439,7 @@ class ProposalGenerator:
                 f"Estimated page count is above limit ({estimated_pages}>{MAX_PROPOSAL_PAGES}); applying one more compacting pass."
             )
             tighter_budget = max(int(content_word_budget * 0.94), 4000)
-            chapter_outputs = self._enforce_word_budget(
+            chapter_outputs = self._fit_into_word_budget(
                 chapter_outputs=chapter_outputs,
                 chapter_prompts=chapter_prompts,
                 chapter_map=chapter_map,
@@ -1334,7 +1455,7 @@ class ProposalGenerator:
         doc = Document()
         StyleEngine.apply_document_styles(doc)
         
-        # Personalized Cover Generation
+        # Cover page.
         for _ in range(2):
             doc.add_paragraph()
 
@@ -1384,19 +1505,19 @@ class ProposalGenerator:
         doc.add_page_break()
 
         rendered_any = False
-        for i, chap in enumerate(selected_chapters):
-            content = chapter_outputs.get(chap['id'], '').strip()
+        for i, chapter in enumerate(selected_chapters):
+            content = chapter_outputs.get(chapter['id'], '').strip()
             if not content:
                 continue
             rendered_any = True
-            h = doc.add_heading(chap['title'], level=1)
+            h = doc.add_heading(chapter['title'], level=1)
             h.alignment = WD_ALIGN_PARAGRAPH.CENTER
             h.runs[0].font.color.rgb = RGBColor(*theme_color)
-            DocumentBuilder.process_content(doc, content, theme_color, chap['title'])
+            DocumentBuilder.process_content(doc, content, theme_color, chapter['title'])
 
             has_next = any(
-                chapter_outputs.get(next_chap['id'], '').strip()
-                for next_chap in selected_chapters[i + 1:]
+                chapter_outputs.get(next_chapter['id'], '').strip()
+                for next_chapter in selected_chapters[i + 1:]
             )
             if has_next:
                 doc.add_page_break()
@@ -1410,3 +1531,30 @@ class ProposalGenerator:
             base_name = f"{base_name}_{chapter_slug}"
 
         return doc, base_name.replace(" ", "_")
+
+
+    def run(
+        self,
+        client: str,
+        project: str,
+        budget: str,
+        service_type: str,
+        project_goal: str,
+        project_type: str,
+        timeline: str,
+        notes: str,
+        regulations: str,
+        chapter_id: Optional[str] = None
+    ) -> Tuple[Document, str]:
+        return self.generate_document(
+            client=client,
+            project=project,
+            budget=budget,
+            service_type=service_type,
+            project_goal=project_goal,
+            project_type=project_type,
+            timeline=timeline,
+            notes=notes,
+            regulations=regulations,
+            chapter_id=chapter_id,
+        )

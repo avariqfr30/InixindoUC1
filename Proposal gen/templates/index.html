@@ -179,7 +179,7 @@
             if (screen === 'success') ui.successStep.classList.remove('hidden');
         };
 
-        // UI Logic for the "Lainnya" Checkbox
+        // Toggle manual framework input when "Lainnya" is checked.
         ui.cbLainnya.addEventListener('change', (e) => {
             if (e.target.checked) {
                 ui.inpFrameworkLainnya.classList.remove('hidden');
@@ -191,7 +191,7 @@
             checkReady();
         });
 
-        // Helper to grab selected frameworks including the custom input
+        // Build final framework value including custom input.
         const getFinalFrameworks = () => {
             const checked = Array.from(ui.groupFramework.querySelectorAll('input:checked:not(#cb-lainnya)'))
                                  .map(cb => cb.value);
@@ -235,14 +235,14 @@
             checkReady();
         });
 
-        // Event Listeners for Validation
+        // Re-check form completeness on relevant input changes.
         ['change', 'input'].forEach(evt => {
             [ui.selProposal, ui.selProyek, ui.inpKonteks, ui.inpPermasalahan, ui.inpWaktu, ui.inpBiaya, ui.groupKebutuhan, ui.groupFramework, ui.inpFrameworkLainnya].forEach(el => {
                 if(el) el.addEventListener(evt, checkReady);
             });
         });
 
-        // Smart Pricing Logic
+        // Fetch budget suggestions from the backend.
         ui.btnAnalyze.addEventListener('click', async () => {
             const client = ui.selPerusahaan.value;
             if(!client) return alert("Pilih klien terlebih dahulu.");

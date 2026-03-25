@@ -1,33 +1,31 @@
-"""
-Configuration and constants for the Proposal Generator Engine.
-"""
+"""Runtime and prompt configuration for the proposal generator."""
+import os
 
-# =====================================================================
-# SYSTEM MODE & API ADAPTER
-# =====================================================================
-DEMO_MODE = True 
-FIRM_API_URL = "https://api.perusahaan-anda.com/v1" 
-API_AUTH_TOKEN = "isi_token_disini_nanti" # <-- Paste real token here
+# Backend mode and internal API settings.
+DEMO_MODE = os.getenv("DEMO_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
+FIRM_API_URL = "https://api.perusahaan-anda.com/v1"
+API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "isi_token_disini_nanti")
 
-# --- CREDENTIALS & HOSTS ---
-SERPER_API_KEY = "SERPER_API"    # <-- Paste real Serper key here
+# External service configuration.
+SERPER_API_KEY = os.getenv("SERPER_API_KEY", "SERPER_API")
 OLLAMA_HOST = "http://127.0.0.1:11434"
 
-# --- MODELS & DB ---
-LLM_MODEL = "gpt-oss:120b-cloud" 
+# Model and storage config.
+LLM_MODEL = "gpt-oss:120b-cloud"
 EMBED_MODEL = "bge-m3:latest"
-DB_URI = "sqlite:///projects.db" 
+DB_URI = "sqlite:///projects.db"
 
-# --- DOCUMENT BUDGET GUARD ---
-# Guardrails used by the generator to keep proposal length within maximum pages.
+# Document length guardrails.
 MAX_PROPOSAL_PAGES = 25
 ESTIMATED_WORDS_PER_PAGE = 230
 RESERVED_NON_CONTENT_PAGES = 2
 PAGE_SAFETY_BUFFER = 1
 
-# --- FIRM IDENTITY ---
-WRITER_FIRM_NAME = "Inixindo Jogja" 
+# Writer identity.
+WRITER_FIRM_NAME = "Inixindo Jogja"
 DEFAULT_COLOR = (0, 51, 102)
+WRITER_FIRM_CONTACT_INFO = os.getenv("WRITER_FIRM_CONTACT_INFO", "").strip()
+WRITER_FIRM_PORTFOLIO = os.getenv("WRITER_FIRM_PORTFOLIO", "").strip()
 
 DATA_MAPPING = {
     "entity": "Client Entity",
@@ -35,9 +33,7 @@ DATA_MAPPING = {
     "budget": "Investment Estimation"
 }
 
-# =====================================================================
-# KNOWLEDGE PATTERN LIBRARY
-# =====================================================================
+# Keyword/regulation suggestions used by the UI.
 SMART_SUGGESTIONS = {
     "banking": {
         "keywords": ["bank", "bca", "bri", "mandiri", "finance", "fintech", "payment", "kredit"],
@@ -57,12 +53,10 @@ SMART_SUGGESTIONS = {
     }
 }
 
-# =====================================================================
-# MOCK API DATA
-# =====================================================================
+# Fallback firm data used in demo mode.
 MOCK_FIRM_PROFILE = {
-    "contact_info": "Kantor Pusat Inixindo Jogja\nJl. Kenari No. 69, Yogyakarta\nEmail: info@inixindo.id\nTelp: (0274) 515448",
-    "portfolio_highlights": "Pengalaman di Transformasi TI, IT Master Plan, DevSecOps, dan ISO/POJK."
+    "contact_info": WRITER_FIRM_CONTACT_INFO,
+    "portfolio_highlights": WRITER_FIRM_PORTFOLIO
 }
 
 MOCK_FIRM_STANDARDS = {
@@ -88,9 +82,7 @@ MOCK_FIRM_STANDARDS = {
     }
 }
 
-# =====================================================================
-# PROPOSAL STRUCTURE (MAX: 25 PAGES TOTAL)
-# =====================================================================
+# Standard chapter structure (max 25 pages total).
 UNIVERSAL_STRUCTURE = [
     {
         "id": "c_1", "title": "BAB I – KONTEKS KLIEN",
@@ -178,41 +170,41 @@ PERSONAS = {
 }
 
 PROPOSAL_SYSTEM_PROMPT = """
-You are an elite Principal Consultant and Technical Writer at {writer_firm}.
+You are a Principal Consultant and Technical Writer at {writer_firm}.
 Your target audience is the Executive Board of {client}. Adopt this persona: {persona}.
 
---- STRICT WRITING RULES ---
-1. NO FLUFF: Write strictly "singkat, padat, tidak bertele-tele" but still deep and specific (not generic).
-2. FORMATTING (MANDATORY):
+Writing rules:
+1. Be concise and direct ("singkat, padat, tidak bertele-tele"), but keep the content specific and useful.
+2. Formatting:
    - Use EXACT heading structure from provided H2 list.
    - Under each H2, create 2-3 H3 subsections (###) that are relevant and non-redundant.
    - Use numbered lists for steps/sequences (1., 2., 3.) and bullet lists for supporting detail points (-).
    - Keep prose dense: avoid excessive blank lines and avoid one-line bullets without explanation.
    - Include at least 1 markdown table only for chapters with operational, governance, timeline, or commercial content.
-3. DEPTH: Explain rationale, assumptions, risks, dependencies, metrics, and expected deliverables in actionable detail.
-4. TONE: Professional, objective, direct, and highly persuasive in Indonesian. Do not use academic filler.
-5. SYNTHESIS: Integrate OSINT data naturally as facts, do not mention "berdasarkan sumber online".
+3. Depth: Explain rationale, assumptions, risks, dependencies, metrics, and expected deliverables in actionable detail.
+4. Tone: Professional, objective, direct, and persuasive in Indonesian. Avoid academic filler.
+5. Synthesis: Integrate OSINT data naturally as facts, and do not mention "berdasarkan sumber online".
 
---- CONTEXT DATA ---
+Context data:
 Global OSINT Data: {global_data}
 Client News: {client_news}
 Regulatory Data: {regulation_data}
 Historical Data: {structured_row_data}
 Semantic RAG: {rag_data}
 
---- DYNAMIC INSTRUCTIONS ---
+Additional instructions:
 {extra_instructions}
 
---- TASK ---
+Task:
 Write "{chapter_title}" ensuring it meets the length intent: {length_intent}
 Include these H2 (##) exactly:
 {sub_chapters}
 
-Mandatory output quality checks before finalizing:
+Before finalizing, check:
 - Provide concrete examples relevant to the client context.
 - Ensure all key claims have business/technical rationale.
 - Ensure the chapter is sufficiently detailed for board-level review and contributes proportionally to a total proposal maximum 25 pages (avoid over-expansion).
 
 {visual_prompt}
-DO NOT write greetings or introductions. Output strictly the chapter content.
+Do not write greetings or introductions. Output only the chapter content.
 """
