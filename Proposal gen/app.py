@@ -35,6 +35,20 @@ def get_companies():
 def suggest_budget():
     """Estimate pricing tiers from public financial signals."""
     data = request.json or {}
+    required_fields = [
+        'nama_perusahaan',
+        'jenis_proposal',
+        'jenis_proyek',
+        'konteks_organisasi',
+        'permasalahan',
+        'klasifikasi_kebutuhan',
+        'estimasi_waktu',
+        'potensi_framework',
+    ]
+    missing = [field for field in required_fields if not str(data.get(field, '')).strip()]
+    if missing:
+        return jsonify({"error": f"Lengkapi field berikut sebelum analisis finansial: {', '.join(missing)}"}), 400
+
     client_name = data.get('nama_perusahaan', '')
 
     analyzer = FinancialAnalyzer(proposal_generator.ollama)

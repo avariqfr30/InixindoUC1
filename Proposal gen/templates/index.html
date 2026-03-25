@@ -105,7 +105,7 @@
                 </div>
 
                 <div class="finance-panel">
-                    <button type="button" id="btn-analyze" class="secondary" style="font-size: 0.85rem;">📊 Auto-Analisis Finansial & Opsi Harga</button>
+                    <button type="button" id="btn-analyze" class="secondary" style="font-size: 0.85rem;" disabled>📊 Auto-Analisis Finansial & Opsi Harga</button>
                     <div id="finance-result" class="hidden" style="margin-top: 10px; font-size: 0.85rem;">
                         <p id="finance-summary" style="margin: 0 0 10px 0; font-style: italic; color: #475569;"></p>
                         <div id="finance-options"></div>
@@ -171,6 +171,7 @@
             financeOptions: document.getElementById('finance-options'),
             spinner: document.getElementById('spinner')
         };
+        let budgetAnalyzeInFlight = false;
 
         const showScreen = (screen) => {
             [ui.loader, ui.configStep, ui.successStep].forEach(el => el.classList.add('hidden'));
@@ -188,7 +189,7 @@
                 ui.inpFrameworkLainnya.classList.add('hidden');
                 ui.inpFrameworkLainnya.value = ''; 
             }
-            checkReady();
+            updateActionState();
         });
 
         // Build final framework value including custom input.
@@ -203,16 +204,26 @@
 
         const getChecked = (container) => Array.from(container.querySelectorAll('input:checked')).map(cb => cb.value).join(', ');
 
-        const checkReady = () => {
+        const hasAnalyzePrerequisites = () => {
             const hasKebutuhan = ui.groupKebutuhan.querySelectorAll('input:checked').length > 0;
             const hasFramework = getFinalFrameworks().length > 0;
+            return Boolean(
+                ui.selPerusahaan.value &&
+                ui.selProposal.value &&
+                ui.selProyek.value &&
+                ui.inpKonteks.value.trim() &&
+                ui.inpPermasalahan.value.trim() &&
+                ui.inpWaktu.value.trim() &&
+                hasKebutuhan &&
+                hasFramework
+            );
+        };
 
-            const isReady = ui.selPerusahaan.value && ui.selProposal.value && ui.selProyek.value &&
-                            ui.inpKonteks.value.trim() && ui.inpPermasalahan.value.trim() && 
-                            ui.inpBiaya.value.trim() && ui.inpWaktu.value.trim() &&
-                            hasKebutuhan && hasFramework;
-                            
-            ui.btnGenerate.disabled = !isReady;
+        const updateActionState = () => {
+            const canAnalyze = hasAnalyzePrerequisites();
+            const canGenerate = canAnalyze && Boolean(ui.inpBiaya.value.trim());
+            ui.btnAnalyze.disabled = budgetAnalyzeInFlight || !canAnalyze;
+            ui.btnGenerate.disabled = !canGenerate;
         };
 
         async function init() {
@@ -222,6 +233,7 @@
                 ui.selPerusahaan.innerHTML = `<option value="" disabled selected>Pilih Klien...</option>`;
                 data.forEach(d => ui.selPerusahaan.add(new Option(d, d)));
                 showScreen('config');
+                updateActionState();
             } catch (e) {
                 document.getElementById('loader-text').innerText = "Gagal memuat database.";
                 showScreen('loader');
@@ -232,24 +244,26 @@
         ui.selPerusahaan.addEventListener('change', () => {
             ui.containerDynamic.classList.remove('hidden');
             ui.financeResult.classList.add('hidden'); 
-            checkReady();
+            updateActionState();
         });
 
         // Re-check form completeness on relevant input changes.
         ['change', 'input'].forEach(evt => {
             [ui.selProposal, ui.selProyek, ui.inpKonteks, ui.inpPermasalahan, ui.inpWaktu, ui.inpBiaya, ui.groupKebutuhan, ui.groupFramework, ui.inpFrameworkLainnya].forEach(el => {
-                if(el) el.addEventListener(evt, checkReady);
+                if(el) el.addEventListener(evt, updateActionState);
             });
         });
 
         // Fetch budget suggestions from the backend.
         ui.btnAnalyze.addEventListener('click', async () => {
-            const client = ui.selPerusahaan.value;
-            if(!client) return alert("Pilih klien terlebih dahulu.");
+            if (!hasAnalyzePrerequisites()) {
+                return alert("Lengkapi semua field sebelum Auto-Analisis Finansial dijalankan.");
+            }
             const payload = getPayload();
             
             ui.btnAnalyze.innerText = "Menganalisis OSINT...";
-            ui.btnAnalyze.disabled = true;
+            budgetAnalyzeInFlight = true;
+            updateActionState();
 
             try {
                 const res = await fetch('/api/suggest-budget', {
@@ -258,6 +272,12 @@
                     body: JSON.stringify(payload)
                 });
                 const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || "Gagal menganalisa data finansial.");
+                }
+                if (!data || !Array.isArray(data.options) || !data.analysis) {
+                    throw new Error("Respons analisis finansial tidak valid.");
+                }
                 
                 ui.financeSummary.innerText = data.analysis;
                 ui.financeOptions.innerHTML = data.options.map(opt => `
@@ -269,10 +289,11 @@
                 
                 ui.financeResult.classList.remove('hidden');
             } catch (err) {
-                alert("Gagal menganalisa data finansial.");
+                alert(err.message || "Gagal menganalisa data finansial.");
             } finally {
                 ui.btnAnalyze.innerText = "📊 Auto-Analisis Finansial & Opsi Harga";
-                ui.btnAnalyze.disabled = false;
+                budgetAnalyzeInFlight = false;
+                updateActionState();
             }
         });
 
@@ -354,8 +375,8 @@
                 alert(e.message || "Gagal generate dokumen. Periksa console/log server.");
                 showScreen('config');
             } finally {
-                ui.btnGenerate.disabled = false;
                 ui.spinner.classList.remove('active');
+                updateActionState();
             }
         });
     </script>
