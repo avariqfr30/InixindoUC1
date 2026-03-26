@@ -25,7 +25,7 @@ def get_base_config():
 
 @app.route('/api/companies')
 def get_companies():
-    if knowledge_base.df is None or knowledge_base.df.empty:
+    if knowledge_base.df is None or knowledge_base.df.empty or 'entity' not in knowledge_base.df.columns:
         return jsonify([])
     companies = knowledge_base.df['entity'].dropna().astype(str).str.strip().unique().tolist()
     companies = [c for c in companies if c.lower() != 'nan' and c]

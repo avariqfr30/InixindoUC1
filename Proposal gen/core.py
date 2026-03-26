@@ -38,13 +38,117 @@ from chromadb.utils import embedding_functions
 from config import (
     SERPER_API_KEY, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL,
     WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE,
-    PERSONAS, PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING,
+    PERSONAS, PROPOSAL_SYSTEM_PROMPT,
+    PROJECT_DATA_FIELD_ALIASES, PROJECT_STANDARD_FIELD_ALIASES, FIRM_PROFILE_FIELD_ALIASES,
     DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, MOCK_FIRM_STANDARDS, MOCK_FIRM_PROFILE,
     WRITER_FIRM_OFFICE_ADDRESS, WRITER_FIRM_EMAIL, WRITER_FIRM_PHONE, WRITER_FIRM_WEBSITE,
     MAX_PROPOSAL_PAGES, ESTIMATED_WORDS_PER_PAGE, RESERVED_NON_CONTENT_PAGES, PAGE_SAFETY_BUFFER,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class SchemaMapper:
+    @classmethod
+    def flatten_payload(cls, payload: Any, prefix: str = "") -> Dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {}
+
+        flattened: Dict[str, Any] = {}
+        for key, value in payload.items():
+            raw_key = str(key or "").strip()
+            if not raw_key:
+                continue
+            next_prefix = f"{prefix}_{raw_key}" if prefix else raw_key
+            if isinstance(value, dict):
+                flattened.update(cls.flatten_payload(value, next_prefix))
+                continue
+            if isinstance(value, list) and value and all(not isinstance(item, (dict, list)) for item in value):
+                flattened[next_prefix] = ", ".join(str(item) for item in value if str(item).strip())
+                continue
+            flattened[next_prefix] = value
+        return flattened
+
+    @staticmethod
+    def normalize_key(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        text = re.sub(r"[^a-z0-9]+", "_", text)
+        return re.sub(r"_+", "_", text).strip("_")
+
+    @classmethod
+    def _token_set(cls, value: Any) -> Set[str]:
+        return set(filter(None, cls.normalize_key(value).split("_")))
+
+    @classmethod
+    def _resolve_alias(cls, raw_key: Any, alias_map: Dict[str, List[str]]) -> Optional[str]:
+        normalized_key = cls.normalize_key(raw_key)
+        if not normalized_key:
+            return None
+
+        direct_hits: List[str] = []
+        fuzzy_hits: List[Tuple[int, str]] = []
+        raw_tokens = cls._token_set(raw_key)
+
+        for canonical, aliases in (alias_map or {}).items():
+            for alias in aliases or []:
+                alias_key = cls.normalize_key(alias)
+                if not alias_key:
+                    continue
+                if normalized_key == alias_key:
+                    direct_hits.append(canonical)
+                    break
+                alias_tokens = cls._token_set(alias)
+                if raw_tokens and alias_tokens and (alias_tokens <= raw_tokens or raw_tokens <= alias_tokens):
+                    fuzzy_hits.append((len(alias_tokens & raw_tokens), canonical))
+
+        if direct_hits:
+            return direct_hits[0]
+        if fuzzy_hits:
+            fuzzy_hits.sort(reverse=True)
+            return fuzzy_hits[0][1]
+        return None
+
+    @classmethod
+    def normalize_record(
+        cls,
+        payload: Optional[Dict[str, Any]],
+        alias_map: Dict[str, List[str]],
+        passthrough_keys: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        raw = dict(payload or {})
+        flattened = cls.flatten_payload(raw)
+        raw.update({k: v for k, v in flattened.items() if k not in raw})
+        normalized: Dict[str, Any] = {}
+        passthrough = passthrough_keys or []
+
+        for key, value in raw.items():
+            mapped_key = cls._resolve_alias(key, alias_map)
+            target_key = mapped_key or cls.normalize_key(key)
+            if mapped_key and normalized.get(mapped_key) not in (None, "", [], {}):
+                continue
+            normalized[target_key] = value
+
+        for key in passthrough:
+            if key in raw and key not in normalized:
+                normalized[key] = raw[key]
+        return normalized
+
+    @classmethod
+    def remap_dataframe(cls, df: pd.DataFrame, alias_map: Dict[str, List[str]]) -> pd.DataFrame:
+        renamed = df.copy()
+        rename_map: Dict[str, str] = {}
+        taken_targets = set(renamed.columns)
+
+        for column in renamed.columns:
+            target = cls._resolve_alias(column, alias_map)
+            if not target or column == target or target in taken_targets:
+                continue
+            rename_map[column] = target
+            taken_targets.add(target)
+
+        if rename_map:
+            renamed = renamed.rename(columns=rename_map)
+        return renamed
 
 
 # Internal API adapter.
@@ -54,17 +158,30 @@ class FirmAPIClient:
         self.base_url = FIRM_API_URL
         self.headers = {"Authorization": f"Bearer {API_AUTH_TOKEN}"}
 
+    @staticmethod
+    def _normalize_project_standards(raw_payload: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        normalized = SchemaMapper.normalize_record(raw_payload, PROJECT_STANDARD_FIELD_ALIASES)
+        methodology = str(normalized.get("methodology") or "").strip() or "TBD"
+        team = str(normalized.get("team") or "").strip() or "TBD"
+        commercial = str(normalized.get("commercial") or "").strip() or "TBD"
+        return {
+            "methodology": methodology,
+            "team": team,
+            "commercial": commercial,
+        }
+
     def get_project_standards(self, project_type: str) -> Dict[str, str]:
         if self.demo_mode:
             logger.info("Using demo standards for project type: %s", project_type)
-            return MOCK_FIRM_STANDARDS.get(project_type, MOCK_FIRM_STANDARDS.get("Implementation"))
+            demo_standards = MOCK_FIRM_STANDARDS.get(project_type, MOCK_FIRM_STANDARDS.get("Implementation"))
+            return self._normalize_project_standards(demo_standards)
         try:
             res = requests.get(f"{self.base_url}/standards/{project_type}", headers=self.headers, timeout=5)
             res.raise_for_status()
-            return res.json()
+            return self._normalize_project_standards(res.json())
         except requests.RequestException as e:
             logger.error(f"Internal API Error: {e}")
-            return {"methodology": "TBD", "team": "TBD", "commercial": "TBD"}
+            return self._normalize_project_standards({})
 
     @classmethod
     def _default_firm_profile(cls) -> Dict[str, str]:
@@ -172,7 +289,7 @@ class FirmAPIClient:
 
     @classmethod
     def _normalize_firm_profile(cls, raw_profile: Optional[Dict[str, Any]]) -> Dict[str, str]:
-        source = dict(raw_profile or {})
+        source = SchemaMapper.normalize_record(raw_profile, FIRM_PROFILE_FIELD_ALIASES)
         raw_contact = str(source.get("contact_info") or "").strip()
         parsed = cls._extract_contact_fields(raw_contact)
 
@@ -308,44 +425,67 @@ class KnowledgeBase:
         self.df: Optional[pd.DataFrame] = None
         self.refresh_data()
 
+    @staticmethod
+    def _required_project_fields() -> Tuple[str, ...]:
+        return ("entity", "topic")
+
+    @classmethod
+    def _normalize_projects_df(cls, raw_df: pd.DataFrame) -> pd.DataFrame:
+        normalized = raw_df.copy()
+        normalized.columns = [str(col).strip() for col in normalized.columns]
+        normalized = SchemaMapper.remap_dataframe(normalized, PROJECT_DATA_FIELD_ALIASES)
+        return normalized
+
+    @classmethod
+    def _has_required_project_fields(cls, df: Optional[pd.DataFrame]) -> bool:
+        if df is None:
+            return False
+        return all(field in df.columns for field in cls._required_project_fields())
+
     def refresh_data(self) -> bool:
         try:
-            self.df = pd.read_sql("SELECT * FROM projects", self.engine)
+            self.df = self._normalize_projects_df(pd.read_sql("SELECT * FROM projects", self.engine))
         except Exception:
             if not os.path.exists("db.csv"):
                 return False
             raw_df = pd.read_csv("db.csv")
-            raw_df.columns = [c.strip() for c in raw_df.columns]
-            rename_dict = {v: k for k, v in DATA_MAPPING.items()}
-            raw_df.rename(columns=rename_dict, inplace=True)
-            raw_df.to_sql("projects", self.engine, index=False, if_exists='replace')
-            self.df = raw_df
+            normalized_df = self._normalize_projects_df(raw_df)
+            normalized_df.to_sql("projects", self.engine, index=False, if_exists='replace')
+            self.df = normalized_df
+
+        if not self._has_required_project_fields(self.df):
+            logger.warning(
+                "Project data schema is missing required fields. Expected aliases for: %s. Available columns: %s",
+                ", ".join(self._required_project_fields()),
+                ", ".join(self.df.columns.astype(str).tolist()) if self.df is not None else "-",
+            )
+            return False
             
         existing_ids = set(self.collection.get()['ids'])
         new_ids_map = {str(idx): row for idx, row in self.df.iterrows()}
         new_ids_set = set(new_ids_map.keys())
         
         ids_to_delete = list(existing_ids - new_ids_set)
-        ids_to_add = list(new_ids_set - existing_ids)
         
         if ids_to_delete: 
             self.collection.delete(ids_to_delete)
-            
-        if ids_to_add:
-            for i in range(0, len(ids_to_add), 500):
-                batch_ids = ids_to_add[i:i + 500]
+
+        all_ids = list(new_ids_set)
+        if all_ids:
+            for i in range(0, len(all_ids), 500):
+                batch_ids = all_ids[i:i + 500]
                 docs = [" | ".join([f"{col}: {val}" for col, val in new_ids_map[b].items()]) for b in batch_ids]
                 metas = [new_ids_map[b].astype(str).to_dict() for b in batch_ids]
-                self.collection.add(documents=docs, metadatas=metas, ids=batch_ids)
+                self.collection.upsert(documents=docs, metadatas=metas, ids=batch_ids)
                 
         return True
 
     def get_exact_context(self, entity: str, topic: str, budget: Optional[str] = None) -> str:
-        if self.df is None or self.df.empty:
+        if self.df is None or self.df.empty or not self._has_required_project_fields(self.df):
             return "No data."
         try:
             match = self.df[(self.df['entity'] == entity) & (self.df['topic'] == topic)]
-            if budget and not match.empty:
+            if budget and 'budget' in self.df.columns and not match.empty:
                 match = match[match['budget'] == budget]
             if not match.empty:
                 return "".join([f"- {k.capitalize()}: {v}\n" for k, v in match.iloc[0].to_dict().items()])

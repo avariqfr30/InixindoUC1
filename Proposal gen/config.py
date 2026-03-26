@@ -37,6 +37,68 @@ DATA_MAPPING = {
     "budget": "Investment Estimation"
 }
 
+PROJECT_DATA_FIELD_ALIASES = {
+    "entity": [
+        "entity", "client entity", "client_entity", "client", "client name", "client_name",
+        "company", "company name", "company_name", "customer", "customer_name",
+        "organization", "organization_name", "nama perusahaan", "nama_perusahaan",
+        "nama klien", "nama_klien", "klien", DATA_MAPPING["entity"],
+    ],
+    "topic": [
+        "topic", "strategic initiative", "strategic_initiative", "initiative", "initiative name",
+        "project", "project name", "project_name", "program", "objective", "tujuan",
+        "konteks organisasi", "konteks_organisasi", "inisiatif", DATA_MAPPING["topic"],
+    ],
+    "budget": [
+        "budget", "investment estimation", "investment_estimation", "investment",
+        "project budget", "project_budget", "estimated budget", "estimated_budget",
+        "estimasi biaya", "estimasi_biaya", "anggaran", "nilai proyek", "nilai_proyek",
+        DATA_MAPPING["budget"],
+    ],
+}
+
+PROJECT_STANDARD_FIELD_ALIASES = {
+    "methodology": [
+        "methodology", "metodologi", "delivery methodology", "delivery_methodology",
+        "approach", "framework", "service methodology", "metode kerja",
+    ],
+    "team": [
+        "team", "team structure", "team_structure", "delivery team", "delivery_team",
+        "resource plan", "resource_plan", "staffing", "struktur tim", "struktur_tim",
+    ],
+    "commercial": [
+        "commercial", "komersial", "commercial terms", "commercial_terms",
+        "pricing terms", "pricing_terms", "payment terms", "payment_terms",
+        "scope and terms", "scope_terms",
+    ],
+}
+
+FIRM_PROFILE_FIELD_ALIASES = {
+    "office_address": [
+        "office address", "office_address", "address", "alamat", "alamat kantor",
+        "alamat_kantor", "office location", "office_location", "location",
+    ],
+    "email": [
+        "email", "official email", "official_email", "company email", "company_email",
+        "contact email", "contact_email",
+    ],
+    "phone": [
+        "phone", "telephone", "telp", "telepon", "phone number", "phone_number",
+        "contact number", "contact_number", "mobile",
+    ],
+    "website": [
+        "website", "url", "company website", "company_website", "site", "web",
+    ],
+    "contact_info": [
+        "contact info", "contact_info", "contact", "kontak", "informasi kontak",
+        "informasi_kontak",
+    ],
+    "portfolio_highlights": [
+        "portfolio highlights", "portfolio_highlights", "portfolio", "highlight portfolio",
+        "highlight_portfolio", "capabilities", "company profile", "company_profile",
+    ],
+}
+
 # Keyword/regulation suggestions used by the UI.
 SMART_SUGGESTIONS = {
     "banking": {
