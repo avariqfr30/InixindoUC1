@@ -29,6 +29,8 @@ from docx import Document
 from docx.image.exceptions import UnrecognizedImageError
 from docx.shared import Pt, RGBColor, Inches, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 from ollama import Client
 from chromadb.utils import embedding_functions
@@ -1040,6 +1042,88 @@ class DocumentBuilder:
         run.italic = italic
 
     @staticmethod
+    def _style_num_id(doc: Document, style_name: str) -> Optional[int]:
+        try:
+            style = doc.styles[style_name]
+        except KeyError:
+            return None
+        ppr = style.element.pPr
+        if ppr is None or ppr.numPr is None or ppr.numPr.numId is None:
+            return None
+        try:
+            return int(ppr.numPr.numId.val)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _create_list_num_id(doc: Document, style_name: str) -> Optional[int]:
+        style_num_id = DocumentBuilder._style_num_id(doc, style_name)
+        if style_num_id is None:
+            return None
+
+        numbering = doc.part.numbering_part.numbering_definitions._numbering
+        abstract_num_id = None
+        for num in numbering.findall(qn('w:num')):
+            raw_num_id = num.get(qn('w:numId'))
+            try:
+                current_num_id = int(raw_num_id) if raw_num_id is not None else None
+            except (TypeError, ValueError):
+                current_num_id = None
+            if current_num_id != style_num_id:
+                continue
+            abstract = num.find(qn('w:abstractNumId'))
+            if abstract is None:
+                continue
+            raw_abstract = abstract.get(qn('w:val'))
+            try:
+                abstract_num_id = int(raw_abstract) if raw_abstract is not None else None
+            except (TypeError, ValueError):
+                abstract_num_id = None
+            break
+
+        if abstract_num_id is None:
+            return None
+
+        existing_num_ids: List[int] = []
+        for num in numbering.findall(qn('w:num')):
+            raw_num_id = num.get(qn('w:numId'))
+            try:
+                if raw_num_id is not None:
+                    existing_num_ids.append(int(raw_num_id))
+            except (TypeError, ValueError):
+                continue
+        next_num_id = (max(existing_num_ids) + 1) if existing_num_ids else (style_num_id + 1)
+
+        num = OxmlElement('w:num')
+        num.set(qn('w:numId'), str(next_num_id))
+        abstract_ref = OxmlElement('w:abstractNumId')
+        abstract_ref.set(qn('w:val'), str(abstract_num_id))
+        num.append(abstract_ref)
+        numbering.append(num)
+        return next_num_id
+
+    @staticmethod
+    def _apply_list_num_id(paragraph, num_id: int, level: int = 0) -> None:
+        p = paragraph._p
+        ppr = p.get_or_add_pPr()
+        num_pr = ppr.find(qn('w:numPr'))
+        if num_pr is None:
+            num_pr = OxmlElement('w:numPr')
+            ppr.append(num_pr)
+
+        ilvl = num_pr.find(qn('w:ilvl'))
+        if ilvl is None:
+            ilvl = OxmlElement('w:ilvl')
+            num_pr.append(ilvl)
+        ilvl.set(qn('w:val'), str(level))
+
+        num_id_el = num_pr.find(qn('w:numId'))
+        if num_id_el is None:
+            num_id_el = OxmlElement('w:numId')
+            num_pr.append(num_id_el)
+        num_id_el.set(qn('w:val'), str(num_id))
+
+    @staticmethod
     def parse_html_to_docx(doc: Document, html_content: str, theme_color: Tuple[int, int, int]) -> None:
         soup = BeautifulSoup(html_content, 'html.parser')
         for element in soup.children:
@@ -1057,19 +1141,28 @@ class DocumentBuilder:
                 p = doc.add_paragraph()
                 DocumentBuilder._process_inline_html(p, element)
             elif element.name in ['ul', 'ol']:
-                # Render markers manually to avoid auto-number carry-over across chapters.
+                # Use native Word list formatting so alignment and wrapping stay consistent.
                 direct_items = element.find_all('li', recursive=False)
+                style_name = "List Number" if element.name == 'ol' else "List Bullet"
+                list_num_id = DocumentBuilder._create_list_num_id(doc, style_name)
                 for idx, li in enumerate(direct_items, start=1):
                     # Avoid orphan markers like "3." with no text.
                     if not li.get_text(" ", strip=True):
                         continue
-                    p = doc.add_paragraph()
-                    p.paragraph_format.left_indent = Cm(0.63)
-                    p.paragraph_format.first_line_indent = Cm(-0.38)
+                    use_manual_fallback = False
+                    try:
+                        p = doc.add_paragraph(style=style_name)
+                    except KeyError:
+                        p = doc.add_paragraph()
+                        use_manual_fallback = True
+
                     p.paragraph_format.space_before = Pt(0)
                     p.paragraph_format.space_after = Pt(4)
-                    marker = f"{idx}.\t" if element.name == 'ol' else "•\t"
-                    p.add_run(marker).bold = True
+                    if list_num_id is not None:
+                        DocumentBuilder._apply_list_num_id(p, list_num_id, level=0)
+                    elif use_manual_fallback:
+                        marker = f"{idx}. " if element.name == 'ol' else "• "
+                        p.add_run(marker).bold = True
                     DocumentBuilder._process_inline_html(p, li)
             elif element.name == 'table':
                 rows = element.find_all('tr')
@@ -1119,7 +1212,7 @@ class DocumentBuilder:
                 in_table = False
             clean_lines.append(line)
             
-        html = markdown.markdown("\n".join(clean_lines), extensions=['tables'])
+        html = markdown.markdown("\n".join(clean_lines), extensions=['tables', 'sane_lists'])
         DocumentBuilder.parse_html_to_docx(doc, html, theme_color)
 
 
