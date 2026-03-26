@@ -485,6 +485,60 @@ class Researcher:
 
     @staticmethod
     @lru_cache(maxsize=128)
+    def get_client_track_record(client_name: str) -> str:
+        current_year = datetime.now().year
+        prev_year = current_year - 1
+        res = Researcher.search(
+            (
+                f'"{client_name}" pencapaian OR kinerja OR ekspansi OR transformasi OR penghargaan '
+                f'{current_year} OR {prev_year}'
+            ),
+            limit=10,
+            recency_bucket="year"
+        )
+        filtered = Researcher._filter_recent_entity_results(
+            res,
+            entity_name=client_name,
+            max_age_years=3,
+            strict_entity=False
+        )
+        return Researcher._format_evidence(
+            filtered[:5],
+            label="OSINT_TRACK",
+            fallback=f"Track record publik {client_name} terbatas; hindari klaim performa tanpa bukti."
+        )
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def get_client_writer_collaboration(client_name: str, writer_firm_name: str = WRITER_FIRM_NAME) -> str:
+        current_year = datetime.now().year
+        strict_writer = Researcher._normalize_text(writer_firm_name) == Researcher._normalize_text(WRITER_FIRM_NAME)
+        query = (
+            f'"{writer_firm_name}" "{client_name}" kerja sama OR proyek OR pelatihan OR konsultasi '
+            f'{current_year} OR {current_year - 1} OR {current_year - 2}'
+        )
+        res = Researcher.search(query, limit=10, recency_bucket="year")
+        filtered: List[Dict[str, Any]] = []
+        for item in Researcher._sort_by_recency(res):
+            if not Researcher._is_recent(item, max_age_years=6):
+                continue
+            if not Researcher._is_entity_match(item, client_name, strict=False):
+                continue
+            if not Researcher._is_entity_match(item, writer_firm_name, strict=strict_writer):
+                continue
+            filtered.append(item)
+
+        return Researcher._format_evidence(
+            filtered[:4],
+            label="OSINT_COLLAB",
+            fallback=(
+                f"Belum ditemukan bukti publik yang cukup kuat terkait kolaborasi {writer_firm_name} "
+                f"dengan {client_name}; jangan menyatakan pernah bekerja sama tanpa verifikasi."
+            )
+        )
+
+    @staticmethod
+    @lru_cache(maxsize=128)
     def get_regulatory_data(regulations_string: str) -> str:
         if not regulations_string:
             return "Tidak ada regulasi spesifik dari input user."
@@ -1311,6 +1365,215 @@ class ProposalGenerator:
             cache.pop(next(iter(cache)))
 
     @staticmethod
+    def _has_external_evidence(osint_block: str) -> bool:
+        return any(line.strip().startswith("Sumber eksternal") for line in (osint_block or "").splitlines())
+
+    @staticmethod
+    def _extract_osint_facts(osint_block: str, max_items: int = 3) -> List[Dict[str, str]]:
+        facts: List[Dict[str, str]] = []
+        pattern = (
+            r"fakta=(?P<fact>.*?)\s*\|\s*sumber=(?P<title>.*?)\s*\|\s*url=(?P<url>.*?)\s*"
+            r"\|\s*sitasi_apa=(?P<citation>\([^)]+\))$"
+        )
+        for raw_line in (osint_block or "").splitlines():
+            line = raw_line.strip()
+            if not line.startswith("Sumber eksternal"):
+                continue
+            match = re.search(pattern, line)
+            if not match:
+                continue
+            fact = re.sub(r"\s+", " ", (match.group("fact") or "")).strip()
+            title = re.sub(r"\s+", " ", (match.group("title") or "")).strip()
+            url = (match.group("url") or "").strip()
+            citation = (match.group("citation") or "").strip()
+            if not fact:
+                continue
+            facts.append({
+                "fact": fact[:240],
+                "title": title,
+                "url": url,
+                "citation": citation,
+            })
+            if len(facts) >= max_items:
+                break
+        return facts
+
+    @staticmethod
+    def _infer_industry(client: str, project: str, notes: str, regulations: str) -> str:
+        combined = " ".join([client or "", project or "", notes or "", regulations or ""]).lower()
+        rules = [
+            ("Perbankan", ["bank", "bri", "bca", "mandiri", "bni", "btn", "fintech", "kredit"]),
+            ("Telekomunikasi", ["telkom", "telkomsel", "indosat", "xl", "axiata", "operator"]),
+            ("Energi & Utilitas", ["pertamina", "pln", "energi", "listrik", "oil", "gas"]),
+            ("Ritel & E-Commerce", ["tokopedia", "e-commerce", "retail", "marketplace", "goto"]),
+            ("Transportasi & Aviasi", ["garuda", "aviation", "airline", "logistik", "transport"]),
+            ("Pemerintah & BUMN", ["kementerian", "dinas", "pemprov", "pemkab", "bumn", "spbe"]),
+            ("Manufaktur & Tambang", ["manufaktur", "adaro", "antam", "vale", "smelter", "mining"]),
+        ]
+        for label, tokens in rules:
+            if any(token in combined for token in tokens):
+                return label
+        return "Lintas Industri"
+
+    @staticmethod
+    def _industry_terms(industry: str) -> List[str]:
+        terms_map = {
+            "Perbankan": ["nasabah", "core banking", "risk appetite", "kepatuhan POJK", "fraud control"],
+            "Telekomunikasi": ["subscriber", "network availability", "service assurance", "NOC", "customer churn"],
+            "Energi & Utilitas": ["operational reliability", "asset integrity", "outage window", "HSSE", "dispatch"],
+            "Ritel & E-Commerce": ["conversion", "basket size", "checkout funnel", "retention cohort", "omnichannel"],
+            "Transportasi & Aviasi": ["on-time performance", "flight disruption", "ground operation", "passenger experience"],
+            "Pemerintah & BUMN": ["akuntabilitas", "SPBE", "tata kelola", "layanan publik", "audit trail"],
+            "Manufaktur & Tambang": ["supply continuity", "production throughput", "downtime pabrik", "safety compliance"],
+        }
+        return terms_map.get(industry, ["operational excellence", "risk control", "business value", "governance"])
+
+    @staticmethod
+    def _extract_metric_keywords(kpi_blueprint: List[str]) -> List[str]:
+        stopwords = {"dan", "yang", "untuk", "dengan", "dari", "pada", "target", "baseline", "dalam", "bulan"}
+        keywords: List[str] = []
+        seen: Set[str] = set()
+        for line in kpi_blueprint or []:
+            for token in re.findall(r"[A-Za-z]{3,}", (line or "").lower()):
+                if token in stopwords or token in seen:
+                    continue
+                seen.add(token)
+                keywords.append(token)
+                if len(keywords) >= 10:
+                    return keywords
+        return keywords
+
+    @staticmethod
+    def _extract_anchor_keywords(facts: List[Dict[str, str]], max_terms: int = 10) -> List[str]:
+        stopwords = {
+            "yang", "dengan", "untuk", "dari", "pada", "tahun", "bulan", "sebagai", "dan",
+            "atau", "oleh", "this", "that", "from", "with", "into", "their"
+        }
+        seen: Set[str] = set()
+        terms: List[str] = []
+        for fact in facts or []:
+            for token in re.findall(r"[A-Za-z]{4,}", (fact.get("fact", "") or "").lower()):
+                if token in stopwords or token in seen:
+                    continue
+                seen.add(token)
+                terms.append(token)
+                if len(terms) >= max_terms:
+                    return terms
+        return terms
+
+    @classmethod
+    def _build_kpi_blueprint(
+        cls,
+        project_goal: str,
+        notes: str,
+        timeline: str,
+        industry: str,
+        client: str
+    ) -> List[str]:
+        combined = " ".join([project_goal or "", notes or ""]).lower()
+        months = FinancialAnalyzer._duration_to_months(timeline)
+        horizon = f"{months:.0f} bulan" if months else (timeline or "periode proyek")
+
+        kpis: List[str] = []
+        if any(token in combined for token in ["mau", "monthly active", "active users", "adopsi"]):
+            kpis.append(f"MAU/Adopsi kanal digital: target pertumbuhan terukur dalam {horizon}.")
+        if any(token in combined for token in ["nps", "kepuasan", "customer experience", "csat"]):
+            kpis.append(f"Customer sentiment (NPS/CSAT): target kenaikan konsisten dalam {horizon}.")
+        if any(token in combined for token in ["churn", "retensi", "retention"]):
+            kpis.append(f"Retention/Churn: turunkan churn dan naikkan retensi pada horizon {horizon}.")
+        if any(token in combined for token in ["downtime", "incident", "availability", "sla", "mttr"]):
+            kpis.append(f"Reliability operasi (Availability/MTTR/Incident): perbaikan stabil dalam {horizon}.")
+        if any(token in combined for token in ["biaya", "cost", "efisiensi", "opex", "capex"]):
+            kpis.append(f"Efisiensi biaya delivery: kontrol biaya per fase dan deviasi anggaran dalam {horizon}.")
+
+        if not kpis:
+            default_by_industry = {
+                "Perbankan": [
+                    f"Pertumbuhan transaksi digital nasabah dalam {horizon}.",
+                    f"Kepatuhan & risiko operasional (audit findings) membaik dalam {horizon}.",
+                    f"Ketersediaan layanan digital meningkat dan insiden prioritas menurun dalam {horizon}.",
+                ],
+                "Telekomunikasi": [
+                    f"Service availability dan pengalaman pelanggan meningkat dalam {horizon}.",
+                    f"Churn pelanggan menurun dan quality of service membaik dalam {horizon}.",
+                    f"Efisiensi operasi network support meningkat dalam {horizon}.",
+                ],
+            }
+            kpis.extend(default_by_industry.get(industry, [
+                f"KPI outcome bisnis utama {client} bergerak positif dalam {horizon}.",
+                f"Kualitas operasi (incident, SLA, lead time) membaik dalam {horizon}.",
+                f"Efektivitas eksekusi proyek (on-time, on-budget, on-scope) tercapai dalam {horizon}.",
+            ]))
+
+        # Keep concise but actionable.
+        return kpis[:4]
+
+    @classmethod
+    def _build_personalization_pack(
+        cls,
+        client: str,
+        project: str,
+        project_goal: str,
+        timeline: str,
+        notes: str,
+        regulations: str,
+        research_bundle: Dict[str, str]
+    ) -> Dict[str, Any]:
+        industry = cls._infer_industry(client, project, notes, regulations)
+        track_record = research_bundle.get("track_record", "")
+        collaboration = research_bundle.get("collaboration", "")
+        news = research_bundle.get("news", "")
+
+        relationship_has_evidence = cls._has_external_evidence(collaboration)
+        relationship_mode = "existing" if relationship_has_evidence else "new"
+        relationship_guidance = (
+            "Gunakan narasi continuity partnership berbasis bukti publik kolaborasi yang ada."
+            if relationship_mode == "existing"
+            else "Gunakan narasi kemitraan baru. Jangan klaim pernah bekerja sama tanpa bukti publik."
+        )
+
+        news_facts = cls._extract_osint_facts(news, max_items=2)
+        track_facts = cls._extract_osint_facts(track_record, max_items=2)
+        initiative_facts: List[Dict[str, str]] = []
+        seen_citations: Set[str] = set()
+        for item in news_facts + track_facts:
+            citation = item.get("citation", "")
+            if citation in seen_citations:
+                continue
+            seen_citations.add(citation)
+            initiative_facts.append(item)
+            if len(initiative_facts) >= 3:
+                break
+
+        kpi_blueprint = cls._build_kpi_blueprint(
+            project_goal=project_goal,
+            notes=notes,
+            timeline=timeline,
+            industry=industry,
+            client=client
+        )
+        terminology = cls._industry_terms(industry)
+
+        profile_summary = (
+            f"Industri klien terdeteksi: {industry}. "
+            f"Fokus inisiatif: {project}. "
+            f"Model hubungan: {'kelanjutan kolaborasi' if relationship_mode == 'existing' else 'inisiasi kemitraan baru'}."
+        )
+
+        return {
+            "industry": industry,
+            "relationship_mode": relationship_mode,
+            "relationship_guidance": relationship_guidance,
+            "kpi_blueprint": kpi_blueprint,
+            "kpi_keywords": cls._extract_metric_keywords(kpi_blueprint),
+            "terminology": terminology[:6],
+            "initiative_facts": initiative_facts,
+            "anchor_citations": [item.get("citation", "") for item in initiative_facts if item.get("citation")],
+            "anchor_keywords": cls._extract_anchor_keywords(initiative_facts),
+            "profile_summary": profile_summary,
+        }
+
+    @staticmethod
     def _normalize_external_citation(domain: str, year: str) -> str:
         domain_clean = (domain or "").strip().lower()
         year_clean = (year or "").strip().lower()
@@ -1330,11 +1593,7 @@ class ProposalGenerator:
     def _collect_allowed_external_citations(cls, research_bundle: Dict[str, str]) -> Set[str]:
         if not research_bundle:
             return set()
-        merged = "\n".join([
-            str(research_bundle.get("profile", "")),
-            str(research_bundle.get("news", "")),
-            str(research_bundle.get("regulations", "")),
-        ])
+        merged = "\n".join([str(value) for value in research_bundle.values()])
         return set(cls._extract_external_citations(merged))
 
     @classmethod
@@ -1418,18 +1677,24 @@ class ProposalGenerator:
         futures = {
             "profile": self.io_pool.submit(Researcher.get_entity_profile, base_client),
             "news": self.io_pool.submit(Researcher.get_latest_client_news, base_client),
+            "track_record": self.io_pool.submit(Researcher.get_client_track_record, base_client),
+            "collaboration": self.io_pool.submit(Researcher.get_client_writer_collaboration, base_client, WRITER_FIRM_NAME),
             "regulations": self.io_pool.submit(Researcher.get_regulatory_data, regulations)
         }
         try:
             bundle = {
                 "profile": futures["profile"].result(timeout=8),
                 "news": futures["news"].result(timeout=8),
+                "track_record": futures["track_record"].result(timeout=8),
+                "collaboration": futures["collaboration"].result(timeout=8),
                 "regulations": futures["regulations"].result(timeout=8),
             }
         except Exception:
             bundle = {
                 "profile": f"Data profil terbaru {base_client} terbatas (sumber daring, n.d.).",
                 "news": f"Data berita terbaru {base_client} terbatas (sumber daring, n.d.).",
+                "track_record": f"Data track record {base_client} terbatas (sumber daring, n.d.).",
+                "collaboration": f"Data histori kolaborasi {WRITER_FIRM_NAME} dengan {base_client} terbatas (sumber daring, n.d.).",
                 "regulations": "Data regulasi terbatas (sumber daring, n.d.)."
             }
 
@@ -1449,11 +1714,15 @@ class ProposalGenerator:
         regulations: str,
         selected_chapters: List[Dict[str, Any]],
         research_bundle: Dict[str, str],
-        firm_data: Dict[str, str]
+        firm_data: Dict[str, str],
+        personalization_pack: Dict[str, Any]
     ) -> str:
         cache_key = self._cache_key(
             "contract", client, project, budget, service_type, project_goal,
-            project_type, timeline, notes, regulations, "|".join([c["id"] for c in selected_chapters])
+            project_type, timeline, notes, regulations, "|".join([c["id"] for c in selected_chapters]),
+            personalization_pack.get("industry", ""),
+            personalization_pack.get("relationship_mode", ""),
+            "|".join(personalization_pack.get("kpi_blueprint", []) or [])
         )
         cached = self._proposal_contract_cache.get(cache_key)
         if cached:
@@ -1478,6 +1747,12 @@ class ProposalGenerator:
         - Baseline Commercial: {firm_data.get('commercial', '')}
         - Profil OSINT: {research_bundle.get('profile', '')}
         - Berita OSINT: {research_bundle.get('news', '')}
+        - Track Record OSINT: {research_bundle.get('track_record', '')}
+        - Histori Kolaborasi {WRITER_FIRM_NAME} & {client}: {research_bundle.get('collaboration', '')}
+        - Industry Pack: {personalization_pack.get('industry', 'Lintas Industri')}
+        - Relationship Mode: {personalization_pack.get('relationship_mode', 'new')}
+        - KPI Blueprint: {', '.join(personalization_pack.get('kpi_blueprint', []))}
+        - Terminologi Prioritas: {', '.join(personalization_pack.get('terminology', []))}
 
         OUTPUT WAJIB (tanpa markdown code block, <= 220 kata):
         1) Narasi Inti (1-2 kalimat)
@@ -1522,12 +1797,16 @@ class ProposalGenerator:
         firm_data: Dict[str, str],
         firm_profile: Dict[str, str],
         research_bundle: Dict[str, str],
+        personalization_pack: Dict[str, Any],
         proposal_contract: str,
         target_words: int
     ) -> Dict[str, Any]:
         try:
             current_year = datetime.now().year
-            global_data = research_bundle.get('profile', '')
+            profile_data = research_bundle.get('profile', '')
+            track_record_data = research_bundle.get('track_record', '')
+            collaboration_data = research_bundle.get('collaboration', '')
+            global_data = "\n".join([item for item in [profile_data, track_record_data, collaboration_data] if item])
             client_news = research_bundle.get('news', '')
             regulation_data = research_bundle.get('regulations', '')
             allowed_external_citations = self._collect_allowed_external_citations(research_bundle)
@@ -1556,10 +1835,42 @@ class ProposalGenerator:
             elif chapter.get('visual_intent') == "flowchart":
                 visual_prompt = "Tambahkan alur tahapan metodologi dalam bentuk bullet bertingkat yang jelas (fase -> aktivitas -> output)."
 
+            terminology_list = personalization_pack.get("terminology", []) or []
+            kpi_blueprint = personalization_pack.get("kpi_blueprint", []) or []
+            relationship_guidance = personalization_pack.get("relationship_guidance", "")
+            relationship_mode = personalization_pack.get("relationship_mode", "new")
+            profile_summary = personalization_pack.get("profile_summary", "")
+            initiative_facts = personalization_pack.get("initiative_facts", []) or []
+            if initiative_facts:
+                anchors_text = " | ".join([
+                    f"{item.get('fact', '')} {item.get('citation', '')}".strip()
+                    for item in initiative_facts[:3]
+                ])
+            else:
+                anchors_text = "Data inisiatif publik terbatas; jangan membuat klaim inisiatif tanpa bukti."
+
             extra = (
                 f"[PROPOSAL CONTRACT]\n{proposal_contract}\n"
                 f"[GLOBAL] Proposal ini wajib mempertahankan kedalaman konten tingkat eksekutif dan total dokumen maksimal {MAX_PROPOSAL_PAGES} halaman. "
                 "Setiap bab harus memiliki konteks spesifik klien, poin yang dapat ditindaklanjuti, dan tidak generik. Gunakan kombinasi numbering dan bullet yang rapi di setiap H2, namun tetap padat dan tidak banyak whitespace."
+            )
+            extra += f" [CLIENT_PROFILE_PACK] {profile_summary}"
+            extra += f" [RELATIONSHIP_MODE] {relationship_mode}. {relationship_guidance}"
+            extra += (
+                f" [KPI_TAILORING] Gunakan KPI blueprint berikut sebagai baseline tailoring: "
+                f"{' | '.join(kpi_blueprint) if kpi_blueprint else 'KPI belum spesifik, gunakan KPI operasional dan outcome bisnis yang terukur.'}"
+            )
+            extra += (
+                f" [TERMINOLOGI_ADAPTASI] Gunakan istilah domain klien berikut secara natural: "
+                f"{', '.join(terminology_list) if terminology_list else 'operational excellence, governance, risk control'}."
+            )
+            extra += (
+                f" [INITIATIVE_ANCHORS] Wajib menyisipkan minimal satu anchor inisiatif klien dari daftar berikut: {anchors_text}"
+            )
+            extra += f" [OSINT_TRACK_RECORD] {track_record_data}"
+            extra += (
+                f" [OSINT_KOLABORASI] {collaboration_data} "
+                "Jangan pernah mengklaim pernah bekerja sama sebelumnya jika tidak ada bukti publik yang jelas."
             )
             if chapter['id'] == 'c_1':
                 extra += f" [FOCUS] Fokus pada latar belakang organisasi '{client}' dan tujuan proyek: '{project}'. Soroti driver bisnis utama: [{project_goal}]."
@@ -1647,7 +1958,8 @@ class ProposalGenerator:
         content: str,
         client: str,
         target_words: Optional[int] = None,
-        allowed_external_citations: Optional[Set[str]] = None
+        allowed_external_citations: Optional[Set[str]] = None,
+        personalization_pack: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         target_words = int(target_words or self._target_words(chapter))
         floor = max(140, int(self._chapter_floor_words(chapter.get("id", ""), for_compression=False) * 0.8))
@@ -1690,6 +2002,32 @@ class ProposalGenerator:
             if invalid_external_citations:
                 issues.append("citation_policy")
 
+        missing_personalization_signals: List[str] = []
+        if personalization_pack:
+            terminology = personalization_pack.get("terminology", []) or []
+            term_hit = any(
+                re.search(rf"\b{re.escape(term)}\b", content, re.IGNORECASE)
+                for term in terminology if term
+            ) if terminology else True
+            if not term_hit:
+                missing_personalization_signals.append("terminology")
+
+            kpi_keywords = personalization_pack.get("kpi_keywords", []) or []
+            kpi_hit = any(
+                re.search(rf"\b{re.escape(token)}\b", content, re.IGNORECASE)
+                for token in kpi_keywords if token
+            ) if kpi_keywords else True
+            if not kpi_hit:
+                missing_personalization_signals.append("kpi")
+
+            anchor_citations = personalization_pack.get("anchor_citations", []) or []
+            anchor_hit = any(citation in content for citation in anchor_citations) if anchor_citations else True
+            if not anchor_hit:
+                missing_personalization_signals.append("initiative_anchor")
+
+            if missing_personalization_signals:
+                issues.append("missing_personalization")
+
         return {
             "issues": issues,
             "word_count": word_count,
@@ -1698,6 +2036,7 @@ class ProposalGenerator:
             "max_words": max_words,
             "missing_h2": missing_h2,
             "invalid_external_citations": invalid_external_citations,
+            "missing_personalization_signals": missing_personalization_signals,
         }
 
     def _ensure_required_headings(self, chapter: Dict[str, Any], content: str) -> str:
@@ -1833,7 +2172,8 @@ class ProposalGenerator:
         prompt: str,
         client: str,
         target_words: int,
-        allowed_external_citations: Optional[Set[str]] = None
+        allowed_external_citations: Optional[Set[str]] = None,
+        personalization_pack: Optional[Dict[str, Any]] = None
     ) -> str:
         allowed = set(allowed_external_citations or set())
         # First draft pass for a chapter.
@@ -1855,9 +2195,13 @@ class ProposalGenerator:
             content,
             client,
             target_words=target_words,
-            allowed_external_citations=allowed
+            allowed_external_citations=allowed,
+            personalization_pack=personalization_pack
         )
-        hard_check_keys = {"missing_h2", "too_short", "too_long", "list_structure", "missing_visual", "citation_policy"}
+        hard_check_keys = {
+            "missing_h2", "too_short", "too_long",
+            "list_structure", "missing_visual", "citation_policy", "missing_personalization"
+        }
         hard_issues = [i for i in report["issues"] if i in hard_check_keys]
         if not hard_issues:
             return content
@@ -1868,12 +2212,18 @@ class ProposalGenerator:
             f"Invalid external citations found: {', '.join(report.get('invalid_external_citations', [])) or '-'}.\n"
             "Hapus semua sitasi eksternal yang tidak ada di daftar allowed.\n"
         )
+        personalization_note = (
+            f"Sinyal personalisasi yang belum muncul: "
+            f"{', '.join(report.get('missing_personalization_signals', [])) or '-'}.\n"
+            "Pastikan konten mencerminkan konteks klien, KPI tailoring, terminologi domain, dan anchor inisiatif.\n"
+        )
         retry_prompt = (
             f"Perbaiki draft {chapter['title']} agar lulus hard quality checks.\n"
             f"Issues: {', '.join(hard_issues)}\n"
             f"Word count: {report['word_count']} (target {report['target_words']}, range {report['min_words']}-{report['max_words']}).\n"
             f"Missing H2: {', '.join(report['missing_h2']) if report['missing_h2'] else '-'}\n"
             f"{citation_policy_note}"
+            f"{personalization_note}"
             "Pertahankan fakta dan konteks. Keluarkan versi final saja.\n\n"
             f"DRAFT:\n{content}"
         )
@@ -1897,7 +2247,8 @@ class ProposalGenerator:
             content,
             client,
             target_words=target_words,
-            allowed_external_citations=allowed
+            allowed_external_citations=allowed,
+            personalization_pack=personalization_pack
         )
         if final_report.get("missing_h2"):
             content = self._ensure_required_headings(chapter, content)
@@ -1906,7 +2257,8 @@ class ProposalGenerator:
                 content,
                 client,
                 target_words=target_words,
-                allowed_external_citations=allowed
+                allowed_external_citations=allowed,
+                personalization_pack=personalization_pack
             )
         if "citation_policy" in final_report.get("issues", []):
             content = self._clean_external_citations(content, allowed)
@@ -1915,7 +2267,8 @@ class ProposalGenerator:
                 content,
                 client,
                 target_words=target_words,
-                allowed_external_citations=allowed
+                allowed_external_citations=allowed,
+                personalization_pack=personalization_pack
             )
 
         if final_report["issues"]:
@@ -2058,6 +2411,15 @@ class ProposalGenerator:
         firm_profile = self.firm_api.get_firm_profile()
         base_client = re.sub(r'\b(Cabang|Branch|Tbk)\b.*$|^(PT\.|CV\.)', '', client, flags=re.IGNORECASE).strip()
         research_bundle = self._get_research_bundle(base_client, regulations)
+        personalization_pack = self._build_personalization_pack(
+            client=client,
+            project=project,
+            project_goal=project_goal,
+            timeline=timeline,
+            notes=notes,
+            regulations=regulations,
+            research_bundle=research_bundle
+        )
         allowed_external_citations = self._collect_allowed_external_citations(research_bundle)
         proposal_contract = self._build_proposal_contract(
             client=client,
@@ -2071,7 +2433,8 @@ class ProposalGenerator:
             regulations=regulations,
             selected_chapters=selected_chapters,
             research_bundle=research_bundle,
-            firm_data=firm_data
+            firm_data=firm_data,
+            personalization_pack=personalization_pack
         )
         logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client)
 
@@ -2079,7 +2442,7 @@ class ProposalGenerator:
             chapter['id']: self.io_pool.submit(
                 self._build_chapter_prompt,
                 chapter, client, project, budget, service_type, project_goal, project_type, timeline,
-                notes, regulations, firm_data, firm_profile, research_bundle, proposal_contract,
+                notes, regulations, firm_data, firm_profile, research_bundle, personalization_pack, proposal_contract,
                 chapter_targets.get(chapter['id'], self._target_words(chapter))
             )
             for chapter in selected_chapters
@@ -2099,7 +2462,8 @@ class ProposalGenerator:
                     prompt=ctx['prompt'],
                     client=client,
                     target_words=chapter_targets.get(chapter['id'], self._target_words(chapter)),
-                    allowed_external_citations=allowed_external_citations
+                    allowed_external_citations=allowed_external_citations,
+                    personalization_pack=personalization_pack
                 )
             except Exception as e:
                 logger.error(f"Generation Error for {chapter['title']}: {e}")
