@@ -24,6 +24,10 @@ PAGE_SAFETY_BUFFER = 1
 # Writer identity.
 WRITER_FIRM_NAME = "Inixindo Jogja"
 DEFAULT_COLOR = (0, 51, 102)
+WRITER_FIRM_OFFICE_ADDRESS = os.getenv("WRITER_FIRM_OFFICE_ADDRESS", "").strip()
+WRITER_FIRM_EMAIL = os.getenv("WRITER_FIRM_EMAIL", "").strip()
+WRITER_FIRM_PHONE = os.getenv("WRITER_FIRM_PHONE", "").strip()
+WRITER_FIRM_WEBSITE = os.getenv("WRITER_FIRM_WEBSITE", "").strip()
 WRITER_FIRM_CONTACT_INFO = os.getenv("WRITER_FIRM_CONTACT_INFO", "").strip()
 WRITER_FIRM_PORTFOLIO = os.getenv("WRITER_FIRM_PORTFOLIO", "").strip()
 
@@ -55,6 +59,10 @@ SMART_SUGGESTIONS = {
 
 # Fallback firm data used in demo mode.
 MOCK_FIRM_PROFILE = {
+    "office_address": WRITER_FIRM_OFFICE_ADDRESS,
+    "email": WRITER_FIRM_EMAIL,
+    "phone": WRITER_FIRM_PHONE,
+    "website": WRITER_FIRM_WEBSITE,
     "contact_info": WRITER_FIRM_CONTACT_INFO,
     "portfolio_highlights": WRITER_FIRM_PORTFOLIO
 }

@@ -40,6 +40,7 @@ from config import (
     WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE,
     PERSONAS, PROPOSAL_SYSTEM_PROMPT, DATA_MAPPING,
     DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, MOCK_FIRM_STANDARDS, MOCK_FIRM_PROFILE,
+    WRITER_FIRM_OFFICE_ADDRESS, WRITER_FIRM_EMAIL, WRITER_FIRM_PHONE, WRITER_FIRM_WEBSITE,
     MAX_PROPOSAL_PAGES, ESTIMATED_WORDS_PER_PAGE, RESERVED_NON_CONTENT_PAGES, PAGE_SAFETY_BUFFER,
 )
 
@@ -65,20 +66,14 @@ class FirmAPIClient:
             logger.error(f"Internal API Error: {e}")
             return {"methodology": "TBD", "team": "TBD", "commercial": "TBD"}
 
-    @staticmethod
-    def _default_firm_profile() -> Dict[str, str]:
-        contact_info = (MOCK_FIRM_PROFILE.get("contact_info") or "").strip()
-        portfolio = (MOCK_FIRM_PROFILE.get("portfolio_highlights") or "").strip()
-
-        if not contact_info:
-            contact_info = f"{WRITER_FIRM_NAME}\nKontak resmi akan disampaikan pada sesi kickoff."
-        if not portfolio:
-            portfolio = "Kapabilitas layanan menyesuaikan kebutuhan proyek klien."
-
-        return {
-            "contact_info": contact_info,
-            "portfolio_highlights": portfolio,
-        }
+    @classmethod
+    def _default_firm_profile(cls) -> Dict[str, str]:
+        base_profile = dict(MOCK_FIRM_PROFILE)
+        base_profile["office_address"] = base_profile.get("office_address") or WRITER_FIRM_OFFICE_ADDRESS
+        base_profile["email"] = base_profile.get("email") or WRITER_FIRM_EMAIL
+        base_profile["phone"] = base_profile.get("phone") or WRITER_FIRM_PHONE
+        base_profile["website"] = base_profile.get("website") or WRITER_FIRM_WEBSITE
+        return cls._normalize_firm_profile(base_profile)
 
     def get_firm_profile(self) -> Dict[str, str]:
         if self.demo_mode:
@@ -86,7 +81,7 @@ class FirmAPIClient:
         try:
             res = requests.get(f"{self.base_url}/firm-profile", headers=self.headers, timeout=5)
             res.raise_for_status()
-            return res.json()
+            return self._normalize_firm_profile(res.json())
         except requests.RequestException as e:
             logger.error(f"Internal API Error: {e}")
             return self._build_profile_from_osint()
@@ -95,6 +90,138 @@ class FirmAPIClient:
     def _extract_first(pattern: str, text: str) -> str:
         match = re.search(pattern, text or "", flags=re.IGNORECASE)
         return match.group(0).strip() if match else ""
+
+    @staticmethod
+    def _clean_contact_value(value: str) -> str:
+        cleaned = re.sub(r"\s+", " ", (value or "").replace("\xa0", " ")).strip()
+        return cleaned.strip(" ,;|-")
+
+    @classmethod
+    def _looks_like_address(cls, value: str) -> bool:
+        cleaned = cls._clean_contact_value(value)
+        lowered = cleaned.lower()
+        if len(cleaned) < 14:
+            return False
+        if "@" in cleaned or re.search(r"https?://|www\.", lowered):
+            return False
+        address_markers = (
+            "jl.", "jalan", "alamat", "gedung", "tower", "ruko", "komplek", "kompleks",
+            "kawasan", "suite", "lantai", "yogyakarta", "sleman", "bantul", "jakarta",
+            "bandung", "surabaya", "indonesia"
+        )
+        return any(marker in lowered for marker in address_markers)
+
+    @classmethod
+    def _extract_address_candidates(cls, text: str) -> List[str]:
+        if not text:
+            return []
+        candidates: List[str] = []
+        patterns = [
+            r"(?:alamat|address)\s*[:\-]?\s*([^|\n]{12,180})",
+            r"((?:jl\.|jalan)\s+[^|\n]{12,180})",
+        ]
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                candidate = match.group(1) if match.lastindex else match.group(0)
+                candidate = re.split(r"(?:\s+[|]\s+| email\s*:| telp\s*:| phone\s*:| website\s*:)", candidate, maxsplit=1, flags=re.IGNORECASE)[0]
+                candidate = cls._clean_contact_value(candidate)
+                if cls._looks_like_address(candidate):
+                    candidates.append(candidate)
+
+        unique_candidates: List[str] = []
+        seen = set()
+        for candidate in candidates:
+            key = candidate.lower()
+            if key in seen:
+                continue
+            unique_candidates.append(candidate)
+            seen.add(key)
+        return unique_candidates
+
+    @classmethod
+    def _extract_contact_fields(cls, text: str) -> Dict[str, str]:
+        office_candidates = cls._extract_address_candidates(text)
+        website = cls._extract_first(r"(?:https?://|www\.)[A-Za-z0-9./_%#?=&-]+\.[A-Za-z]{2,}", text)
+        return {
+            "office_address": office_candidates[0] if office_candidates else "",
+            "email": cls._extract_first(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text),
+            "phone": cls._extract_first(r"(?:\+62|62|0)\d[\d\-\s()]{7,}\d", text),
+            "website": website.rstrip(".,;)"),
+        }
+
+    @classmethod
+    def build_contact_lines(cls, firm_profile: Optional[Dict[str, Any]]) -> List[str]:
+        profile = firm_profile or {}
+        lines = []
+        office_address = cls._clean_contact_value(str(profile.get("office_address") or ""))
+        email = cls._clean_contact_value(str(profile.get("email") or ""))
+        phone = cls._clean_contact_value(str(profile.get("phone") or ""))
+        website = cls._clean_contact_value(str(profile.get("website") or ""))
+
+        if office_address:
+            lines.append(f"Alamat kantor: {office_address}")
+        if email:
+            lines.append(f"Email: {email}")
+        if phone:
+            lines.append(f"Telp: {phone}")
+        if website:
+            if not re.match(r"^https?://", website, flags=re.IGNORECASE):
+                website = f"https://{website.lstrip('/')}"
+            lines.append(f"Website: {website}")
+        return lines
+
+    @classmethod
+    def _normalize_firm_profile(cls, raw_profile: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        source = dict(raw_profile or {})
+        raw_contact = str(source.get("contact_info") or "").strip()
+        parsed = cls._extract_contact_fields(raw_contact)
+
+        office_address = cls._clean_contact_value(str(
+            source.get("office_address")
+            or source.get("address")
+            or source.get("office_location")
+            or source.get("location")
+            or parsed.get("office_address")
+            or ""
+        ))
+        email = cls._clean_contact_value(str(
+            source.get("email")
+            or source.get("official_email")
+            or parsed.get("email")
+            or ""
+        ))
+        phone = cls._clean_contact_value(str(
+            source.get("phone")
+            or source.get("telephone")
+            or source.get("telp")
+            or source.get("mobile")
+            or parsed.get("phone")
+            or ""
+        ))
+        website = cls._clean_contact_value(str(
+            source.get("website")
+            or source.get("url")
+            or parsed.get("website")
+            or ""
+        ))
+        portfolio = cls._clean_contact_value(str(source.get("portfolio_highlights") or ""))
+        contact_lines = cls.build_contact_lines(
+            {
+                "office_address": office_address,
+                "email": email,
+                "phone": phone,
+                "website": website,
+            }
+        )
+
+        return {
+            "office_address": office_address,
+            "email": email,
+            "phone": phone,
+            "website": website,
+            "contact_info": "\n".join(contact_lines),
+            "portfolio_highlights": portfolio or "Kapabilitas layanan menyesuaikan kebutuhan proyek klien.",
+        }
 
     def _build_profile_from_osint(self) -> Dict[str, str]:
         current_year = datetime.now().year
@@ -118,25 +245,53 @@ class FirmAPIClient:
                 max_age_years=6,
                 strict_entity=True
             )
-        merged = " ".join(
-            [str(item.get("title", "")) + " " + str(item.get("snippet", "")) for item in hits]
+        address_query = f'"{WRITER_FIRM_NAME}" alamat kantor Yogyakarta OR "Jl." OR "Jalan"'
+        address_hits = Researcher.search(address_query, limit=8, recency_bucket="year")
+        address_hits = Researcher._filter_recent_entity_results(
+            address_hits,
+            entity_name=WRITER_FIRM_NAME,
+            max_age_years=6,
+            strict_entity=True
         )
 
-        email = self._extract_first(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", merged)
-        phone = self._extract_first(r"(?:\+62|62|0)\d[\d\-\s()]{7,}\d", merged)
-        contact_parts = [WRITER_FIRM_NAME]
-        if email:
-            contact_parts.append(f"Email: {email}")
-        if phone:
-            contact_parts.append(f"Telp: {phone}")
+        merged_hits = hits + [item for item in address_hits if item not in hits]
+        merged_text = " ".join(
+            [
+                " ".join(
+                    [
+                        str(item.get("title", "")),
+                        str(item.get("snippet", "")),
+                        str(item.get("link", "")),
+                    ]
+                )
+                for item in merged_hits
+            ]
+        )
+        parsed = self._extract_contact_fields(merged_text)
 
-        if len(contact_parts) == 1:
-            contact_parts.append("Kontak resmi dapat diberikan saat sesi kickoff.")
+        if not parsed.get("office_address"):
+            for item in merged_hits:
+                item_text = " ".join(
+                    [
+                        str(item.get("title", "")),
+                        str(item.get("snippet", "")),
+                        str(item.get("link", "")),
+                    ]
+                )
+                parsed_item = self._extract_contact_fields(item_text)
+                if parsed_item.get("office_address"):
+                    parsed["office_address"] = parsed_item["office_address"]
+                    break
 
-        return {
-            "contact_info": "\n".join(contact_parts),
-            "portfolio_highlights": "Kapabilitas layanan menyesuaikan kebutuhan proyek klien.",
-        }
+        return self._normalize_firm_profile(
+            {
+                "office_address": parsed.get("office_address", ""),
+                "email": parsed.get("email", ""),
+                "phone": parsed.get("phone", ""),
+                "website": parsed.get("website", ""),
+                "portfolio_highlights": "Kapabilitas layanan menyesuaikan kebutuhan proyek klien.",
+            }
+        )
 
 
 # Knowledge base and vector index.
@@ -1611,6 +1766,42 @@ class ProposalGenerator:
         cleaned = re.sub(r"\s+([,.;:])", r"\1", cleaned)
         return cleaned
 
+    @staticmethod
+    def _verified_firm_contact_block(firm_profile: Optional[Dict[str, Any]]) -> str:
+        contact_lines = FirmAPIClient.build_contact_lines(firm_profile)
+        if not contact_lines:
+            return ""
+        return "\n".join([f"- {line}" for line in contact_lines])
+
+    @classmethod
+    def _inject_verified_firm_contact(
+        cls,
+        content: str,
+        firm_profile: Optional[Dict[str, Any]]
+    ) -> str:
+        block = cls._verified_firm_contact_block(firm_profile)
+        if not block:
+            return content
+
+        existing_lines = FirmAPIClient.build_contact_lines(firm_profile)
+        if all(line in (content or "") for line in existing_lines):
+            return content
+
+        contact_section = f"### Kontak Resmi Terverifikasi\n{block}"
+        heading_pattern = r"(?im)^\s*##\s*Informasi Kontak dan Langkah Lanjutan\s*$"
+        match = re.search(heading_pattern, content or "")
+        if match:
+            insert_at = match.end()
+            return (content or "")[:insert_at] + "\n\n" + contact_section + (content or "")[insert_at:]
+
+        trimmed = (content or "").rstrip()
+        if trimmed:
+            trimmed += "\n\n"
+        return (
+            f"{trimmed}## Informasi Kontak dan Langkah Lanjutan\n\n"
+            f"{contact_section}"
+        )
+
     def _resolve_chapters(self, chapter_id: Optional[str]) -> List[Dict[str, Any]]:
         normalized_id = (chapter_id or "").strip()
         if not normalized_id or normalized_id.lower() in {"all", "semua"}:
@@ -1893,14 +2084,24 @@ class ProposalGenerator:
             elif chapter['id'] == 'c_10':
                 extra += f" [FOCUS] Wajib menyajikan model pembiayaan dengan angka estimasi: {budget}. Sertakan termin pembayaran, model kerja, asumsi, eksklusi, dan terms komersial: {firm_data['commercial']}. Gunakan tabel markdown."
             elif chapter['id'] == 'c_closing':
-                contact_info = firm_profile.get('contact_info', WRITER_FIRM_NAME)
+                verified_contact_block = self._verified_firm_contact_block(firm_profile)
                 extra += (
                     f" [FOCUS] Ini adalah bab penutup proposal. Jangan pernah menulis label 'BAB XI' atau variasinya. "
                     f"Tunjukkan apresiasi profesional kepada klien '{client}', tegaskan komitmen kolaborasi jangka panjang, "
                     f"dan berikan langkah tindak lanjut yang jelas dan actionable. "
-                    f"Wajib cantumkan informasi kontak resmi berikut secara lengkap dan akurat: {contact_info}. "
                     f"Gunakan tone hangat, profesional, dan meyakinkan."
                 )
+                if verified_contact_block:
+                    extra += (
+                        " [CONTACT_POLICY] Cantumkan hanya detail kontak firma yang sudah terverifikasi berikut ini "
+                        "secara persis, tanpa menambah atau memodifikasi data:\n"
+                        f"{verified_contact_block}"
+                    )
+                else:
+                    extra += (
+                        " [CONTACT_POLICY] Selain nama firma, tidak ada detail kontak writer firm yang terverifikasi. "
+                        "Jangan menulis alamat kantor, email, telepon, atau website yang tidak tersedia."
+                    )
 
             if allowed_external_citations:
                 allowed_list = ", ".join(sorted(allowed_external_citations))
@@ -2510,6 +2711,12 @@ class ProposalGenerator:
                 allowed_external_citations=allowed_external_citations
             )
 
+        if chapter_outputs.get("c_closing"):
+            chapter_outputs["c_closing"] = self._inject_verified_firm_contact(
+                chapter_outputs["c_closing"],
+                firm_profile
+            )
+
         try:
             logo_stream, theme_color = logo_future.result(timeout=8)
         except Exception:
@@ -2561,8 +2768,11 @@ class ProposalGenerator:
         )
         meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        firm_info = firm_profile.get('contact_info', WRITER_FIRM_NAME)
-        contact = doc.add_paragraph(f"Disusun oleh {WRITER_FIRM_NAME}\n{firm_info}")
+        firm_contact_lines = FirmAPIClient.build_contact_lines(firm_profile)
+        contact_text = f"Disusun oleh {WRITER_FIRM_NAME}"
+        if firm_contact_lines:
+            contact_text += "\n" + "\n".join(firm_contact_lines)
+        contact = doc.add_paragraph(contact_text)
         contact.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         doc.add_page_break()
