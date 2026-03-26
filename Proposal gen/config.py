@@ -3,6 +3,8 @@ import os
 
 # Backend mode and internal API settings.
 DEMO_MODE = os.getenv("DEMO_MODE", "true").strip().lower() in {"1", "true", "yes", "on"}
+_raw_data_mode = os.getenv("DATA_ACQUISITION_MODE", "demo" if DEMO_MODE else "staged").strip().lower()
+DATA_ACQUISITION_MODE = "demo" if _raw_data_mode in {"demo", "legacy", "current"} else "staged"
 FIRM_API_URL = "https://api.perusahaan-anda.com/v1"
 API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "isi_token_disini_nanti")
 
@@ -96,6 +98,17 @@ FIRM_PROFILE_FIELD_ALIASES = {
     "portfolio_highlights": [
         "portfolio highlights", "portfolio_highlights", "portfolio", "highlight portfolio",
         "highlight_portfolio", "capabilities", "company profile", "company_profile",
+    ],
+}
+
+CLIENT_RELATIONSHIP_FIELD_ALIASES = {
+    "summary": [
+        "summary", "relationship summary", "relationship_summary", "description",
+        "notes", "detail", "history", "engagement history", "engagement_history",
+    ],
+    "status": [
+        "status", "relationship status", "relationship_status", "mode", "client_status",
+        "engagement_status", "has_relationship",
     ],
 }
 

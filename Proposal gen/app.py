@@ -21,7 +21,11 @@ def home():
 
 @app.route('/api/config')
 def get_base_config():
-    return jsonify({"suggestions": SMART_SUGGESTIONS})
+    return jsonify({
+        "suggestions": SMART_SUGGESTIONS,
+        "data_acquisition_mode": proposal_generator.firm_api.data_acquisition_mode,
+        "demo_mode": proposal_generator.firm_api.demo_mode,
+    })
 
 @app.route('/api/companies')
 def get_companies():
@@ -50,17 +54,24 @@ def suggest_budget():
         return jsonify({"error": f"Lengkapi field berikut sebelum analisis finansial: {', '.join(missing)}"}), 400
 
     client_name = data.get('nama_perusahaan', '')
+    project_type = data.get('jenis_proyek', '')
+    acquisition_mode = proposal_generator.firm_api.data_acquisition_mode
+    commercial_context = ""
+    if not proposal_generator.firm_api.uses_demo_logic():
+        commercial_context = proposal_generator.firm_api.get_project_standards(project_type).get('commercial', '')
 
     analyzer = FinancialAnalyzer(proposal_generator.ollama)
     result = analyzer.suggest_budget(
         client_name=client_name,
         timeline=data.get('estimasi_waktu', ''),
-        project_type=data.get('jenis_proyek', ''),
+        project_type=project_type,
         service_type=data.get('jenis_proposal', ''),
         project_goal=data.get('klasifikasi_kebutuhan', ''),
         objective=data.get('konteks_organisasi', ''),
         notes=data.get('permasalahan', ''),
         frameworks=data.get('potensi_framework', ''),
+        commercial_context=commercial_context,
+        pricing_mode=acquisition_mode,
     )
     return jsonify(result)
 

@@ -40,7 +40,9 @@ from config import (
     WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE,
     PERSONAS, PROPOSAL_SYSTEM_PROMPT,
     PROJECT_DATA_FIELD_ALIASES, PROJECT_STANDARD_FIELD_ALIASES, FIRM_PROFILE_FIELD_ALIASES,
+    CLIENT_RELATIONSHIP_FIELD_ALIASES,
     DEMO_MODE, FIRM_API_URL, API_AUTH_TOKEN, MOCK_FIRM_STANDARDS, MOCK_FIRM_PROFILE,
+    DATA_ACQUISITION_MODE,
     WRITER_FIRM_OFFICE_ADDRESS, WRITER_FIRM_EMAIL, WRITER_FIRM_PHONE, WRITER_FIRM_WEBSITE,
     MAX_PROPOSAL_PAGES, ESTIMATED_WORDS_PER_PAGE, RESERVED_NON_CONTENT_PAGES, PAGE_SAFETY_BUFFER,
 )
@@ -155,8 +157,12 @@ class SchemaMapper:
 class FirmAPIClient:
     def __init__(self) -> None:
         self.demo_mode = DEMO_MODE
+        self.data_acquisition_mode = DATA_ACQUISITION_MODE
         self.base_url = FIRM_API_URL
         self.headers = {"Authorization": f"Bearer {API_AUTH_TOKEN}"}
+
+    def uses_demo_logic(self) -> bool:
+        return self.demo_mode or self.data_acquisition_mode == "demo"
 
     @staticmethod
     def _normalize_project_standards(raw_payload: Optional[Dict[str, Any]]) -> Dict[str, str]:
@@ -168,6 +174,37 @@ class FirmAPIClient:
             "methodology": methodology,
             "team": team,
             "commercial": commercial,
+        }
+
+    @staticmethod
+    def _normalize_relationship_mode(value: Any) -> str:
+        normalized = SchemaMapper.normalize_key(value)
+        existing_markers = {
+            "existing", "active", "returning", "repeat", "renewal", "incumbent",
+            "prior", "previous", "historical", "yes", "true", "1"
+        }
+        return "existing" if normalized in existing_markers else "new"
+
+    @classmethod
+    def _normalize_client_relationship(cls, raw_payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        normalized = SchemaMapper.normalize_record(raw_payload, CLIENT_RELATIONSHIP_FIELD_ALIASES)
+        status_value = normalized.get("status", "")
+        summary = str(normalized.get("summary") or "").strip()
+        mode = cls._normalize_relationship_mode(status_value)
+        return {
+            "summary": summary,
+            "mode": mode,
+            "source": "internal_api",
+            "verified": bool(summary or str(status_value).strip()),
+        }
+
+    @staticmethod
+    def _empty_relationship_context(source: str = "internal_api") -> Dict[str, Any]:
+        return {
+            "summary": "",
+            "mode": "new",
+            "source": source,
+            "verified": False,
         }
 
     def get_project_standards(self, project_type: str) -> Dict[str, str]:
@@ -201,7 +238,33 @@ class FirmAPIClient:
             return self._normalize_firm_profile(res.json())
         except requests.RequestException as e:
             logger.error(f"Internal API Error: {e}")
-            return self._build_profile_from_osint()
+            if self.uses_demo_logic():
+                return self._build_profile_from_osint()
+            return self._default_firm_profile()
+
+    def get_client_relationship(self, client_name: str) -> Dict[str, Any]:
+        if self.uses_demo_logic():
+            summary = Researcher.get_client_writer_collaboration(client_name, WRITER_FIRM_NAME)
+            has_evidence = ProposalGenerator._has_external_evidence(summary)
+            return {
+                "summary": summary,
+                "mode": "existing" if has_evidence else "new",
+                "source": "osint",
+                "verified": has_evidence,
+            }
+
+        try:
+            res = requests.get(
+                f"{self.base_url}/client-relationship",
+                params={"client_name": client_name},
+                headers=self.headers,
+                timeout=5
+            )
+            res.raise_for_status()
+            return self._normalize_client_relationship(res.json())
+        except requests.RequestException as e:
+            logger.error(f"Internal API Error: {e}")
+            return self._empty_relationship_context()
 
     @staticmethod
     def _extract_first(pattern: str, text: str) -> str:
@@ -1120,7 +1183,8 @@ class FinancialAnalyzer:
     def _merge_with_context_adjustment(
         model_payload: Dict[str, Any],
         context_payload: Dict[str, Any],
-        context_sensitive: bool
+        context_sensitive: bool,
+        prefer_context_options: bool = True
     ) -> Dict[str, Any]:
         if not context_sensitive:
             return model_payload
@@ -1131,6 +1195,10 @@ class FinancialAnalyzer:
             )
         else:
             analysis = context_payload.get("analysis", "")
+        if not prefer_context_options:
+            merged = dict(model_payload)
+            merged["analysis"] = analysis
+            return merged
         return {
             "analysis": analysis,
             "options": context_payload.get("options", []),
@@ -1146,6 +1214,8 @@ class FinancialAnalyzer:
         objective: str = "",
         notes: str = "",
         frameworks: str = "",
+        commercial_context: str = "",
+        pricing_mode: str = "demo",
     ) -> Dict[str, Any]:
         year = datetime.now().year
         finance_results = Researcher.search(
@@ -1186,6 +1256,14 @@ class FinancialAnalyzer:
             notes=notes,
             frameworks=frameworks,
         )
+        staged_pricing = pricing_mode == "staged"
+        commercial_note = (
+            f"Baseline commercial rules internal:\n{commercial_context}\n"
+            "Jadikan baseline internal ini sebagai acuan utama penentuan harga. "
+            "Data OSINT hanya dipakai sebagai sinyal pendukung.\n"
+            if staged_pricing and commercial_context.strip()
+            else ""
+        )
 
         prompt = f"""
         Menganalisa kekuatan finansial perusahaan: {client_name}.
@@ -1203,6 +1281,7 @@ class FinancialAnalyzer:
         - Objective: {objective or '-'}
         - Pain Points: {notes or '-'}
         - Framework: {frameworks or '-'}
+        {commercial_note}
 
         Berdasarkan data di atas, estimasikan kapasitas finansial mereka dan berikan 3 opsi estimasi budget proyek TI/Konsultasi.
         FORMAT WAJIB JSON murni tanpa markdown, tanpa teks tambahan:
@@ -1233,7 +1312,12 @@ class FinancialAnalyzer:
                 context_sensitive = any(
                     [timeline.strip(), project_type.strip(), service_type.strip(), project_goal.strip(), objective.strip(), notes.strip(), frameworks.strip()]
                 )
-                return self._merge_with_context_adjustment(parsed, dynamic_estimate, context_sensitive=context_sensitive)
+                return self._merge_with_context_adjustment(
+                    parsed,
+                    dynamic_estimate,
+                    context_sensitive=context_sensitive,
+                    prefer_context_options=not staged_pricing
+                )
             return dynamic_estimate
         except Exception as e:
             logger.error(f"Financial Analyzer Error: {e}")
@@ -1812,20 +1896,33 @@ class ProposalGenerator:
         timeline: str,
         notes: str,
         regulations: str,
-        research_bundle: Dict[str, str]
+        research_bundle: Dict[str, str],
+        relationship_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         industry = cls._infer_industry(client, project, notes, regulations)
         track_record = research_bundle.get("track_record", "")
         collaboration = research_bundle.get("collaboration", "")
         news = research_bundle.get("news", "")
 
-        relationship_has_evidence = cls._has_external_evidence(collaboration)
-        relationship_mode = "existing" if relationship_has_evidence else "new"
-        relationship_guidance = (
-            "Gunakan narasi continuity partnership berbasis bukti publik kolaborasi yang ada."
-            if relationship_mode == "existing"
-            else "Gunakan narasi kemitraan baru. Jangan klaim pernah bekerja sama tanpa bukti publik."
-        )
+        relationship_context = relationship_context or {}
+        relationship_source = str(relationship_context.get("source") or "").strip().lower()
+        relationship_mode = str(relationship_context.get("mode") or "").strip().lower()
+        if relationship_mode not in {"existing", "new"}:
+            relationship_has_evidence = cls._has_external_evidence(collaboration)
+            relationship_mode = "existing" if relationship_has_evidence else "new"
+            relationship_source = "osint" if relationship_has_evidence else relationship_source
+        if relationship_source == "internal_api":
+            relationship_guidance = (
+                "Gunakan narasi continuity partnership hanya jika data internal memang menunjukkan hubungan kerja sebelumnya."
+                if relationship_mode == "existing"
+                else "Gunakan narasi kemitraan baru. Jangan klaim hubungan sebelumnya tanpa data internal."
+            )
+        else:
+            relationship_guidance = (
+                "Gunakan narasi continuity partnership berbasis bukti publik kolaborasi yang ada."
+                if relationship_mode == "existing"
+                else "Gunakan narasi kemitraan baru. Jangan klaim pernah bekerja sama tanpa bukti publik."
+            )
 
         news_facts = cls._extract_osint_facts(news, max_items=2)
         track_facts = cls._extract_osint_facts(track_record, max_items=2)
@@ -1858,6 +1955,7 @@ class ProposalGenerator:
         return {
             "industry": industry,
             "relationship_mode": relationship_mode,
+            "relationship_source": relationship_source or "osint",
             "relationship_guidance": relationship_guidance,
             "kpi_blueprint": kpi_blueprint,
             "kpi_keywords": cls._extract_metric_keywords(kpi_blueprint),
@@ -1999,8 +2097,8 @@ class ProposalGenerator:
             for chapter in chapters
         ]
 
-    def _get_research_bundle(self, base_client: str, regulations: str) -> Dict[str, str]:
-        key = self._cache_key("research", base_client, regulations)
+    def _get_research_bundle(self, base_client: str, regulations: str, include_collaboration: bool = True) -> Dict[str, str]:
+        key = self._cache_key("research", base_client, regulations, str(include_collaboration))
         cached = self._research_cache.get(key)
         if cached:
             return cached
@@ -2009,15 +2107,18 @@ class ProposalGenerator:
             "profile": self.io_pool.submit(Researcher.get_entity_profile, base_client),
             "news": self.io_pool.submit(Researcher.get_latest_client_news, base_client),
             "track_record": self.io_pool.submit(Researcher.get_client_track_record, base_client),
-            "collaboration": self.io_pool.submit(Researcher.get_client_writer_collaboration, base_client, WRITER_FIRM_NAME),
             "regulations": self.io_pool.submit(Researcher.get_regulatory_data, regulations)
         }
+        if include_collaboration:
+            futures["collaboration"] = self.io_pool.submit(
+                Researcher.get_client_writer_collaboration, base_client, WRITER_FIRM_NAME
+            )
         try:
             bundle = {
                 "profile": futures["profile"].result(timeout=8),
                 "news": futures["news"].result(timeout=8),
                 "track_record": futures["track_record"].result(timeout=8),
-                "collaboration": futures["collaboration"].result(timeout=8),
+                "collaboration": futures["collaboration"].result(timeout=8) if include_collaboration else "",
                 "regulations": futures["regulations"].result(timeout=8),
             }
         except Exception:
@@ -2025,7 +2126,10 @@ class ProposalGenerator:
                 "profile": f"Data profil terbaru {base_client} terbatas (sumber daring, n.d.).",
                 "news": f"Data berita terbaru {base_client} terbatas (sumber daring, n.d.).",
                 "track_record": f"Data track record {base_client} terbatas (sumber daring, n.d.).",
-                "collaboration": f"Data histori kolaborasi {WRITER_FIRM_NAME} dengan {base_client} terbatas (sumber daring, n.d.).",
+                "collaboration": (
+                    f"Data histori kolaborasi {WRITER_FIRM_NAME} dengan {base_client} terbatas (sumber daring, n.d.)."
+                    if include_collaboration else ""
+                ),
                 "regulations": "Data regulasi terbatas (sumber daring, n.d.)."
             }
 
@@ -2170,6 +2274,7 @@ class ProposalGenerator:
             kpi_blueprint = personalization_pack.get("kpi_blueprint", []) or []
             relationship_guidance = personalization_pack.get("relationship_guidance", "")
             relationship_mode = personalization_pack.get("relationship_mode", "new")
+            relationship_source = personalization_pack.get("relationship_source", "osint")
             profile_summary = personalization_pack.get("profile_summary", "")
             initiative_facts = personalization_pack.get("initiative_facts", []) or []
             if initiative_facts:
@@ -2200,8 +2305,12 @@ class ProposalGenerator:
             )
             extra += f" [OSINT_TRACK_RECORD] {track_record_data}"
             extra += (
-                f" [OSINT_KOLABORASI] {collaboration_data} "
-                "Jangan pernah mengklaim pernah bekerja sama sebelumnya jika tidak ada bukti publik yang jelas."
+                f" [{'INTERNAL_RELATIONSHIP' if relationship_source == 'internal_api' else 'OSINT_KOLABORASI'}] {collaboration_data} "
+                + (
+                    "Jangan pernah mengklaim pernah bekerja sama sebelumnya jika tidak ada data internal yang jelas."
+                    if relationship_source == "internal_api"
+                    else "Jangan pernah mengklaim pernah bekerja sama sebelumnya jika tidak ada bukti publik yang jelas."
+                )
             )
             if chapter['id'] == 'c_1':
                 extra += f" [FOCUS] Fokus pada latar belakang organisasi '{client}' dan tujuan proyek: '{project}'. Soroti driver bisnis utama: [{project_goal}]."
@@ -2748,10 +2857,19 @@ class ProposalGenerator:
         chapter_targets = self._chapter_word_targets(selected_chapters)
         content_word_budget = self._content_word_budget()
 
+        use_demo_logic = self.firm_api.uses_demo_logic()
         firm_data = self.firm_api.get_project_standards(project_type)
         firm_profile = self.firm_api.get_firm_profile()
         base_client = re.sub(r'\b(Cabang|Branch|Tbk)\b.*$|^(PT\.|CV\.)', '', client, flags=re.IGNORECASE).strip()
-        research_bundle = self._get_research_bundle(base_client, regulations)
+        relationship_context = self.firm_api.get_client_relationship(base_client)
+        research_bundle = self._get_research_bundle(
+            base_client,
+            regulations,
+            include_collaboration=use_demo_logic
+        )
+        if not use_demo_logic:
+            research_bundle = dict(research_bundle)
+            research_bundle["collaboration"] = relationship_context.get("summary", "")
         personalization_pack = self._build_personalization_pack(
             client=client,
             project=project,
@@ -2759,7 +2877,8 @@ class ProposalGenerator:
             timeline=timeline,
             notes=notes,
             regulations=regulations,
-            research_bundle=research_bundle
+            research_bundle=research_bundle,
+            relationship_context=relationship_context
         )
         allowed_external_citations = self._collect_allowed_external_citations(research_bundle)
         proposal_contract = self._build_proposal_contract(
