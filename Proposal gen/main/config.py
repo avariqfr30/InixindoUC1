@@ -1,5 +1,9 @@
 """Runtime and prompt configuration for the proposal generator."""
 import os
+from pathlib import Path
+
+PACKAGE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = PACKAGE_DIR.parent
 
 # Backend mode and internal API settings.
 DEMO_MODE = os.getenv("DEMO_MODE", "true").strip().lower() in {"1", "true", "yes", "on"}
@@ -15,7 +19,9 @@ OLLAMA_HOST = "http://127.0.0.1:11434"
 # Model and storage config.
 LLM_MODEL = "gpt-oss:120b-cloud"
 EMBED_MODEL = "bge-m3:latest"
-DB_URI = "sqlite:///projects.db"
+PROJECT_DB_PATH = PROJECT_ROOT / "projects.db"
+PROJECT_CSV_PATH = PROJECT_ROOT / "db.csv"
+DB_URI = f"sqlite:///{PROJECT_DB_PATH}"
 
 # Low-level shared testing runtime.
 GENERATION_PROFILE = os.getenv("GENERATION_PROFILE", "balanced").strip().lower()

@@ -1,7 +1,7 @@
 """Proposal support logic: research assembly, structured chapters, quality checks, and acceptance."""
 
-from proposal_shared import *
-from runtime_components import (
+from .proposal_shared import *
+from .runtime_components import (
     ChartEngine,
     DocumentBuilder,
     FinancialAnalyzer,

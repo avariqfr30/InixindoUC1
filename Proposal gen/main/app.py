@@ -8,6 +8,7 @@ import re
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from flask import Flask, jsonify, render_template, request, send_file
@@ -18,7 +19,7 @@ try:
 except Exception:  # pragma: no cover - optional local server dependency
     waitress_serve = None
 
-from config import (
+from .config import (
     APP_HOST,
     APP_PORT,
     DB_URI,
@@ -29,12 +30,14 @@ from config import (
     MAX_GENERATION_BACKLOG,
     SMART_SUGGESTIONS,
 )
-from core import FinancialAnalyzer, KnowledgeBase, ProposalGenerator
+from .core import FinancialAnalyzer, KnowledgeBase, ProposalGenerator
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
+
+app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
 CORS(app)
 
 knowledge_base = KnowledgeBase(DB_URI)

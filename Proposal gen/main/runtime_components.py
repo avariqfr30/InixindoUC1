@@ -1,6 +1,6 @@
 """Runtime components for data access, research, pricing, and document rendering."""
 
-from proposal_shared import *
+from .proposal_shared import *
 
 
 class SchemaMapper:
@@ -462,9 +462,9 @@ class KnowledgeBase:
         try:
             self.df = self._normalize_projects_df(pd.read_sql("SELECT * FROM projects", self.engine))
         except Exception:
-            if not os.path.exists("db.csv"):
+            if not PROJECT_CSV_PATH.exists():
                 return False
-            raw_df = pd.read_csv("db.csv")
+            raw_df = pd.read_csv(PROJECT_CSV_PATH)
             normalized_df = self._normalize_projects_df(raw_df)
             normalized_df.to_sql("projects", self.engine, index=False, if_exists='replace')
             self.df = normalized_df

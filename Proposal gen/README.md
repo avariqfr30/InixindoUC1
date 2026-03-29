@@ -137,7 +137,7 @@ export SERPER_API_KEY=isi_api_key
 ### 4. Jalankan aplikasi
 
 ```bash
-python app.py
+python -m main.app
 ```
 
 Lalu buka:

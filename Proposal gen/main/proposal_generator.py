@@ -1,9 +1,9 @@
 """Primary proposal generator composed from focused backend mixins."""
 
-from proposal_shared import *
-from proposal_engine import ProposalEngineMixin
-from proposal_support import ProposalSupportMixin
-from runtime_components import FirmAPIClient, KnowledgeBase
+from .proposal_shared import *
+from .proposal_engine import ProposalEngineMixin
+from .proposal_support import ProposalSupportMixin
+from .runtime_components import FirmAPIClient, KnowledgeBase
 
 
 class ProposalGenerator(ProposalEngineMixin, ProposalSupportMixin):

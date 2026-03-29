@@ -1,6 +1,7 @@
 """Shared imports, config, and module-wide utilities for proposal generation."""
 
 import os
+from pathlib import Path
 import io
 import re
 import json
@@ -37,7 +38,7 @@ from docx.oxml.ns import qn
 from ollama import Client
 from chromadb.utils import embedding_functions
 
-from config import (
+from .config import (
     SERPER_API_KEY, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL,
     WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE,
     PERSONAS, PROPOSAL_SYSTEM_PROMPT,
