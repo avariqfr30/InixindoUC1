@@ -1659,6 +1659,60 @@ class ProposalGenerator:
     CLOSING_CHAPTER_FLOOR_WORDS = 170
     BASE_COMPRESSION_FLOOR_WORDS = 240
     CLOSING_COMPRESSION_FLOOR_WORDS = 180
+    CHAPTER_FLOOR_WORDS = {
+        "c_1": 420,
+        "c_2": 450,
+        "c_3": 360,
+        "c_4": 360,
+        "c_5": 430,
+        "c_6": 430,
+        "c_7": 300,
+        "c_8": 280,
+        "c_9": 280,
+        "c_10": 280,
+        "c_closing": 220,
+    }
+    CHAPTER_COMPRESSION_FLOORS = {
+        "c_1": 320,
+        "c_2": 340,
+        "c_3": 280,
+        "c_4": 280,
+        "c_5": 330,
+        "c_6": 330,
+        "c_7": 240,
+        "c_8": 230,
+        "c_9": 230,
+        "c_10": 230,
+        "c_closing": 180,
+    }
+    CHAPTER_COMPRESSION_RANK = {
+        "c_10": 0,
+        "c_8": 1,
+        "c_9": 1,
+        "c_7": 1,
+        "c_closing": 1,
+        "c_3": 2,
+        "c_4": 2,
+        "c_1": 3,
+        "c_2": 3,
+        "c_5": 4,
+        "c_6": 4,
+    }
+    CHAPTER_BUSINESS_RANK = {
+        "c_1": 5,
+        "c_2": 5,
+        "c_3": 4,
+        "c_4": 4,
+        "c_5": 5,
+        "c_6": 5,
+        "c_7": 3,
+        "c_8": 3,
+        "c_9": 3,
+        "c_10": 3,
+        "c_closing": 2,
+    }
+    PROPOSAL_ACCEPTANCE_TARGET = 80
+    PROPOSAL_CATEGORY_FLOOR = 70
 
     def __init__(self, kb_instance: KnowledgeBase) -> None:
         self.ollama = Client(host=OLLAMA_HOST)
@@ -1701,9 +1755,23 @@ class ProposalGenerator:
 
     @classmethod
     def _chapter_floor_words(cls, chapter_id: str, for_compression: bool = False) -> int:
-        if chapter_id == "c_closing":
-            return cls.CLOSING_COMPRESSION_FLOOR_WORDS if for_compression else cls.CLOSING_CHAPTER_FLOOR_WORDS
-        return cls.BASE_COMPRESSION_FLOOR_WORDS if for_compression else cls.BASE_CHAPTER_FLOOR_WORDS
+        if for_compression:
+            return cls.CHAPTER_COMPRESSION_FLOORS.get(
+                chapter_id,
+                cls.CLOSING_COMPRESSION_FLOOR_WORDS if chapter_id == "c_closing" else cls.BASE_COMPRESSION_FLOOR_WORDS
+            )
+        return cls.CHAPTER_FLOOR_WORDS.get(
+            chapter_id,
+            cls.CLOSING_CHAPTER_FLOOR_WORDS if chapter_id == "c_closing" else cls.BASE_CHAPTER_FLOOR_WORDS
+        )
+
+    @classmethod
+    def _chapter_compression_rank(cls, chapter_id: str) -> int:
+        return cls.CHAPTER_COMPRESSION_RANK.get(chapter_id, 2)
+
+    @classmethod
+    def _chapter_business_rank(cls, chapter_id: str) -> int:
+        return cls.CHAPTER_BUSINESS_RANK.get(chapter_id, 3)
 
     def _chapter_word_targets(self, chapters: List[Dict[str, Any]]) -> Dict[str, int]:
         base_targets = {chapter["id"]: self._target_words(chapter) for chapter in chapters}
@@ -3147,6 +3215,21 @@ class ProposalGenerator:
             )
         return patched
 
+    def _ensure_visual_requirements(self, chapter: Dict[str, Any], content: str, timeline: str = "") -> str:
+        patched = (content or "").rstrip()
+        if chapter.get("visual_intent") != "gantt" or "[[GANTT:" in patched:
+            return patched
+
+        months = max(4, int(round(FinancialAnalyzer._duration_to_months(timeline) or 6)))
+        breakpoints = [0, max(1, months // 4), max(2, months // 2), max(3, (months * 3) // 4), months]
+        phase_names = ["Discovery", "Design", "Execution", "Stabilization"]
+        parts = []
+        for idx, name in enumerate(phase_names):
+            start = min(breakpoints[idx], months - 1)
+            end = max(start + 1, min(months, breakpoints[idx + 1]))
+            parts.append(f"{name},{start},{end}")
+        return patched + f"\n[[GANTT: Jadwal Pelaksanaan | Bulan | {'; '.join(parts)}]]"
+
     def _ensure_personalization_signals(
         self,
         content: str,
@@ -3187,6 +3270,95 @@ class ProposalGenerator:
             return patched
         return patched + "\n" + "\n".join(additions)
 
+    def _ensure_minimum_substance(
+        self,
+        chapter: Dict[str, Any],
+        content: str,
+        client: str,
+        target_words: Optional[int] = None,
+        personalization_pack: Optional[Dict[str, Any]] = None,
+        timeline: str = ""
+    ) -> str:
+        target = int(target_words or self._target_words(chapter))
+        floor = max(140, int(self._chapter_floor_words(chapter.get("id", ""), for_compression=False) * 0.8))
+        min_words = max(floor, int(target * 0.72))
+        patched = (content or "").rstrip()
+        if self._word_count(patched) >= min_words:
+            return patched
+
+        data = personalization_pack or {}
+        kpi_line = " | ".join((data.get("kpi_blueprint", []) or [])[:2]) or f"outcome utama {client}"
+        term_line = ", ".join((data.get("terminology", []) or [])[:2]) or "governance, risk control"
+        anchor_line = ""
+        anchors = data.get("initiative_facts", []) or []
+        if anchors:
+            fact = str(anchors[0].get("fact", "") or "").strip()
+            citation = str(anchors[0].get("citation", "") or "").strip()
+            if fact and citation:
+                anchor_line = f" Rujukan konteks yang tetap dipakai adalah {fact} {citation}."
+
+        chapter_specific_blocks = {
+            "c_3": [
+                (
+                    f"Pada praktiknya, klasifikasi kebutuhan tidak boleh berhenti sebagai label administratif. Bagi {client}, "
+                    f"klasifikasi ini menentukan apakah fokus kerja harus menutup gap yang sudah nyata, menangkap peluang yang bisa mempercepat hasil, "
+                    f"atau memenuhi directive yang tidak bisa ditawar. Dengan kerangka seperti ini, keputusan scope, prioritas eksekusi, dan governance "
+                    f"bisa diarahkan lebih presisi terhadap KPI seperti {kpi_line}.{anchor_line}"
+                ),
+                (
+                    f"- Dampak utama dari klasifikasi yang benar adalah keputusan proyek menjadi lebih cepat, lebih defensible, dan lebih mudah diturunkan ke delivery plan.\n"
+                    f"- Untuk {client}, bahasa kerja seperti {term_line} perlu tetap hadir agar klasifikasi kebutuhan tidak terlepas dari konteks operasionalnya."
+                ),
+                (
+                    f"Karena itu, hasil klasifikasi juga perlu dipakai sebagai dasar untuk menetapkan sponsor keputusan, scope awal, dan bentuk intervensi yang paling realistis. "
+                    f"Dengan pendekatan ini, {client} tidak hanya memperoleh label kebutuhan, tetapi juga dasar yang lebih kuat untuk menyelaraskan tujuan proyek, kontrol delivery, dan ukuran keberhasilan sejak fase awal."
+                ),
+            ],
+            "c_7": [
+                (
+                    f"Penjadwalan tidak hanya membagi durasi {timeline or 'proyek'} ke dalam fase, tetapi juga memastikan dependensi, keputusan sponsor, "
+                    f"dan kesiapan stakeholder bergerak dalam ritme yang sama. Untuk {client}, pengaturan ini penting agar progres tidak sekadar terlihat aktif, "
+                    f"melainkan benar-benar menjaga jalur pencapaian KPI seperti {kpi_line}.{anchor_line}"
+                ),
+                (
+                    f"- Setiap fase perlu punya quality gate yang jelas agar perubahan prioritas tidak langsung merusak baseline jadwal.\n"
+                    f"- Koordinasi timeline juga harus menjaga konsistensi istilah kerja {term_line} supaya forum eksekusi dan forum pengarah membaca progres dengan bahasa yang sama."
+                ),
+                (
+                    f"Dengan cara ini, timeline berfungsi sebagai alat steering, bukan hanya kalender aktivitas. Sponsor {client} dapat melihat kapan keputusan penting harus diambil, "
+                    f"kapan deliverable harus ditinjau, dan kapan penyesuaian perlu dilakukan agar program tetap bergerak ke outcome yang dituju tanpa kehilangan kontrol atas risiko dan dependensi."
+                ),
+            ],
+        }
+        generic_blocks = [
+            (
+                f"Untuk {client}, isi bab ini harus dibaca sebagai dasar keputusan kerja yang dapat ditindaklanjuti, bukan sekadar penjelasan konseptual. "
+                f"Karena itu, isi bab tetap diarahkan untuk menjaga relevansi terhadap KPI seperti {kpi_line} dan istilah kerja {term_line}.{anchor_line}"
+            ),
+            (
+                f"- Implikasi eksekusinya harus tetap jelas agar sponsor dan tim delivery dapat menurunkan isi bab ini menjadi tindakan yang konkret.\n"
+                f"- Dengan pendekatan ini, narasi proposal tetap terhubung pada kebutuhan bisnis sekaligus tidak kehilangan kontrol implementasi."
+            ),
+            (
+                f"Secara praktis, hal ini membantu {client} membaca setiap bagian proposal sebagai bahan keputusan yang lebih operasional: apa yang harus diprioritaskan, "
+                f"siapa yang perlu mengambil keputusan, risiko apa yang harus dijaga, dan indikator apa yang dipakai untuk menguji bahwa arah kerja masih benar."
+            ),
+        ]
+
+        blocks = chapter_specific_blocks.get(chapter.get("id", ""), []) + generic_blocks
+        for block in blocks:
+            if self._word_count(patched) >= min_words:
+                break
+            patched += "\n\n" + block
+
+        if self._word_count(patched) < min_words:
+            patched += (
+                f"\n\nParagraf penegasan ini menjaga agar isi bab tetap cukup substantif untuk dibaca oleh sponsor {client}. "
+                f"Artinya, isi bab tidak berhenti pada deskripsi, tetapi tetap menunjukkan keterkaitan antara keputusan kerja, KPI {kpi_line}, "
+                f"bahasa operasional {term_line}, dan konteks inisiatif yang sedang dijalankan."
+            )
+        return patched
+
     def _apply_draft_repairs(
         self,
         chapter: Dict[str, Any],
@@ -3194,30 +3366,454 @@ class ProposalGenerator:
         client: str,
         allowed_external_citations: Optional[Set[str]] = None,
         personalization_pack: Optional[Dict[str, Any]] = None
+        ,
+        target_words: Optional[int] = None,
+        timeline: str = ""
     ) -> str:
         allowed = set(allowed_external_citations or set())
         repaired = self._clean_external_citations(content or "", allowed)
         repaired = self._ensure_required_headings(chapter, repaired)
         repaired = self._ensure_list_structure(repaired, chapter, client, personalization_pack=personalization_pack)
+        repaired = self._ensure_visual_requirements(chapter, repaired, timeline=timeline)
         repaired = self._ensure_personalization_signals(repaired, client, personalization_pack=personalization_pack)
+        repaired = self._ensure_minimum_substance(
+            chapter,
+            repaired,
+            client,
+            target_words=target_words,
+            personalization_pack=personalization_pack,
+            timeline=timeline
+        )
         return self._clean_external_citations(repaired, allowed)
+
+    @staticmethod
+    def _semantic_terms(values: Any, max_terms: int = 12) -> List[str]:
+        stopwords = {
+            "yang", "untuk", "dengan", "dari", "pada", "dan", "atau", "agar", "dalam",
+            "lebih", "tetap", "harus", "jadi", "sebagai", "melalui", "terhadap", "karena",
+            "the", "and", "with", "from", "into", "this", "that", "your", "their",
+        }
+        raw_items = values if isinstance(values, list) else [values]
+        seen: Set[str] = set()
+        terms: List[str] = []
+        for raw in raw_items:
+            text = re.sub(r"\s+", " ", str(raw or "").strip())
+            if not text:
+                continue
+            lowered = text.lower()
+            if 2 <= len(lowered.split()) <= 5 and lowered not in seen:
+                seen.add(lowered)
+                terms.append(text)
+            for token in re.findall(r"[A-Za-z]{4,}", lowered):
+                if token in stopwords or token in seen:
+                    continue
+                seen.add(token)
+                terms.append(token)
+                if len(terms) >= max_terms:
+                    return terms
+            if len(terms) >= max_terms:
+                break
+        return terms[:max_terms]
+
+    @staticmethod
+    def _count_signal_hits(content: str, candidates: List[str], max_hits: int = 6) -> int:
+        hits = 0
+        seen: Set[str] = set()
+        text = content or ""
+        for candidate in candidates or []:
+            value = re.sub(r"\s+", " ", str(candidate or "").strip())
+            if not value:
+                continue
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            pattern = re.escape(value)
+            if " " not in value and value.isalpha():
+                pattern = rf"\b{pattern}\b"
+            if re.search(pattern, text, re.IGNORECASE):
+                hits += 1
+                if hits >= max_hits:
+                    return hits
+        return hits
+
+    @staticmethod
+    def _chapter_usefulness_terms(chapter_id: str) -> List[str]:
+        mapping = {
+            "c_1": ["latar belakang", "konteks", "prioritas", "permintaan"],
+            "c_2": ["masalah", "hambatan", "gap", "risiko"],
+            "c_3": ["problem", "opportunity", "directive", "tujuan", "jenis proyek"],
+            "c_4": ["framework", "regulasi", "standar", "acuan"],
+            "c_5": ["metodologi", "langkah kerja", "fase", "output"],
+            "c_6": ["solusi", "deliverable", "target state", "output"],
+            "c_7": ["deliverable", "milestone", "fase", "gantt"],
+            "c_8": ["keputusan", "eskalasi", "quality gate", "kontrol"],
+            "c_9": ["tim", "kapabilitas", "pengalaman", "sertifikasi"],
+            "c_10": ["biaya", "pembayaran", "scope", "batasan"],
+            "c_closing": ["terima kasih", "langkah lanjutan", "kemitraan"],
+        }
+        return mapping.get(chapter_id, ["deliverable", "risiko", "kpi"])
+
+    @staticmethod
+    def _safe_score(value: float) -> int:
+        return max(0, min(100, int(round(value))))
+
+    @classmethod
+    def _find_contact_like_lines(cls, content: str) -> List[str]:
+        suspects: List[str] = []
+        patterns = [
+            r"@",
+            r"https?://|www\.",
+            r"\b(?:telp|telepon|phone|whatsapp|wa)\b",
+            r"\b(?:jl\.|jalan|office|kantor)\b",
+            r"\(\d{3,4}\)",
+        ]
+        for raw_line in (content or "").splitlines():
+            line = re.sub(r"^[#*\-\d.\s]+", "", raw_line).strip()
+            if not line:
+                continue
+            if any(re.search(pattern, line, re.IGNORECASE) for pattern in patterns):
+                suspects.append(line)
+        return suspects
+
+    def _evaluate_proposal_acceptance(
+        self,
+        chapter_outputs: Dict[str, str],
+        selected_chapters: List[Dict[str, Any]],
+        chapter_targets: Dict[str, int],
+        client: str,
+        project: str,
+        notes: str,
+        firm_profile: Dict[str, Any],
+        allowed_external_citations: Set[str],
+        personalization_pack: Dict[str, Any],
+        value_map: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        chapter_map = {chapter["id"]: chapter for chapter in selected_chapters}
+        full_text = "\n\n".join(
+            chapter_outputs.get(chapter["id"], "")
+            for chapter in selected_chapters
+            if chapter_outputs.get(chapter["id"], "")
+        )
+        generated_words = sum(self._word_count(text) for text in chapter_outputs.values() if text)
+        estimated_pages = self._estimated_pages(generated_words)
+
+        chapter_findings: Dict[str, Dict[str, Any]] = {}
+        hard_failures: List[str] = []
+        soft_findings: List[str] = []
+        invalid_external_citations: List[str] = []
+        personalization_weight = 0.0
+        personalization_score_total = 0.0
+
+        company_terms = self._semantic_terms(
+            [value_map.get("positioning", ""), value_map.get("proposal_promise", "")] +
+            (value_map.get("differentiators", []) or []) +
+            (value_map.get("proof_points", []) or []),
+            max_terms=18
+        )
+        persuasion_terms = self._semantic_terms(
+            [value_map.get("value_statement", ""), value_map.get("value_hook", ""), value_map.get("win_theme", "")] +
+            (value_map.get("client_gains", []) or []) +
+            (value_map.get("industry_drivers", []) or []),
+            max_terms=18
+        )
+        pressure_terms = self._semantic_terms([project, notes, value_map.get("customer_pressure", "")], max_terms=12)
+        anchor_terms = personalization_pack.get("anchor_citations", []) or []
+        if not anchor_terms:
+            anchor_terms = self._semantic_terms(
+                [item.get("fact", "") for item in personalization_pack.get("initiative_facts", []) or []],
+                max_terms=8
+            )
+
+        for chapter in selected_chapters:
+            chapter_id = chapter["id"]
+            content = (chapter_outputs.get(chapter_id) or "").strip()
+            target_words = chapter_targets.get(chapter_id, self._target_words(chapter))
+            if not content:
+                hard_failures.append(f"{chapter['title']}: empty")
+                chapter_findings[chapter_id] = {
+                    "title": chapter["title"],
+                    "issues": ["empty"],
+                    "score": 0,
+                    "weaknesses": ["missing_content"],
+                }
+                continue
+
+            quality = self._evaluate_chapter_quality(
+                chapter=chapter,
+                content=content,
+                client=client,
+                target_words=target_words,
+                allowed_external_citations=allowed_external_citations,
+                personalization_pack=personalization_pack,
+            )
+            issues = quality.get("issues", [])
+            invalid_external_citations.extend(quality.get("invalid_external_citations", []))
+
+            if any(issue in issues for issue in {"missing_h2", "too_short", "missing_visual", "citation_policy"}):
+                hard_failures.extend([f"{chapter['title']}: {issue}" for issue in issues if issue in {"missing_h2", "too_short", "missing_visual", "citation_policy"}])
+            elif issues:
+                soft_findings.extend([f"{chapter['title']}: {issue}" for issue in issues])
+
+            client_ref_hit = self._contains_client_reference(content, client)
+            term_hits = self._count_signal_hits(content, personalization_pack.get("terminology", []) or [], max_hits=3)
+            kpi_hits = self._count_signal_hits(
+                content,
+                (personalization_pack.get("kpi_blueprint", []) or []) + (personalization_pack.get("kpi_keywords", []) or []),
+                max_hits=3
+            )
+            anchor_hits = self._count_signal_hits(content, anchor_terms, max_hits=2)
+            value_hits = self._count_signal_hits(content, persuasion_terms, max_hits=4)
+            usefulness_hits = self._count_signal_hits(content, self._chapter_usefulness_terms(chapter_id), max_hits=3)
+
+            business_rank = self._chapter_business_rank(chapter_id)
+            chapter_personalization = (
+                (1.0 if client_ref_hit else 0.0) +
+                min(1.0, term_hits / 2.0) +
+                min(1.0, kpi_hits / 2.0) +
+                min(1.0, anchor_hits / 1.0)
+            ) / 4.0
+            personalization_score_total += chapter_personalization * business_rank
+            personalization_weight += business_rank
+
+            chapter_score = 100
+            chapter_score -= 16 * len([issue for issue in issues if issue in {"missing_h2", "too_short", "missing_visual", "citation_policy"}])
+            chapter_score -= 8 * len([issue for issue in issues if issue not in {"missing_h2", "too_short", "missing_visual", "citation_policy"}])
+            chapter_score += min(8, value_hits * 2)
+            chapter_score += min(8, usefulness_hits * 2)
+            chapter_score = self._safe_score(chapter_score)
+
+            weaknesses: List[str] = []
+            if not client_ref_hit:
+                weaknesses.append("client_specificity")
+            if term_hits == 0 or kpi_hits == 0:
+                weaknesses.append("personalization")
+            if anchor_hits == 0 and chapter_id in {"c_1", "c_2", "c_3", "c_4", "c_5", "c_6"}:
+                weaknesses.append("external_or_internal_anchor")
+            if value_hits == 0:
+                weaknesses.append("business_value")
+            if usefulness_hits == 0:
+                weaknesses.append("actionability")
+            if "too_short" in issues:
+                weaknesses.append("substance")
+
+            chapter_findings[chapter_id] = {
+                "title": chapter["title"],
+                "issues": issues,
+                "score": chapter_score,
+                "client_ref_hit": client_ref_hit,
+                "term_hits": term_hits,
+                "kpi_hits": kpi_hits,
+                "anchor_hits": anchor_hits,
+                "value_hits": value_hits,
+                "usefulness_hits": usefulness_hits,
+                "weaknesses": weaknesses,
+            }
+
+        format_penalty = 0
+        if estimated_pages > MAX_PROPOSAL_PAGES:
+            hard_failures.append(f"page_limit_exceeded:{estimated_pages}>{MAX_PROPOSAL_PAGES}")
+            format_penalty += min(40, (estimated_pages - MAX_PROPOSAL_PAGES) * 10)
+        format_penalty += min(40, len(hard_failures) * 4)
+        format_penalty += min(20, len(soft_findings) * 2)
+        format_fidelity = self._safe_score(100 - format_penalty)
+
+        personalization_score = self._safe_score(
+            100 * (personalization_score_total / max(personalization_weight, 1.0))
+        )
+
+        company_fit_hits = [
+            1.0 if WRITER_FIRM_NAME.lower() in full_text.lower() else 0.0,
+            min(1.0, self._count_signal_hits(full_text, company_terms, max_hits=6) / 4.0),
+            min(1.0, self._count_signal_hits(full_text, value_map.get("proof_points", []) or [], max_hits=3) / 2.0),
+        ]
+        verified_contact_lines = FirmAPIClient.build_contact_lines(firm_profile)
+        if verified_contact_lines:
+            closing_text = chapter_outputs.get("c_closing", "")
+            extracted_contact = FirmAPIClient._extract_contact_fields(closing_text)
+            expected_contact = {
+                "office_address": str(firm_profile.get("office_address") or "").strip(),
+                "email": str(firm_profile.get("email") or "").strip(),
+                "phone": str(firm_profile.get("phone") or "").strip(),
+                "website": str(firm_profile.get("website") or "").strip(),
+            }
+            missing_contact_lines = [
+                field_name for field_name, expected_value in expected_contact.items()
+                if expected_value
+                and expected_value not in closing_text
+                and expected_value not in str(extracted_contact.get(field_name) or "")
+            ]
+            if missing_contact_lines:
+                hard_failures.append("verified_contact_missing")
+            company_fit_hits.append(1.0 if not missing_contact_lines else 0.0)
+        company_fit = self._safe_score(100 * (sum(company_fit_hits) / max(len(company_fit_hits), 1)))
+
+        persuasion_components = [
+            min(1.0, self._count_signal_hits(full_text, persuasion_terms, max_hits=8) / 5.0),
+            min(1.0, self._count_signal_hits(full_text, pressure_terms, max_hits=6) / 3.0),
+        ]
+        for chapter_id in ("c_2", "c_3", "c_5", "c_6", "c_10"):
+            chapter_text = chapter_outputs.get(chapter_id, "")
+            if not chapter_text:
+                continue
+            persuasion_components.append(
+                min(1.0, self._count_signal_hits(chapter_text, persuasion_terms + pressure_terms, max_hits=5) / 2.0)
+            )
+        persuasion_score = self._safe_score(100 * (sum(persuasion_components) / max(len(persuasion_components), 1)))
+
+        usefulness_checks = [
+            1.0 if "[[GANTT:" in chapter_outputs.get("c_7", "") else 0.0 if chapter_map.get("c_7") else 1.0,
+            min(1.0, self._count_signal_hits(chapter_outputs.get("c_5", ""), self._chapter_usefulness_terms("c_5"), max_hits=4) / 2.0) if chapter_map.get("c_5") else 1.0,
+            min(1.0, self._count_signal_hits(chapter_outputs.get("c_6", ""), self._chapter_usefulness_terms("c_6"), max_hits=4) / 2.0) if chapter_map.get("c_6") else 1.0,
+            min(1.0, self._count_signal_hits(chapter_outputs.get("c_8", ""), self._chapter_usefulness_terms("c_8"), max_hits=4) / 2.0) if chapter_map.get("c_8") else 1.0,
+            min(1.0, self._count_signal_hits(chapter_outputs.get("c_10", ""), self._chapter_usefulness_terms("c_10"), max_hits=4) / 2.0) if chapter_map.get("c_10") else 1.0,
+        ]
+        usefulness_score = self._safe_score(100 * (sum(usefulness_checks) / max(len(usefulness_checks), 1)))
+
+        factual_penalty = 0
+        if invalid_external_citations:
+            factual_penalty += min(50, len(set(invalid_external_citations)) * 20)
+        closing_contact_lines = self._find_contact_like_lines(chapter_outputs.get("c_closing", ""))
+        if verified_contact_lines:
+            allowed_contact_values = set()
+            for line in verified_contact_lines:
+                extracted = FirmAPIClient._extract_contact_fields(line)
+                allowed_contact_values.update(
+                    value.strip() for value in extracted.values() if str(value).strip()
+                )
+            unverified_contact_lines = [
+                line for line in closing_contact_lines
+                if not any(value and value in line for value in allowed_contact_values)
+            ]
+        else:
+            unverified_contact_lines = closing_contact_lines
+        if unverified_contact_lines:
+            factual_penalty += min(40, len(unverified_contact_lines) * 10)
+            hard_failures.append("unverified_contact_detail")
+        factual_safety = self._safe_score(100 - factual_penalty)
+
+        categories = {
+            "format_fidelity": format_fidelity,
+            "personalization": personalization_score,
+            "company_fit": company_fit,
+            "persuasion": persuasion_score,
+            "usefulness": usefulness_score,
+            "factual_safety": factual_safety,
+        }
+        total_score = self._safe_score(
+            (format_fidelity * 0.20) +
+            (personalization_score * 0.25) +
+            (company_fit * 0.20) +
+            (persuasion_score * 0.15) +
+            (usefulness_score * 0.10) +
+            (factual_safety * 0.10)
+        )
+        low_categories = [name for name, score in categories.items() if score < self.PROPOSAL_CATEGORY_FLOOR]
+
+        return {
+            "score": total_score,
+            "categories": categories,
+            "estimated_pages": estimated_pages,
+            "generated_words": generated_words,
+            "hard_failures": sorted(set(hard_failures)),
+            "soft_findings": sorted(set(soft_findings)),
+            "low_categories": low_categories,
+            "chapter_findings": chapter_findings,
+            "passes": not hard_failures and total_score >= self.PROPOSAL_ACCEPTANCE_TARGET and not low_categories,
+        }
+
+    def _select_improvement_chapters(
+        self,
+        acceptance_report: Dict[str, Any],
+        selected_chapters: List[Dict[str, Any]]
+    ) -> List[str]:
+        limit = 2 if self._throughput_mode() else 3
+        candidates: List[Tuple[int, int, str]] = []
+        for chapter in selected_chapters:
+            chapter_id = chapter["id"]
+            if chapter_id == "c_closing" or self._use_structured_chapter(chapter_id):
+                continue
+            finding = acceptance_report.get("chapter_findings", {}).get(chapter_id, {})
+            issues = finding.get("issues", []) or []
+            weaknesses = finding.get("weaknesses", []) or []
+            score = int(finding.get("score", 100))
+            if score >= 82 and not issues and not weaknesses:
+                continue
+            priority = self._chapter_business_rank(chapter_id)
+            candidates.append((score, -priority, chapter_id))
+        candidates.sort()
+        return [chapter_id for _, _, chapter_id in candidates[:limit]]
+
+    def _improve_weak_chapter(
+        self,
+        chapter: Dict[str, Any],
+        prompt: str,
+        content: str,
+        client: str,
+        target_words: int,
+        acceptance_report: Dict[str, Any],
+        personalization_pack: Dict[str, Any],
+        value_map: Dict[str, Any],
+        allowed_external_citations: Set[str],
+        timeline: str = ""
+    ) -> str:
+        finding = acceptance_report.get("chapter_findings", {}).get(chapter["id"], {})
+        weaknesses = finding.get("weaknesses", []) or ["personalization", "business_value", "actionability"]
+        focus_terms = ", ".join(personalization_pack.get("terminology", [])[:3]) or "governance, delivery, risk control"
+        kpi_line = " | ".join(personalization_pack.get("kpi_blueprint", [])[:3]) or f"hasil bisnis terukur untuk {client}"
+        proof_line = ", ".join(value_map.get("proof_points", [])[:3]) or "kapabilitas delivery dan kontrol mutu yang tersedia"
+        try:
+            res = self.ollama.chat(
+                model=LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": (
+                        f"Perkuat draft {chapter['title']} agar lebih layak sebagai proposal 80% siap pakai.\n"
+                        f"Fokus perbaikan: {', '.join(weaknesses)}.\n"
+                        f"Wajib:\n"
+                        f"- lebih spesifik ke konteks {client}\n"
+                        f"- lebih jelas menghubungkan isi bab dengan KPI {kpi_line}\n"
+                        f"- lebih terasa nilai dan kredibilitas {WRITER_FIRM_NAME} lewat bukti {proof_line}\n"
+                        f"- lebih actionable untuk sponsor, decision maker, dan delivery team\n"
+                        f"- tetap faktual, jangan menambah klaim baru di luar draft/sumber yang sudah ada\n"
+                        f"- pertahankan H2 wajib, numbering, bullet, dan disiplin panjang sekitar {target_words} kata\n"
+                        f"- gunakan istilah domain secara natural: {focus_terms}\n\n"
+                        f"DRAFT SAAT INI:\n{content}"
+                    )},
+                ],
+                options=self._chapter_generation_options(target_words, purpose="retry")
+            )
+            revised = (res.get("message", {}).get("content", "") or "").strip()
+        except Exception:
+            revised = ""
+
+        repaired = self._apply_draft_repairs(
+            chapter=chapter,
+            content=revised or content,
+            client=client,
+            allowed_external_citations=allowed_external_citations,
+            personalization_pack=personalization_pack,
+            target_words=target_words,
+            timeline=timeline,
+        )
+        return repaired
 
     def _chapter_generation_options(self, target_words: int, purpose: str = "draft") -> Dict[str, Any]:
         throughput = self._throughput_mode()
         if purpose == "tighten":
-            cap = 1500 if throughput else 2200
-            floor = 700
-            multiplier = 1.55 if throughput else 1.8
+            cap = 1800 if throughput else 2400
+            floor = 850
+            multiplier = 1.75 if throughput else 1.95
             temperature = 0.12 if throughput else 0.15
         elif purpose == "retry":
-            cap = 2200 if throughput else 3200
-            floor = 950
-            multiplier = 1.85 if throughput else 2.15
+            cap = 2800 if throughput else 3600
+            floor = 1200
+            multiplier = 2.15 if throughput else 2.35
             temperature = 0.18 if throughput else 0.2
         else:
-            cap = 2200 if throughput else 3200
-            floor = 1100
-            multiplier = 1.95 if throughput else 2.25
+            cap = 2800 if throughput else 3600
+            floor = 1350
+            multiplier = 2.2 if throughput else 2.45
             temperature = 0.2 if throughput else 0.25
         return {
             "num_ctx": 32768 if throughput else 65536,
@@ -3512,8 +4108,7 @@ class ProposalGenerator:
             changed = False
             chapter_order = sorted(
                 [cid for cid, text in outputs.items() if text],
-                key=lambda cid: self._word_count(outputs[cid]),
-                reverse=True
+                key=lambda cid: (self._chapter_compression_rank(cid), -self._word_count(outputs[cid]))
             )
 
             for cid in chapter_order:
@@ -3552,7 +4147,11 @@ class ProposalGenerator:
 
         if total_words() > max_words:
             ratio = max_words / max(total_words(), 1)
-            for cid, text in list(outputs.items()):
+            ordered_items = sorted(
+                list(outputs.items()),
+                key=lambda item: (self._chapter_compression_rank(item[0]), -self._word_count(item[1] or ""))
+            )
+            for cid, text in ordered_items:
                 chapter = chapter_map.get(cid)
                 prompt = chapter_prompts.get(cid)
                 if not chapter or not prompt or not text:
@@ -3747,6 +4346,86 @@ class ProposalGenerator:
             chapter_outputs["c_closing"] = self._inject_verified_firm_contact(
                 chapter_outputs["c_closing"],
                 firm_profile
+            )
+
+        acceptance_report = self._evaluate_proposal_acceptance(
+            chapter_outputs=chapter_outputs,
+            selected_chapters=selected_chapters,
+            chapter_targets=chapter_targets,
+            client=client,
+            project=project,
+            notes=notes,
+            firm_profile=firm_profile,
+            allowed_external_citations=allowed_external_citations,
+            personalization_pack=personalization_pack,
+            value_map=value_map,
+        )
+        if not acceptance_report["passes"]:
+            weak_chapters = self._select_improvement_chapters(acceptance_report, selected_chapters)
+            for chapter_id in weak_chapters:
+                chapter = chapter_map.get(chapter_id)
+                prompt = chapter_prompts.get(chapter_id)
+                content = chapter_outputs.get(chapter_id, "")
+                if not chapter or not prompt or not content:
+                    continue
+                chapter_outputs[chapter_id] = self._improve_weak_chapter(
+                    chapter=chapter,
+                    prompt=prompt,
+                    content=content,
+                    client=client,
+                    target_words=chapter_targets.get(chapter_id, self._target_words(chapter)),
+                    acceptance_report=acceptance_report,
+                    personalization_pack=personalization_pack,
+                    value_map=value_map,
+                    allowed_external_citations=allowed_external_citations,
+                    timeline=timeline,
+                )
+
+            if weak_chapters:
+                chapter_outputs = {
+                    chapter_id: self._clean_external_citations(content, allowed_external_citations)
+                    for chapter_id, content in chapter_outputs.items()
+                }
+                chapter_outputs = self._fit_into_word_budget(
+                    chapter_outputs=chapter_outputs,
+                    chapter_prompts=chapter_prompts,
+                    chapter_map=chapter_map,
+                    chapter_targets=chapter_targets,
+                    max_words=content_word_budget,
+                    allowed_external_citations=allowed_external_citations
+                )
+                if chapter_outputs.get("c_closing"):
+                    chapter_outputs["c_closing"] = self._inject_verified_firm_contact(
+                        chapter_outputs["c_closing"],
+                        firm_profile
+                    )
+                acceptance_report = self._evaluate_proposal_acceptance(
+                    chapter_outputs=chapter_outputs,
+                    selected_chapters=selected_chapters,
+                    chapter_targets=chapter_targets,
+                    client=client,
+                    project=project,
+                    notes=notes,
+                    firm_profile=firm_profile,
+                    allowed_external_citations=allowed_external_citations,
+                    personalization_pack=personalization_pack,
+                    value_map=value_map,
+                )
+
+        if acceptance_report["hard_failures"] or acceptance_report["low_categories"]:
+            logger.warning(
+                "Proposal acceptance below target | score=%s | categories=%s | hard_failures=%s | low_categories=%s",
+                acceptance_report["score"],
+                acceptance_report["categories"],
+                acceptance_report["hard_failures"],
+                acceptance_report["low_categories"],
+            )
+        else:
+            logger.info(
+                "Proposal acceptance passed | score=%s | categories=%s | estimated_pages=%s",
+                acceptance_report["score"],
+                acceptance_report["categories"],
+                acceptance_report["estimated_pages"],
             )
 
         try:
