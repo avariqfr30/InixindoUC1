@@ -1,7 +1,7 @@
 """Proposal orchestration logic: drafting, tightening, compression, and document assembly."""
 
 from .proposal_shared import *
-from .runtime_components import ChartEngine, DocumentBuilder, FinancialAnalyzer, LogoManager, StyleEngine
+from .runtime_components import ChartEngine, DocumentBuilder, FinancialAnalyzer, FirmAPIClient, LogoManager, StyleEngine
 
 
 class ProposalEngineMixin:
