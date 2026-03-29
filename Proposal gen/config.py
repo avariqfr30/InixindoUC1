@@ -17,6 +17,20 @@ LLM_MODEL = "gpt-oss:120b-cloud"
 EMBED_MODEL = "bge-m3:latest"
 DB_URI = "sqlite:///projects.db"
 
+# Low-level shared testing runtime.
+GENERATION_PROFILE = os.getenv("GENERATION_PROFILE", "balanced").strip().lower()
+if GENERATION_PROFILE not in {"balanced", "throughput"}:
+    GENERATION_PROFILE = "balanced"
+# Each request still produces only one proposal document, but the server may
+# run a small number of proposal jobs in parallel to protect end-to-end timing.
+MAX_ACTIVE_GENERATIONS = max(1, int(os.getenv("MAX_ACTIVE_GENERATIONS", "2")))
+MAX_GENERATION_BACKLOG = max(MAX_ACTIVE_GENERATIONS, int(os.getenv("MAX_GENERATION_BACKLOG", "18")))
+JOB_RETENTION_SECONDS = max(300, int(os.getenv("JOB_RETENTION_SECONDS", "1800")))
+JOB_POLL_INTERVAL_MS = max(1000, int(os.getenv("JOB_POLL_INTERVAL_MS", "2000")))
+RESEARCH_CACHE_TTL_SECONDS = max(300, int(os.getenv("RESEARCH_CACHE_TTL_SECONDS", "1800")))
+APP_HOST = os.getenv("APP_HOST", "0.0.0.0").strip() or "0.0.0.0"
+APP_PORT = max(1, int(os.getenv("APP_PORT", "5500")))
+
 # Document length guardrails.
 MAX_PROPOSAL_PAGES = 25
 ESTIMATED_WORDS_PER_PAGE = 230
@@ -32,6 +46,99 @@ WRITER_FIRM_PHONE = os.getenv("WRITER_FIRM_PHONE", "").strip()
 WRITER_FIRM_WEBSITE = os.getenv("WRITER_FIRM_WEBSITE", "").strip()
 WRITER_FIRM_CONTACT_INFO = os.getenv("WRITER_FIRM_CONTACT_INFO", "").strip()
 WRITER_FIRM_PORTFOLIO = os.getenv("WRITER_FIRM_PORTFOLIO", "").strip()
+
+COMPANY_DNA = {
+    "positioning": (
+        "Inixindo Jogja adalah mitra pembelajaran dan konsultasi yang membantu klien bergerak "
+        "dari kebutuhan bisnis ke rencana eksekusi yang jelas, kredibel, dan dapat dijalankan."
+    ),
+    "proposal_promise": (
+        "Proposal harus terasa seperti dokumen kerja yang siap dipakai untuk mengambil keputusan, "
+        "bukan sekadar narasi yang menjelaskan situasi."
+    ),
+    "differentiators": [
+        "Menerjemahkan kebutuhan bisnis ke pendekatan delivery yang rapi, terukur, dan mudah ditindaklanjuti.",
+        "Menghubungkan metodologi, governance, dan komersial dalam satu alur keputusan yang konsisten.",
+        "Menjaga bahasa proposal tetap profesional, singkat, dan relevan bagi sponsor eksekutif.",
+    ],
+    "client_value_focus": [
+        "kejelasan keputusan",
+        "kecepatan mobilisasi",
+        "kontrol risiko dan tata kelola",
+        "hasil bisnis yang terukur",
+    ],
+    "human_touch_review_points": [
+        "kalibrasi relasi dan sponsor",
+        "penajaman nilai komersial akhir",
+        "pesan penutup yang paling personal dan relevan",
+    ],
+}
+
+VALUE_PLAYBOOK = {
+    "diagnostic": {
+        "capability": "assessment, gap analysis, dan recommendation framing",
+        "value_hook": "memberi kejelasan sebelum investasi diperbesar",
+        "client_gains": [
+            "baseline kondisi saat ini yang rapi",
+            "prioritas masalah yang lebih tajam",
+            "arah keputusan lanjutan yang lebih aman",
+        ],
+    },
+    "strategic": {
+        "capability": "strategy design, target operating model, dan roadmap prioritas",
+        "value_hook": "menjembatani visi bisnis dengan urutan eksekusi yang realistis",
+        "client_gains": [
+            "arah transformasi yang lebih fokus",
+            "prioritas investasi yang lebih defensible",
+            "roadmap eksekusi yang lebih mudah disetujui",
+        ],
+    },
+    "transformation": {
+        "capability": "readiness assessment, rollout orchestration, change management, dan hypercare",
+        "value_hook": "mengubah kebutuhan klien menjadi program perubahan yang lebih terkendali",
+        "client_gains": [
+            "mobilisasi yang lebih cepat",
+            "kontrol risiko perubahan yang lebih baik",
+            "adopsi hasil yang lebih stabil",
+        ],
+    },
+    "implementation": {
+        "capability": "solution delivery, implementation control, UAT readiness, dan handover",
+        "value_hook": "membawa rancangan solusi menjadi hasil implementasi yang siap dipakai",
+        "client_gains": [
+            "go-live yang lebih tertata",
+            "kualitas delivery yang lebih terjaga",
+            "transisi ke operasi yang lebih rapi",
+        ],
+    },
+}
+
+INDUSTRY_VALUE_DRIVERS = {
+    "Perbankan": [
+        "pertumbuhan adopsi dan engagement nasabah",
+        "ketahanan layanan digital",
+        "kepatuhan terhadap regulasi dan kontrol risiko",
+        "pengambilan keputusan yang lebih cepat dan terukur",
+    ],
+    "Telekomunikasi": [
+        "service reliability",
+        "pengendalian churn",
+        "percepatan monetisasi layanan baru",
+        "kontrol operasi lintas workstream",
+    ],
+    "Energi & Utilitas": [
+        "reliability operasi",
+        "kontrol risiko dan keselamatan",
+        "prioritas eksekusi yang lebih jelas",
+        "keberlanjutan hasil implementasi",
+    ],
+    "Pemerintah & BUMN": [
+        "akuntabilitas keputusan",
+        "tata kelola program",
+        "keselarasan kebijakan dan eksekusi",
+        "layanan yang lebih efektif",
+    ],
+}
 
 DATA_MAPPING = {
     "entity": "Client Entity",

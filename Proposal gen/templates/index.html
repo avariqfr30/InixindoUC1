@@ -132,7 +132,7 @@
                 <div id="preview-content"></div>
             </div>
             
-            <button type="button" id="btn-generate" disabled>Generate Proposal Singkat & Padat <span id="spinner" class="spinner"></span></button>
+            <button type="button" id="btn-generate" disabled><span id="btn-generate-label">Generate Proposal Singkat & Padat</span> <span id="spinner" class="spinner"></span></button>
         </div>
 
         <div id="step-success" class="hidden" style="text-align:center; padding: 20px;">
@@ -162,6 +162,7 @@
             inpFrameworkLainnya: document.getElementById('input-framework-lainnya'),
             containerDynamic: document.getElementById('container-dynamic'),
             btnGenerate: document.getElementById('btn-generate'),
+            btnGenerateLabel: document.getElementById('btn-generate-label'),
             btnAnalyze: document.getElementById('btn-analyze'),
             btnPreview: document.getElementById('btn-preview'),
             previewPanel: document.getElementById('preview-panel'),
@@ -172,6 +173,10 @@
             spinner: document.getElementById('spinner')
         };
         let budgetAnalyzeInFlight = false;
+        let proposalJobInFlight = false;
+        let jobPollIntervalMs = 2000;
+        let prefetchTimer = null;
+        let lastPrefetchKey = '';
 
         const showScreen = (screen) => {
             [ui.loader, ui.configStep, ui.successStep].forEach(el => el.classList.add('hidden'));
@@ -219,17 +224,29 @@
             );
         };
 
+        const setGenerateLabel = (text) => {
+            ui.btnGenerateLabel.textContent = text;
+        };
+
         const updateActionState = () => {
             const canAnalyze = hasAnalyzePrerequisites();
-            const canGenerate = canAnalyze && Boolean(ui.inpBiaya.value.trim());
-            ui.btnAnalyze.disabled = budgetAnalyzeInFlight || !canAnalyze;
+            const canGenerate = canAnalyze && Boolean(ui.inpBiaya.value.trim()) && !proposalJobInFlight;
+            ui.btnAnalyze.disabled = budgetAnalyzeInFlight || proposalJobInFlight || !canAnalyze;
+            ui.btnPreview.disabled = proposalJobInFlight;
             ui.btnGenerate.disabled = !canGenerate;
         };
 
         async function init() {
             try {
-                const res = await fetch('/api/companies');
-                const data = await res.json();
+                const [companyRes, configRes] = await Promise.all([
+                    fetch('/api/companies'),
+                    fetch('/api/config')
+                ]);
+                const data = await companyRes.json();
+                if (configRes.ok) {
+                    const config = await configRes.json();
+                    jobPollIntervalMs = Number(config.job_poll_interval_ms) || jobPollIntervalMs;
+                }
                 ui.selPerusahaan.innerHTML = `<option value="" disabled selected>Pilih Klien...</option>`;
                 data.forEach(d => ui.selPerusahaan.add(new Option(d, d)));
                 showScreen('config');
@@ -245,12 +262,16 @@
             ui.containerDynamic.classList.remove('hidden');
             ui.financeResult.classList.add('hidden'); 
             updateActionState();
+            schedulePrefetch(true);
         });
 
         // Re-check form completeness on relevant input changes.
         ['change', 'input'].forEach(evt => {
             [ui.selProposal, ui.selProyek, ui.inpKonteks, ui.inpPermasalahan, ui.inpWaktu, ui.inpBiaya, ui.groupKebutuhan, ui.groupFramework, ui.inpFrameworkLainnya].forEach(el => {
-                if(el) el.addEventListener(evt, updateActionState);
+                if(el) el.addEventListener(evt, () => {
+                    updateActionState();
+                    schedulePrefetch();
+                });
             });
         });
 
@@ -309,6 +330,80 @@
             potensi_framework: getFinalFrameworks()
         });
 
+        async function prefetchContext(force = false) {
+            const payload = getPayload();
+            const key = `${payload.nama_perusahaan}||${payload.potensi_framework}`;
+            if (!payload.nama_perusahaan || !payload.potensi_framework) return;
+            if (!force && key === lastPrefetchKey) return;
+            lastPrefetchKey = key;
+            try {
+                await fetch('/api/prefetch-context', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+            } catch (_) {}
+        }
+
+        function schedulePrefetch(force = false) {
+            clearTimeout(prefetchTimer);
+            prefetchTimer = setTimeout(() => prefetchContext(force), 350);
+        }
+
+        const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        async function downloadFinishedJob(jobId, payload) {
+            const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/download`);
+            if (!res.ok) {
+                let message = "Dokumen selesai dibuat, tetapi gagal diunduh.";
+                try {
+                    const data = await res.json();
+                    if (data && data.error) message = data.error;
+                } catch (_) {}
+                throw new Error(message);
+            }
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Proposal_Ringkas_${payload.nama_perusahaan.replace(/\s+/g, '_')}.docx`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        async function waitForGeneration(jobId, payload) {
+            while (true) {
+                const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+                let data = null;
+                try {
+                    data = await res.json();
+                } catch (_) {}
+                if (!res.ok) {
+                    throw new Error((data && data.error) || "Status generate proposal tidak bisa dibaca.");
+                }
+
+                if (data.status === 'queued') {
+                    setGenerateLabel(`Masuk Antrean (#${data.queue_position || 1})`);
+                    await wait(jobPollIntervalMs);
+                    continue;
+                }
+
+                if (data.status === 'running') {
+                    setGenerateLabel('Menyusun Proposal...');
+                    await wait(jobPollIntervalMs);
+                    continue;
+                }
+
+                if (data.status === 'done') {
+                    setGenerateLabel('Mengunduh Proposal...');
+                    await downloadFinishedJob(jobId, payload);
+                    return data;
+                }
+
+                throw new Error(data.error || data.message || "Generate proposal gagal.");
+            }
+        }
+
         ui.btnPreview.addEventListener('click', async () => {
             const payload = getPayload();
             if (!payload.nama_perusahaan || !payload.konteks_organisasi || !payload.permasalahan) {
@@ -341,8 +436,11 @@
         });
 
         ui.btnGenerate.addEventListener('click', async () => {
-            ui.btnGenerate.disabled = true;
+            if (proposalJobInFlight) return;
+            proposalJobInFlight = true;
             ui.spinner.classList.add('active');
+            setGenerateLabel('Mengirim Permintaan...');
+            updateActionState();
 
             const payload = getPayload();
 
@@ -360,22 +458,19 @@
                     } catch (_) {}
                     throw new Error(message);
                 }
-                
-                const blob = await res.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `Proposal_Ringkas_${payload.nama_perusahaan.replace(/\s+/g, '_')}.docx`;
-                a.click();
-                window.URL.revokeObjectURL(url);
-                
-                ui.successMessage.innerText = `Proposal untuk ${payload.nama_perusahaan} selesai dibuat dan siap diunduh.`;
+
+                const job = await res.json();
+                const finalStatus = await waitForGeneration(job.job_id, payload);
+
+                ui.successMessage.innerText = finalStatus.message || `Proposal untuk ${payload.nama_perusahaan} selesai dibuat dan siap diunduh.`;
                 showScreen('success');
             } catch (e) {
                 alert(e.message || "Gagal generate dokumen. Periksa console/log server.");
                 showScreen('config');
             } finally {
+                proposalJobInFlight = false;
                 ui.spinner.classList.remove('active');
+                setGenerateLabel('Generate Proposal Singkat & Padat');
                 updateActionState();
             }
         });
