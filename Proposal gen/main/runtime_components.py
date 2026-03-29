@@ -1279,13 +1279,7 @@ class FinancialAnalyzer:
     ) -> Dict[str, Any]:
         if not context_sensitive:
             return model_payload
-        analysis = str(model_payload.get("analysis", "")).strip()
-        if analysis:
-            analysis = (
-                f"{analysis} Rentang harga sudah disesuaikan lagi dengan durasi dan skala proyek dari input."
-            )
-        else:
-            analysis = context_payload.get("analysis", "")
+        analysis = str(context_payload.get("analysis", "")).strip() or str(model_payload.get("analysis", "")).strip()
         if not prefer_context_options:
             merged = dict(model_payload)
             merged["analysis"] = analysis

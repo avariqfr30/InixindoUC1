@@ -145,6 +145,10 @@ class ProposalSupportMixin:
                     return terms
         return terms
 
+    @staticmethod
+    def _anchor_required_chapters() -> Set[str]:
+        return {"c_1", "c_2", "c_3"}
+
     @classmethod
     def _build_kpi_blueprint(
         cls,
@@ -250,6 +254,18 @@ class ProposalSupportMixin:
             client=client
         )
         terminology = cls._industry_terms(industry)
+        initiative_terms = cls._semantic_terms([project, notes, project_goal], max_terms=8)
+        merged_terms: List[str] = []
+        seen_terms: Set[str] = set()
+        for term in terminology + initiative_terms:
+            normalized = str(term or "").strip()
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen_terms:
+                continue
+            seen_terms.add(key)
+            merged_terms.append(normalized)
 
         profile_summary = (
             f"Industri klien terdeteksi: {industry}. "
@@ -264,7 +280,7 @@ class ProposalSupportMixin:
             "relationship_guidance": relationship_guidance,
             "kpi_blueprint": kpi_blueprint,
             "kpi_keywords": cls._extract_metric_keywords(kpi_blueprint),
-            "terminology": terminology[:6],
+            "terminology": merged_terms[:10],
             "initiative_facts": initiative_facts,
             "anchor_citations": [item.get("citation", "") for item in initiative_facts if item.get("citation")],
             "anchor_keywords": cls._extract_anchor_keywords(initiative_facts),
@@ -505,6 +521,20 @@ class ProposalSupportMixin:
         citation = str(first.get("citation", "") or "").strip()
         return fact, citation
 
+    @classmethod
+    def _chapter_anchor_line(
+        cls,
+        chapter_id: str,
+        personalization_pack: Optional[Dict[str, Any]],
+        prefix: str = "Sebagai konteks eksternal"
+    ) -> str:
+        if chapter_id not in cls._anchor_required_chapters():
+            return ""
+        fact, citation = cls._extract_first_external_anchor(personalization_pack)
+        if not fact or not citation:
+            return ""
+        return f"{prefix}, {fact} {citation}."
+
     @staticmethod
     def _build_phase_plan(project_type: str, timeline: str) -> List[Dict[str, str]]:
         months = FinancialAnalyzer._duration_to_months(timeline)
@@ -612,12 +642,6 @@ class ProposalSupportMixin:
     ) -> str:
         year = datetime.now().year
         value_map = value_map or {}
-        anchor_fact, anchor_citation = self._extract_first_external_anchor(personalization_pack)
-        anchor_line = (
-            f"Sebagai konteks eksternal, {anchor_fact} {anchor_citation}."
-            if anchor_fact and anchor_citation
-            else ""
-        )
         terminology = personalization_pack.get("terminology", []) or []
         kpi_blueprint = personalization_pack.get("kpi_blueprint", []) or []
         term_line = ", ".join(terminology[:3]) if terminology else "governance, delivery, risk control"
@@ -670,8 +694,7 @@ class ProposalSupportMixin:
                 f"Untuk {client}, timeline pekerjaan disusun agar inisiatif {short_project} dapat bergerak stabil selama {timeline}. "
                 f"Rencana ini mengikat ritme delivery ke KPI seperti {kpi_line}, memakai istilah kerja {term_line}, "
                 f"dan menjaga agar keputusan fase selalu dapat ditelusuri terhadap outcome bisnis. Secara komersial dan delivery, ritme ini juga diarahkan untuk {value_hook} "
-                f"sehingga manfaat seperti {gains_line} terasa sejak fase awal (Data Internal, {year}). "
-                f"{anchor_line}\n\n"
+                f"sehingga manfaat seperti {gains_line} terasa sejak fase awal (Data Internal, {year}).\n\n"
                 "## 7.1 Aktivitas per Fase\n"
                 f"{numbered}\n"
                 f"- Setiap fase memiliki owner, quality gate, dan exit criteria yang jelas untuk {client}.\n"
@@ -699,7 +722,7 @@ class ProposalSupportMixin:
             return (
                 f"Tata kelola proyek untuk {client} dirancang agar keputusan strategis, kontrol eksekusi, dan penanganan risiko berjalan dalam satu sistem kerja yang konsisten. "
                 f"Fokusnya adalah menjaga {short_project.lower()} tetap selaras dengan KPI seperti {kpi_line}, sambil memakai istilah operasional {term_line} "
-                f"agar koordinasi lintas pihak tidak kehilangan konteks. Pola governance ini juga harus mendukung tema utama proposal: {win_theme} dan merefleksikan disiplin delivery {WRITER_FIRM_NAME} yang menghubungkan keputusan sponsor dengan kontrol eksekusi nyata (Data Internal, {year}). {anchor_line}\n\n"
+                f"agar koordinasi lintas pihak tidak kehilangan konteks. Pola governance ini juga harus mendukung tema utama proposal: {win_theme} dan merefleksikan disiplin delivery {WRITER_FIRM_NAME} yang menghubungkan keputusan sponsor dengan kontrol eksekusi nyata (Data Internal, {year}).\n\n"
                 "## 8.1 Mekanisme Pengambilan Keputusan\n"
                 f"1. **Steering Committee** menetapkan arah, prioritas, dan keputusan yang berdampak pada scope, biaya, atau timeline program {client}.\n"
                 "2. **Project Board** memutuskan isu lintas workstream, approval deliverable utama, dan tindakan korektif terhadap deviasi progres.\n"
@@ -743,7 +766,7 @@ class ProposalSupportMixin:
             return (
                 f"Struktur tim proyek untuk {client} dibentuk agar pengambilan keputusan, pengawasan mutu, dan eksekusi lapangan bergerak seirama. "
                 f"Komposisi tim tidak diperlakukan sebagai daftar jabatan semata, tetapi sebagai mekanisme untuk menjaga kualitas output terhadap target {kpi_line} "
-                f"dan kebutuhan {short_goal.lower()}. Rancangan tim ini juga harus membuat nilai proposal terasa kredibel melalui {differentiator_line}, sebagai cerminan model kerja {WRITER_FIRM_NAME} yang menyeimbangkan quality control, kepemimpinan delivery, dan spesialisasi domain (Data Internal, {year}). {anchor_line}\n\n"
+                f"dan kebutuhan {short_goal.lower()}. Rancangan tim ini juga harus membuat nilai proposal terasa kredibel melalui {differentiator_line}, sebagai cerminan model kerja {WRITER_FIRM_NAME} yang menyeimbangkan quality control, kepemimpinan delivery, dan spesialisasi domain (Data Internal, {year}).\n\n"
                 "## 9.1 Struktur Tim Proyek\n"
                 f"{numbered}\n"
                 f"- Komposisi inti yang direncanakan mengacu pada baseline internal: {team_summary}.\n"
@@ -774,7 +797,7 @@ class ProposalSupportMixin:
             return (
                 f"Model pembiayaan untuk {client} disusun agar komitmen biaya, mekanisme pembayaran, dan batas ruang lingkup tetap jelas sejak awal. "
                 f"Tujuannya adalah menjaga proyek {short_project.lower()} tetap dapat dieksekusi tanpa ambiguitas komersial, sambil memberi ruang kontrol terhadap perubahan yang benar-benar material "
-                f"dan memastikan investasi tetap tertaut pada manfaat yang dijanjikan: {short_value}. Struktur ini juga mencerminkan cara {WRITER_FIRM_NAME} menjaga disiplin komersial tetap selaras dengan delivery reality dan outcome klien (Data Internal, {year}). {anchor_line}\n\n"
+                f"dan memastikan investasi tetap tertaut pada manfaat yang dijanjikan: {short_value}. Struktur ini juga mencerminkan cara {WRITER_FIRM_NAME} menjaga disiplin komersial tetap selaras dengan delivery reality dan outcome klien (Data Internal, {year}).\n\n"
                 "## 10.1 Biaya dan Tahapan Pembayaran\n"
                 f"Estimasi investasi awal untuk engagement ini adalah **{budget or 'menyesuaikan scope final'}**, dengan tipe layanan **{service_type}** pada model proyek **{project_type}** selama **{timeline}**. "
                 f"Baseline komersial internal yang menjadi acuan adalah {commercial_summary}. Dengan demikian, pembahasan biaya tidak berdiri sebagai angka semata, tetapi sebagai representasi dari komitmen kerja, quality gate, dan acceptance deliverable yang menjadi standar {WRITER_FIRM_NAME}.\n\n"
@@ -1349,10 +1372,11 @@ class ProposalSupportMixin:
             if not kpi_hit:
                 missing_personalization_signals.append("kpi")
 
-            anchor_citations = personalization_pack.get("anchor_citations", []) or []
-            anchor_hit = any(citation in content for citation in anchor_citations) if anchor_citations else True
-            if not anchor_hit:
-                missing_personalization_signals.append("initiative_anchor")
+            if chapter.get("id", "") in self._anchor_required_chapters():
+                anchor_citations = personalization_pack.get("anchor_citations", []) or []
+                anchor_hit = any(citation in content for citation in anchor_citations) if anchor_citations else True
+                if not anchor_hit:
+                    missing_personalization_signals.append("initiative_anchor")
 
             if missing_personalization_signals:
                 issues.append("missing_personalization")
@@ -1433,10 +1457,8 @@ class ProposalSupportMixin:
         kpi_line = " | ".join((data.get("kpi_blueprint", []) or [])[:2]) or f"outcome utama {client}"
         term_line = ", ".join((data.get("terminology", []) or [])[:2]) or "governance, risk control"
         anchor_line = ""
-        anchors = data.get("initiative_facts", []) or []
-        if anchors:
-            fact = str(anchors[0].get("fact", "") or "").strip()
-            citation = str(anchors[0].get("citation", "") or "").strip()
+        if chapter.get("id", "") in self._anchor_required_chapters():
+            fact, citation = self._extract_first_external_anchor(data)
             if fact and citation:
                 anchor_line = f" Acuan konteks yang tetap dipakai adalah {fact} {citation}."
 
@@ -1498,37 +1520,40 @@ class ProposalSupportMixin:
         self,
         content: str,
         client: str,
-        personalization_pack: Optional[Dict[str, Any]] = None
+        personalization_pack: Optional[Dict[str, Any]] = None,
+        chapter: Optional[Dict[str, Any]] = None
     ) -> str:
         data = personalization_pack or {}
         patched = (content or "").rstrip()
         additions: List[str] = []
+        chapter_id = str((chapter or {}).get("id") or "").strip()
 
         if not self._contains_client_reference(patched, client):
             additions.append(f"- Untuk {client}, isi bab ini tetap diarahkan pada keputusan dan langkah kerja yang konkret.")
 
         terminology = data.get("terminology", []) or []
         if terminology:
-            term_hit = any(re.search(rf"\b{re.escape(term)}\b", patched, re.IGNORECASE) for term in terminology if term)
-            if not term_hit:
-                additions.append(f"- Istilah kerja yang tetap dijaga pada bab ini mencakup {', '.join(terminology[:2])}.")
+            term_hits = self._count_signal_hits(patched, terminology, max_hits=3)
+            if term_hits < 2:
+                additions.append(f"- Istilah kerja yang tetap dijaga pada bab ini mencakup {', '.join(terminology[:3])}.")
 
         kpis = data.get("kpi_blueprint", []) or []
         if kpis:
             kpi_keywords = data.get("kpi_keywords", []) or []
-            kpi_hit = any(re.search(rf"\b{re.escape(token)}\b", patched, re.IGNORECASE) for token in kpi_keywords if token)
-            if not kpi_hit:
-                additions.append(f"- KPI acuan yang tetap dijaga pada bab ini adalah {kpis[0]}.")
+            kpi_hits = self._count_signal_hits(patched, kpis + kpi_keywords, max_hits=3)
+            if kpi_hits < 2:
+                additions.append(f"- KPI acuan yang tetap dijaga pada bab ini adalah {' | '.join(kpis[:2])}.")
 
-        anchors = data.get("initiative_facts", []) or []
-        anchor_citations = data.get("anchor_citations", []) or []
-        anchor_hit = any(citation in patched for citation in anchor_citations) if anchor_citations else True
-        if anchors and not anchor_hit:
-            anchor = anchors[0]
-            anchor_fact = str(anchor.get("fact", "") or "").strip()
-            anchor_citation = str(anchor.get("citation", "") or "").strip()
-            if anchor_fact and anchor_citation:
-                additions.append(f"- Anchor inisiatif yang tetap dirujuk adalah {anchor_fact} {anchor_citation}.")
+        if chapter_id in self._anchor_required_chapters():
+            anchors = data.get("initiative_facts", []) or []
+            anchor_citations = data.get("anchor_citations", []) or []
+            anchor_hit = any(citation in patched for citation in anchor_citations) if anchor_citations else True
+            if anchors and not anchor_hit:
+                anchor = anchors[0]
+                anchor_fact = str(anchor.get("fact", "") or "").strip()
+                anchor_citation = str(anchor.get("citation", "") or "").strip()
+                if anchor_fact and anchor_citation:
+                    additions.append(f"- Anchor inisiatif yang tetap dirujuk adalah {anchor_fact} {anchor_citation}.")
 
         if not additions:
             return patched
@@ -1554,10 +1579,8 @@ class ProposalSupportMixin:
         kpi_line = " | ".join((data.get("kpi_blueprint", []) or [])[:2]) or f"outcome utama {client}"
         term_line = ", ".join((data.get("terminology", []) or [])[:2]) or "governance, risk control"
         anchor_line = ""
-        anchors = data.get("initiative_facts", []) or []
-        if anchors:
-            fact = str(anchors[0].get("fact", "") or "").strip()
-            citation = str(anchors[0].get("citation", "") or "").strip()
+        if chapter.get("id", "") in self._anchor_required_chapters():
+            fact, citation = self._extract_first_external_anchor(data)
             if fact and citation:
                 anchor_line = f" Rujukan konteks yang tetap dipakai adalah {fact} {citation}."
 
@@ -1597,7 +1620,7 @@ class ProposalSupportMixin:
                 (
                     f"Penjadwalan tidak hanya membagi durasi {timeline or 'proyek'} ke dalam fase, tetapi juga memastikan dependensi, keputusan sponsor, "
                     f"dan kesiapan stakeholder bergerak dalam ritme yang sama. Untuk {client}, pengaturan ini penting agar progres tidak sekadar terlihat aktif, "
-                    f"melainkan benar-benar menjaga jalur pencapaian KPI seperti {kpi_line}.{anchor_line}"
+                    f"melainkan benar-benar menjaga jalur pencapaian KPI seperti {kpi_line}."
                 ),
                 (
                     f"- Setiap fase perlu punya quality gate yang jelas agar perubahan prioritas tidak langsung merusak baseline jadwal.\n"
@@ -1628,7 +1651,7 @@ class ProposalSupportMixin:
         generic_blocks = [
             (
                 f"Untuk {client}, isi bab ini harus dibaca sebagai dasar keputusan kerja yang dapat ditindaklanjuti, bukan sekadar penjelasan konseptual. "
-                f"Karena itu, isi bab tetap diarahkan untuk menjaga relevansi terhadap KPI seperti {kpi_line} dan istilah kerja {term_line}.{anchor_line}"
+                f"Karena itu, isi bab tetap diarahkan untuk menjaga relevansi terhadap KPI seperti {kpi_line} dan istilah kerja {term_line}."
             ),
             (
                 f"- Implikasi eksekusinya harus tetap jelas agar sponsor dan tim delivery dapat menurunkan isi bab ini menjadi tindakan yang konkret.\n"
@@ -1679,7 +1702,12 @@ class ProposalSupportMixin:
         repaired = self._ensure_list_structure(repaired, chapter, client, personalization_pack=personalization_pack)
         repaired = self._ensure_problem_definition_pattern(chapter, repaired, client, personalization_pack=personalization_pack)
         repaired = self._ensure_visual_requirements(chapter, repaired, timeline=timeline)
-        repaired = self._ensure_personalization_signals(repaired, client, personalization_pack=personalization_pack)
+        repaired = self._ensure_personalization_signals(
+            repaired,
+            client,
+            personalization_pack=personalization_pack,
+            chapter=chapter,
+        )
         repaired = self._ensure_minimum_substance(
             chapter,
             repaired,
@@ -1866,7 +1894,8 @@ class ProposalSupportMixin:
                 (personalization_pack.get("kpi_blueprint", []) or []) + (personalization_pack.get("kpi_keywords", []) or []),
                 max_hits=3
             )
-            anchor_hits = self._count_signal_hits(content, anchor_terms, max_hits=2)
+            anchor_expected = chapter_id in self._anchor_required_chapters()
+            anchor_hits = self._count_signal_hits(content, anchor_terms, max_hits=2) if anchor_expected else 1
             value_hits = self._count_signal_hits(content, persuasion_terms, max_hits=4)
             usefulness_hits = self._count_signal_hits(content, self._chapter_usefulness_terms(chapter_id), max_hits=3)
 
@@ -1892,7 +1921,7 @@ class ProposalSupportMixin:
                 weaknesses.append("client_specificity")
             if term_hits == 0 or kpi_hits == 0:
                 weaknesses.append("personalization")
-            if anchor_hits == 0 and chapter_id in {"c_1", "c_2", "c_3", "c_4", "c_5", "c_6"}:
+            if anchor_expected and anchor_hits == 0:
                 weaknesses.append("external_or_internal_anchor")
             if value_hits == 0:
                 weaknesses.append("business_value")
