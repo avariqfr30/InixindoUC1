@@ -8,6 +8,7 @@ from .runtime_components import (
     FirmAPIClient,
     LogoManager,
     Researcher,
+    SchemaMapper,
     StyleEngine,
 )
 

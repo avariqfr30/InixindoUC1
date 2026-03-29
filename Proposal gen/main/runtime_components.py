@@ -875,6 +875,20 @@ class FinancialAnalyzer:
     def __init__(self, ollama_client: Client):
         self.ollama = ollama_client
 
+    DEFAULT_DURATION_MONTHS = {
+        "diagnostic": 2.0,
+        "strategic": 3.0,
+        "transformation": 6.0,
+        "implementation": 5.0,
+    }
+
+    BASE_MONTHLY_DELIVERY_RATE = {
+        "diagnostic": 45_000_000,
+        "strategic": 60_000_000,
+        "transformation": 85_000_000,
+        "implementation": 95_000_000,
+    }
+
     @staticmethod
     def _format_idr(amount: int) -> str:
         amount = max(0, int(amount))
@@ -968,6 +982,86 @@ class FinancialAnalyzer:
         return max(0.75, min(2.4, raw))
 
     @classmethod
+    def _default_duration_months(cls, project_type: str) -> float:
+        return cls.DEFAULT_DURATION_MONTHS.get((project_type or "").strip().lower(), 4.0)
+
+    @classmethod
+    def _duration_months_or_default(cls, timeline: str, project_type: str) -> float:
+        return cls._duration_to_months(timeline) or cls._default_duration_months(project_type)
+
+    @classmethod
+    def _complexity_profile(
+        cls,
+        project_goal: str,
+        objective: str,
+        notes: str,
+        frameworks: str
+    ) -> Dict[str, Any]:
+        combined = " ".join([project_goal or "", objective or "", notes or "", frameworks or ""]).lower()
+        if not combined.strip():
+            return {"level": "moderat", "multiplier": 1.0, "signal_count": 0}
+
+        high_complexity = {
+            "multi": 0.08,
+            "integrasi": 0.10,
+            "integration": 0.10,
+            "core banking": 0.14,
+            "migrasi": 0.10,
+            "migration": 0.10,
+            "nasional": 0.06,
+            "enterprise": 0.06,
+            "regulasi": 0.08,
+            "regulatory": 0.08,
+            "compliance": 0.08,
+            "24/7": 0.06,
+            "high availability": 0.08,
+            "multi-site": 0.06,
+            "multisite": 0.06,
+            "security": 0.06,
+            "cyber": 0.06,
+            "data governance": 0.06,
+        }
+        medium_complexity = {
+            "dashboard": 0.03,
+            "governance": 0.04,
+            "kpi": 0.03,
+            "workflow": 0.03,
+            "automation": 0.04,
+            "cloud": 0.04,
+            "api": 0.04,
+            "audit": 0.04,
+            "change management": 0.05,
+            "training": 0.03,
+            "adoption": 0.03,
+            "rollout": 0.04,
+            "hypercare": 0.04,
+        }
+
+        multiplier = 1.0
+        signal_count = 0
+        for token, boost in high_complexity.items():
+            if token in combined:
+                multiplier += boost
+                signal_count += 1
+        for token, boost in medium_complexity.items():
+            if token in combined:
+                multiplier += boost
+                signal_count += 1
+
+        framework_tokens = [part.strip() for part in re.split(r"[,;/]| dan ", frameworks or "") if part.strip()]
+        if framework_tokens:
+            multiplier += min(0.12, max(0, len(framework_tokens) - 1) * 0.03)
+
+        multiplier = max(0.9, min(1.9, multiplier))
+        if multiplier >= 1.45:
+            level = "tinggi"
+        elif multiplier >= 1.15:
+            level = "menengah"
+        else:
+            level = "terkendali"
+        return {"level": level, "multiplier": multiplier, "signal_count": signal_count}
+
+    @classmethod
     def _scope_multiplier(
         cls,
         project_type: str,
@@ -992,24 +1086,58 @@ class FinancialAnalyzer:
         base = project_weight.get((project_type or "").strip().lower(), 1.0)
         base *= service_weight.get((service_type or "").strip().lower(), 1.0)
 
-        combined = " ".join([project_goal or "", objective or "", notes or "", frameworks or ""]).lower()
-        high_complexity = [
-            "multi", "integrasi", "core banking", "migrasi", "nasional", "enterprise",
-            "regulasi", "compliance", "24/7", "high availability", "multi-site", "multisite",
-        ]
-        medium_complexity = [
-            "dashboard", "governance", "kpi", "workflow", "automation",
-            "cloud", "api", "security", "audit", "change management",
-        ]
-        high_hits = sum(1 for token in high_complexity if token in combined)
-        medium_hits = sum(1 for token in medium_complexity if token in combined)
-        complexity_boost = min(0.55, (high_hits * 0.06) + (medium_hits * 0.025))
+        complexity_profile = cls._complexity_profile(project_goal, objective, notes, frameworks)
+        complexity_boost = max(0.0, complexity_profile["multiplier"] - 1.0)
 
         need_items = [part.strip() for part in re.split(r"[,+;/]| dan ", (project_goal or "").lower()) if part.strip()]
         breadth_boost = min(0.25, max(0, len(need_items) - 1) * 0.05)
 
         scope_multiplier = base * (1.0 + complexity_boost + breadth_boost)
         return max(0.75, min(2.4, scope_multiplier))
+
+    @classmethod
+    def _project_effort_baseline(
+        cls,
+        timeline: str,
+        project_type: str,
+        service_type: str,
+        project_goal: str,
+        objective: str,
+        notes: str,
+        frameworks: str,
+    ) -> Dict[str, Any]:
+        project_key = (project_type or "").strip().lower()
+        service_key = (service_type or "").strip().lower()
+        months = cls._duration_months_or_default(timeline, project_type)
+        monthly_rate = cls.BASE_MONTHLY_DELIVERY_RATE.get(project_key, 70_000_000)
+        service_multiplier = {
+            "training": 0.80,
+            "konsultan": 1.00,
+            "training dan konsultan": 1.12,
+        }.get(service_key, 1.0)
+        complexity_profile = cls._complexity_profile(project_goal, objective, notes, frameworks)
+
+        breadth_inputs = [objective, notes, project_goal, frameworks]
+        active_dimensions = sum(1 for item in breadth_inputs if str(item or "").strip())
+        breadth_multiplier = 1.0 + min(0.18, max(0, active_dimensions - 2) * 0.04)
+
+        effort_base = monthly_rate * months * service_multiplier * complexity_profile["multiplier"] * breadth_multiplier
+        effort_base = int(max(120_000_000, min(9_000_000_000, effort_base)))
+        return {
+            "months": months,
+            "monthly_rate": int(monthly_rate),
+            "complexity": complexity_profile,
+            "breadth_multiplier": breadth_multiplier,
+            "effort_base": effort_base,
+        }
+
+    @staticmethod
+    def _bounded_calibration(value: int, anchor: int, lower_ratio: float, upper_ratio: float) -> int:
+        if value <= 0 or anchor <= 0:
+            return max(value, anchor)
+        lower = int(anchor * lower_ratio)
+        upper = int(anchor * upper_ratio)
+        return max(lower, min(upper, value))
 
     @staticmethod
     def _compact_keywords(text: str, max_terms: int = 7) -> str:
@@ -1052,30 +1180,8 @@ class FinancialAnalyzer:
 
         finance_values = sorted(cls._extract_financial_values(finance_text))
         benchmark_values = sorted(cls._extract_financial_values(benchmark_text))
-
-        if finance_values:
-            finance_median = finance_values[len(finance_values) // 2]
-            financial_base = int(max(120_000_000, min(6_000_000_000, finance_median * 0.0015)))
-        else:
-            finance_median = None
-            financial_base = 350_000_000
-
-        if benchmark_values:
-            benchmark_median = benchmark_values[len(benchmark_values) // 2]
-            market_base = int(max(80_000_000, min(6_000_000_000, benchmark_median)))
-        else:
-            benchmark_median = None
-            market_base = financial_base
-
-        if finance_median and benchmark_median:
-            base_price = int((financial_base * 0.45) + (market_base * 0.55))
-        elif benchmark_median:
-            base_price = market_base
-        else:
-            base_price = financial_base
-
-        duration_factor = cls._duration_multiplier(timeline)
-        scope_factor = cls._scope_multiplier(
+        effort_profile = cls._project_effort_baseline(
+            timeline=timeline,
             project_type=project_type,
             service_type=service_type,
             project_goal=project_goal,
@@ -1083,25 +1189,53 @@ class FinancialAnalyzer:
             notes=notes,
             frameworks=frameworks,
         )
-        adjusted_base = int(base_price * duration_factor * scope_factor)
-        adjusted_base = int(max(120_000_000, min(9_000_000_000, adjusted_base)))
+        effort_base = effort_profile["effort_base"]
+
+        if finance_values:
+            finance_median = finance_values[len(finance_values) // 2]
+            financial_base = int(max(120_000_000, min(6_000_000_000, finance_median * 0.0015)))
+            financial_base = cls._bounded_calibration(financial_base, effort_base, 0.70, 1.80)
+        else:
+            finance_median = None
+            financial_base = effort_base
+
+        if benchmark_values:
+            benchmark_median = benchmark_values[len(benchmark_values) // 2]
+            market_base = int(max(80_000_000, min(6_000_000_000, benchmark_median)))
+            market_base = cls._bounded_calibration(market_base, effort_base, 0.75, 1.60)
+        else:
+            benchmark_median = None
+            market_base = effort_base
+
+        if finance_median and benchmark_median:
+            base_price = int((effort_base * 0.65) + (market_base * 0.25) + (financial_base * 0.10))
+        elif benchmark_median:
+            base_price = int((effort_base * 0.78) + (market_base * 0.22))
+        elif finance_median:
+            base_price = int((effort_base * 0.88) + (financial_base * 0.12))
+        else:
+            base_price = effort_base
+
+        calibration_cap = max(effort_base, int(financial_base * 1.75)) if finance_median else effort_base
+        adjusted_base = int(max(120_000_000, min(9_000_000_000, min(base_price, calibration_cap))))
 
         basic = int(adjusted_base * 0.72)
         standard = max(basic + 40_000_000, adjusted_base)
         enterprise = max(standard + 80_000_000, int(adjusted_base * 1.65))
 
-        months = cls._duration_to_months(timeline)
+        months = effort_profile["months"]
         duration_note = f"{months:.1f} bulan" if months else "durasi belum spesifik"
+        complexity_level = effort_profile["complexity"]["level"]
         if finance_median:
             analysis = (
-                f"Estimasi untuk {client_name} memakai sinyal finansial publik "
-                f"(acuan {cls._format_idr(finance_median)}) lalu disesuaikan oleh durasi ({duration_note}) "
-                f"dan skala/scope proyek."
+                f"Estimasi untuk {client_name} terutama dihitung dari effort delivery proyek "
+                f"({duration_note}, kompleksitas {complexity_level}) dan hanya dikalibrasi ringan "
+                f"dengan sinyal finansial publik ({cls._format_idr(finance_median)})."
             )
         else:
             analysis = (
-                f"Data finansial publik {client_name} terbatas; estimasi dibuat dari benchmark OSINT "
-                f"dan disesuaikan oleh durasi ({duration_note}) serta skala/scope proyek."
+                f"Data finansial publik {client_name} terbatas; estimasi terutama dihitung dari effort delivery proyek "
+                f"({duration_note}, kompleksitas {complexity_level}) lalu dicek dengan benchmark OSINT yang tersedia."
             )
 
         return {
@@ -1241,6 +1375,13 @@ class FinancialAnalyzer:
         {commercial_note}
 
         Berdasarkan data di atas, estimasikan kapasitas finansial mereka dan berikan 3 opsi estimasi budget proyek TI/Konsultasi.
+        PRIORITAS PENENTUAN HARGA:
+        1. Durasi/length proyek
+        2. Tingkat kesulitan, kompleksitas integrasi, regulasi, dan perubahan
+        3. Jenis proyek dan jenis layanan
+        4. Benchmark OSINT
+        5. Sinyal finansial publik klien hanya sebagai kalibrasi, bukan faktor dominan
+
         FORMAT WAJIB JSON murni tanpa markdown, tanpa teks tambahan:
         {{
             "analysis": "Ringkasan 1 kalimat kekuatan finansial berdasarkan data (atau sebutkan estimasi jika data terbatas).",
@@ -1250,7 +1391,7 @@ class FinancialAnalyzer:
                 {{"tier": "Enterprise", "price": "Rp <angka>"}}
             ]
         }}
-        Pastikan angka mempertimbangkan durasi dan skala/scope proyek selain data OSINT.
+        Pastikan angka terutama mempertimbangkan durasi, tingkat kesulitan, dan scope proyek; jangan bertumpu hanya pada pendapatan tahunan klien.
         """
         try:
             res = self.ollama.chat(
