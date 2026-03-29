@@ -1,6 +1,6 @@
 flask
 flask-cors
-waitress
+waitress>=3.0,<4.0
 python-docx
 pandas
 ollama
