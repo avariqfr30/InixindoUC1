@@ -160,6 +160,10 @@ class FirmAPIClient:
             "verified": False,
         }
 
+    @staticmethod
+    def _has_osint_evidence(summary: str) -> bool:
+        return any(line.strip().startswith("Sumber eksternal") for line in (summary or "").splitlines())
+
     def get_project_standards(self, project_type: str) -> Dict[str, str]:
         if self.demo_mode:
             logger.info("Using demo standards for project type: %s", project_type)
@@ -198,7 +202,7 @@ class FirmAPIClient:
     def get_client_relationship(self, client_name: str) -> Dict[str, Any]:
         if self.uses_demo_logic():
             summary = Researcher.get_client_writer_collaboration(client_name, WRITER_FIRM_NAME)
-            has_evidence = ProposalGenerator._has_external_evidence(summary)
+            has_evidence = self._has_osint_evidence(summary)
             return {
                 "summary": summary,
                 "mode": "existing" if has_evidence else "new",

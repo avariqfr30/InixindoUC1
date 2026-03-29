@@ -80,10 +80,10 @@ class ProposalGenerator(ProposalEngineMixin, ProposalSupportMixin):
         self._chapter_context_cache: Dict[str, Dict[str, str]] = {}
         self._cache_lock = threading.RLock()
 
-    @staticmethod
-    def _target_words(chapter: Dict[str, Any]) -> int:
+    @classmethod
+    def _target_words(cls, chapter: Dict[str, Any]) -> int:
         m = re.search(r'Target:\s*(\d+)\s*words', chapter.get('length_intent', ''), re.IGNORECASE)
-        return int(m.group(1)) if m else ProposalGenerator.DEFAULT_CHAPTER_TARGET_WORDS
+        return int(m.group(1)) if m else cls.DEFAULT_CHAPTER_TARGET_WORDS
 
     @staticmethod
     def _word_count(text: str) -> int:
