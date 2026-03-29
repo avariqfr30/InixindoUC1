@@ -140,6 +140,25 @@ INDUSTRY_VALUE_DRIVERS = {
     ],
 }
 
+CHAPTER_STANDARD_RULES = {
+    "c_2": {
+        "problem_definition_pattern": {
+            "subsections": [
+                "2.2 Business Context",
+                "2.3 Key Challenge",
+                "2.4 Underlying Gap",
+                "2.5 Implication / Risk",
+                "2.6 Need for Solution",
+            ],
+            "focus_note": (
+                "Setelah 2.1 Kebutuhan atau Keinginan Klien, wajib gunakan sub-bab standar perusahaan dalam urutan: "
+                "2.2 Business Context -> 2.3 Key Challenge -> 2.4 Underlying Gap -> 2.5 Implication / Risk -> 2.6 Need for Solution. "
+                "Tegaskan gap antara current state dan target state, lalu turunkan menjadi kebutuhan solusi yang jelas."
+            ),
+        }
+    }
+}
+
 DATA_MAPPING = {
     "entity": "Client Entity",
     "topic": "Strategic Initiative",
@@ -282,9 +301,16 @@ UNIVERSAL_STRUCTURE = [
     },
     {
         "id": "c_2", "title": "BAB II – PERMASALAHAN",
-        "subs": ["2.1 Kebutuhan atau Keinginan Klien", "2.2 Rumusan Masalah yang Harus Diselesaikan"],
+        "subs": [
+            "2.1 Kebutuhan atau Keinginan Klien",
+            "2.2 Business Context",
+            "2.3 Key Challenge",
+            "2.4 Underlying Gap",
+            "2.5 Implication / Risk",
+            "2.6 Need for Solution",
+        ],
         "keywords": "problem statement pain points client needs",
-        "length_intent": "Tangkap dengan jelas apa yang benar-benar dibutuhkan atau diinginkan klien serta konteks masalah inti yang harus diselesaikan. (Target: 750 words)."
+        "length_intent": "Tangkap dengan jelas apa yang benar-benar dibutuhkan atau diinginkan klien, lalu turunkan pola definisi masalah standar perusahaan dari business context hingga need for solution. (Target: 750 words)."
     },
     {
         "id": "c_3", "title": "BAB III – KLASIFIKASI KEBUTUHAN",

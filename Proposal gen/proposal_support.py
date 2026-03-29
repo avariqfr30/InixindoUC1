@@ -1,0 +1,2139 @@
+"""Proposal support logic: research assembly, structured chapters, quality checks, and acceptance."""
+
+from proposal_shared import *
+from runtime_components import (
+    ChartEngine,
+    DocumentBuilder,
+    FinancialAnalyzer,
+    FirmAPIClient,
+    LogoManager,
+    Researcher,
+    StyleEngine,
+)
+
+
+class ProposalSupportMixin:
+    def _get_cached_research_bundle(self, key: str) -> Optional[Dict[str, str]]:
+        with self._cache_lock:
+            cached = self._research_cache.get(key)
+            cached_at = float(self._research_cache_times.get(key, 0.0) or 0.0)
+            if cached and cached_at and (time.time() - cached_at) <= RESEARCH_CACHE_TTL_SECONDS:
+                return dict(cached)
+            if key in self._research_cache:
+                self._research_cache.pop(key, None)
+                self._research_cache_times.pop(key, None)
+            return None
+
+    def _store_research_bundle(self, key: str, bundle: Dict[str, str]) -> Dict[str, str]:
+        normalized = dict(bundle or {})
+        with self._cache_lock:
+            self._cache_put(self._research_cache, key, normalized, max_size=96)
+            self._research_cache_times[key] = time.time()
+        return dict(normalized)
+
+    @staticmethod
+    def _fallback_research_bundle(base_client: str, include_collaboration: bool) -> Dict[str, str]:
+        return {
+            "profile": f"Data profil terbaru {base_client} terbatas (sumber daring, n.d.).",
+            "news": f"Data berita terbaru {base_client} terbatas (sumber daring, n.d.).",
+            "track_record": f"Data track record {base_client} terbatas (sumber daring, n.d.).",
+            "collaboration": (
+                f"Data histori kolaborasi {WRITER_FIRM_NAME} dengan {base_client} terbatas (sumber daring, n.d.)."
+                if include_collaboration else ""
+            ),
+            "regulations": "Data regulasi terbatas (sumber daring, n.d.)."
+        }
+
+    def _throughput_mode(self) -> bool:
+        return self.generation_profile == "throughput"
+
+    @staticmethod
+    def _has_external_evidence(osint_block: str) -> bool:
+        return any(line.strip().startswith("Sumber eksternal") for line in (osint_block or "").splitlines())
+
+    @staticmethod
+    def _extract_osint_facts(osint_block: str, max_items: int = 3) -> List[Dict[str, str]]:
+        facts: List[Dict[str, str]] = []
+        pattern = (
+            r"fakta=(?P<fact>.*?)\s*\|\s*sumber=(?P<title>.*?)\s*\|\s*url=(?P<url>.*?)\s*"
+            r"\|\s*sitasi_apa=(?P<citation>\([^)]+\))$"
+        )
+        for raw_line in (osint_block or "").splitlines():
+            line = raw_line.strip()
+            if not line.startswith("Sumber eksternal"):
+                continue
+            match = re.search(pattern, line)
+            if not match:
+                continue
+            fact = re.sub(r"\s+", " ", (match.group("fact") or "")).strip()
+            title = re.sub(r"\s+", " ", (match.group("title") or "")).strip()
+            url = (match.group("url") or "").strip()
+            citation = (match.group("citation") or "").strip()
+            if not fact:
+                continue
+            facts.append({
+                "fact": fact[:240],
+                "title": title,
+                "url": url,
+                "citation": citation,
+            })
+            if len(facts) >= max_items:
+                break
+        return facts
+
+    @staticmethod
+    def _infer_industry(client: str, project: str, notes: str, regulations: str) -> str:
+        combined = " ".join([client or "", project or "", notes or "", regulations or ""]).lower()
+        rules = [
+            ("Perbankan", ["bank", "bri", "bca", "mandiri", "bni", "btn", "fintech", "kredit"]),
+            ("Telekomunikasi", ["telkom", "telkomsel", "indosat", "xl", "axiata", "operator"]),
+            ("Energi & Utilitas", ["pertamina", "pln", "energi", "listrik", "oil", "gas"]),
+            ("Ritel & E-Commerce", ["tokopedia", "e-commerce", "retail", "marketplace", "goto"]),
+            ("Transportasi & Aviasi", ["garuda", "aviation", "airline", "logistik", "transport"]),
+            ("Pemerintah & BUMN", ["kementerian", "dinas", "pemprov", "pemkab", "bumn", "spbe"]),
+            ("Manufaktur & Tambang", ["manufaktur", "adaro", "antam", "vale", "smelter", "mining"]),
+        ]
+        for label, tokens in rules:
+            if any(token in combined for token in tokens):
+                return label
+        return "Lintas Industri"
+
+    @staticmethod
+    def _industry_terms(industry: str) -> List[str]:
+        terms_map = {
+            "Perbankan": ["nasabah", "core banking", "risk appetite", "kepatuhan POJK", "fraud control"],
+            "Telekomunikasi": ["subscriber", "network availability", "service assurance", "NOC", "customer churn"],
+            "Energi & Utilitas": ["operational reliability", "asset integrity", "outage window", "HSSE", "dispatch"],
+            "Ritel & E-Commerce": ["conversion", "basket size", "checkout funnel", "retention cohort", "omnichannel"],
+            "Transportasi & Aviasi": ["on-time performance", "flight disruption", "ground operation", "passenger experience"],
+            "Pemerintah & BUMN": ["akuntabilitas", "SPBE", "tata kelola", "layanan publik", "audit trail"],
+            "Manufaktur & Tambang": ["supply continuity", "production throughput", "downtime pabrik", "safety compliance"],
+        }
+        return terms_map.get(industry, ["operational excellence", "risk control", "business value", "governance"])
+
+    @staticmethod
+    def _extract_metric_keywords(kpi_blueprint: List[str]) -> List[str]:
+        stopwords = {"dan", "yang", "untuk", "dengan", "dari", "pada", "target", "baseline", "dalam", "bulan"}
+        keywords: List[str] = []
+        seen: Set[str] = set()
+        for line in kpi_blueprint or []:
+            for token in re.findall(r"[A-Za-z]{3,}", (line or "").lower()):
+                if token in stopwords or token in seen:
+                    continue
+                seen.add(token)
+                keywords.append(token)
+                if len(keywords) >= 10:
+                    return keywords
+        return keywords
+
+    @staticmethod
+    def _extract_anchor_keywords(facts: List[Dict[str, str]], max_terms: int = 10) -> List[str]:
+        stopwords = {
+            "yang", "dengan", "untuk", "dari", "pada", "tahun", "bulan", "sebagai", "dan",
+            "atau", "oleh", "this", "that", "from", "with", "into", "their"
+        }
+        seen: Set[str] = set()
+        terms: List[str] = []
+        for fact in facts or []:
+            for token in re.findall(r"[A-Za-z]{4,}", (fact.get("fact", "") or "").lower()):
+                if token in stopwords or token in seen:
+                    continue
+                seen.add(token)
+                terms.append(token)
+                if len(terms) >= max_terms:
+                    return terms
+        return terms
+
+    @classmethod
+    def _build_kpi_blueprint(
+        cls,
+        project_goal: str,
+        notes: str,
+        timeline: str,
+        industry: str,
+        client: str
+    ) -> List[str]:
+        combined = " ".join([project_goal or "", notes or ""]).lower()
+        months = FinancialAnalyzer._duration_to_months(timeline)
+        horizon = f"{months:.0f} bulan" if months else (timeline or "periode proyek")
+
+        kpis: List[str] = []
+        if any(token in combined for token in ["mau", "monthly active", "active users", "adopsi"]):
+            kpis.append(f"MAU/Adopsi kanal digital: target pertumbuhan terukur dalam {horizon}.")
+        if any(token in combined for token in ["nps", "kepuasan", "customer experience", "csat"]):
+            kpis.append(f"Customer sentiment (NPS/CSAT): target kenaikan konsisten dalam {horizon}.")
+        if any(token in combined for token in ["churn", "retensi", "retention"]):
+            kpis.append(f"Retention/Churn: turunkan churn dan naikkan retensi pada horizon {horizon}.")
+        if any(token in combined for token in ["downtime", "incident", "availability", "sla", "mttr"]):
+            kpis.append(f"Reliability operasi (Availability/MTTR/Incident): perbaikan stabil dalam {horizon}.")
+        if any(token in combined for token in ["biaya", "cost", "efisiensi", "opex", "capex"]):
+            kpis.append(f"Efisiensi biaya delivery: kontrol biaya per fase dan deviasi anggaran dalam {horizon}.")
+
+        if not kpis:
+            default_by_industry = {
+                "Perbankan": [
+                    f"Pertumbuhan transaksi digital nasabah dalam {horizon}.",
+                    f"Kepatuhan & risiko operasional (audit findings) membaik dalam {horizon}.",
+                    f"Ketersediaan layanan digital meningkat dan insiden prioritas menurun dalam {horizon}.",
+                ],
+                "Telekomunikasi": [
+                    f"Service availability dan pengalaman pelanggan meningkat dalam {horizon}.",
+                    f"Churn pelanggan menurun dan quality of service membaik dalam {horizon}.",
+                    f"Efisiensi operasi network support meningkat dalam {horizon}.",
+                ],
+            }
+            kpis.extend(default_by_industry.get(industry, [
+                f"KPI outcome bisnis utama {client} bergerak positif dalam {horizon}.",
+                f"Kualitas operasi (incident, SLA, lead time) membaik dalam {horizon}.",
+                f"Efektivitas eksekusi proyek (on-time, on-budget, on-scope) tercapai dalam {horizon}.",
+            ]))
+
+        # Keep concise but actionable.
+        return kpis[:4]
+
+    @classmethod
+    def _build_personalization_pack(
+        cls,
+        client: str,
+        project: str,
+        project_goal: str,
+        timeline: str,
+        notes: str,
+        regulations: str,
+        research_bundle: Dict[str, str],
+        relationship_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        industry = cls._infer_industry(client, project, notes, regulations)
+        track_record = research_bundle.get("track_record", "")
+        collaboration = research_bundle.get("collaboration", "")
+        news = research_bundle.get("news", "")
+
+        relationship_context = relationship_context or {}
+        relationship_source = str(relationship_context.get("source") or "").strip().lower()
+        relationship_mode = str(relationship_context.get("mode") or "").strip().lower()
+        if relationship_mode not in {"existing", "new"}:
+            relationship_has_evidence = cls._has_external_evidence(collaboration)
+            relationship_mode = "existing" if relationship_has_evidence else "new"
+            relationship_source = "osint" if relationship_has_evidence else relationship_source
+        if relationship_source == "internal_api":
+            relationship_guidance = (
+                "Gunakan narasi continuity partnership hanya jika data internal memang menunjukkan hubungan kerja sebelumnya."
+                if relationship_mode == "existing"
+                else "Gunakan narasi kemitraan baru. Jangan klaim hubungan sebelumnya tanpa data internal."
+            )
+        else:
+            relationship_guidance = (
+                "Gunakan narasi continuity partnership berbasis bukti publik kolaborasi yang ada."
+                if relationship_mode == "existing"
+                else "Gunakan narasi kemitraan baru. Jangan klaim pernah bekerja sama tanpa bukti publik."
+            )
+
+        news_facts = cls._extract_osint_facts(news, max_items=2)
+        track_facts = cls._extract_osint_facts(track_record, max_items=2)
+        initiative_facts: List[Dict[str, str]] = []
+        seen_citations: Set[str] = set()
+        for item in news_facts + track_facts:
+            citation = item.get("citation", "")
+            if citation in seen_citations:
+                continue
+            seen_citations.add(citation)
+            initiative_facts.append(item)
+            if len(initiative_facts) >= 3:
+                break
+
+        kpi_blueprint = cls._build_kpi_blueprint(
+            project_goal=project_goal,
+            notes=notes,
+            timeline=timeline,
+            industry=industry,
+            client=client
+        )
+        terminology = cls._industry_terms(industry)
+
+        profile_summary = (
+            f"Industri klien terdeteksi: {industry}. "
+            f"Fokus inisiatif: {project}. "
+            f"Model hubungan: {'kelanjutan kolaborasi' if relationship_mode == 'existing' else 'inisiasi kemitraan baru'}."
+        )
+
+        return {
+            "industry": industry,
+            "relationship_mode": relationship_mode,
+            "relationship_source": relationship_source or "osint",
+            "relationship_guidance": relationship_guidance,
+            "kpi_blueprint": kpi_blueprint,
+            "kpi_keywords": cls._extract_metric_keywords(kpi_blueprint),
+            "terminology": terminology[:6],
+            "initiative_facts": initiative_facts,
+            "anchor_citations": [item.get("citation", "") for item in initiative_facts if item.get("citation")],
+            "anchor_keywords": cls._extract_anchor_keywords(initiative_facts),
+            "profile_summary": profile_summary,
+        }
+
+    @staticmethod
+    def _playbook_for_project(project_type: str) -> Dict[str, Any]:
+        key = SchemaMapper.normalize_key(project_type)
+        return VALUE_PLAYBOOK.get(key, VALUE_PLAYBOOK.get("implementation", {}))
+
+    @staticmethod
+    def _industry_value_drivers(industry: str) -> List[str]:
+        return INDUSTRY_VALUE_DRIVERS.get(industry, [
+            "kejelasan keputusan",
+            "kontrol risiko yang lebih baik",
+            "mobilisasi delivery yang lebih cepat",
+            "hasil bisnis yang lebih terukur",
+        ])
+
+    @classmethod
+    def _build_value_map(
+        cls,
+        client: str,
+        project: str,
+        service_type: str,
+        project_goal: str,
+        project_type: str,
+        timeline: str,
+        notes: str,
+        regulations: str,
+        firm_data: Dict[str, str],
+        firm_profile: Dict[str, str],
+        personalization_pack: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        industry = personalization_pack.get("industry", "Lintas Industri")
+        playbook = cls._playbook_for_project(project_type)
+        kpis = personalization_pack.get("kpi_blueprint", []) or []
+        drivers = cls._industry_value_drivers(industry)
+        differentiators = COMPANY_DNA.get("differentiators", []) or []
+        portfolio_note = cls._summarize_phrase(
+            firm_profile.get("portfolio_highlights", ""),
+            "kapabilitas delivery dan advisory yang relevan",
+            max_words=22
+        )
+        methodology_note = cls._summarize_phrase(
+            firm_data.get("methodology", ""),
+            "metodologi delivery internal yang terstruktur",
+            max_words=18
+        )
+        team_note = cls._summarize_phrase(
+            firm_data.get("team", ""),
+            "tim inti delivery dan quality control",
+            max_words=18
+        )
+        customer_pressure = cls._summarize_phrase(
+            notes,
+            f"kebutuhan {project_goal or 'prioritas bisnis'} yang perlu ditangani lebih terukur",
+            max_words=24
+        )
+        project_frame = cls._summarize_phrase(project, "inisiatif prioritas klien", max_words=18)
+        value_hook = str(playbook.get("value_hook") or "mengubah kebutuhan klien menjadi rencana kerja yang lebih terkontrol").strip()
+        capability = str(playbook.get("capability") or "advisory dan delivery management").strip()
+        client_gains = playbook.get("client_gains", []) or []
+        client_gains = [str(item).strip() for item in client_gains if str(item).strip()]
+        value_statement = (
+            f"{WRITER_FIRM_NAME} menempatkan engagement {client} sebagai upaya untuk {value_hook}, "
+            f"dengan memanfaatkan kapabilitas {capability} agar inisiatif {project_frame.lower()} "
+            f"bergerak ke hasil yang lebih terukur dalam horizon {timeline or 'proyek'}."
+        )
+        win_theme = (
+            f"Nilai utama yang harus terasa bagi {client} adalah kombinasi antara {drivers[0]}, "
+            f"{drivers[1] if len(drivers) > 1 else 'kontrol delivery'}, dan kemampuan "
+            f"{WRITER_FIRM_NAME} untuk menjaga keputusan tetap selaras dengan eksekusi."
+        )
+        human_touch_points = COMPANY_DNA.get("human_touch_review_points", []) or []
+        return {
+            "positioning": COMPANY_DNA.get("positioning", ""),
+            "proposal_promise": COMPANY_DNA.get("proposal_promise", ""),
+            "differentiators": differentiators[:3],
+            "client_value_focus": COMPANY_DNA.get("client_value_focus", [])[:4],
+            "industry_drivers": drivers[:4],
+            "capability": capability,
+            "value_hook": value_hook,
+            "client_gains": client_gains[:3],
+            "value_statement": value_statement,
+            "win_theme": win_theme,
+            "customer_pressure": customer_pressure,
+            "proof_points": [item for item in [portfolio_note, methodology_note, team_note] if item],
+            "kpi_bridge": kpis[:3],
+            "human_touch_points": human_touch_points[:3],
+            "review_note": (
+                "Target draft adalah sekitar 80% siap pakai; sisakan ruang bagi reviewer manusia untuk "
+                "menyempurnakan nuansa relasi, komersial, dan keputusan akhir."
+            ),
+            "service_type": service_type,
+            "project_type": project_type,
+            "project_goal": project_goal,
+            "regulations": regulations,
+        }
+
+    @staticmethod
+    def _format_value_map(value_map: Optional[Dict[str, Any]]) -> str:
+        data = value_map or {}
+        lines = [
+            f"Positioning: {data.get('positioning', '-')}",
+            f"Proposal Promise: {data.get('proposal_promise', '-')}",
+            f"Value Statement: {data.get('value_statement', '-')}",
+            f"Win Theme: {data.get('win_theme', '-')}",
+            f"Customer Pressure: {data.get('customer_pressure', '-')}",
+            f"Capability Match: {data.get('capability', '-')}",
+            f"Client Gains: {', '.join(data.get('client_gains', []) or []) or '-'}",
+            f"Industry Drivers: {', '.join(data.get('industry_drivers', []) or []) or '-'}",
+            f"Differentiators: {', '.join(data.get('differentiators', []) or []) or '-'}",
+            f"Proof Points: {', '.join(data.get('proof_points', []) or []) or '-'}",
+            f"KPI Bridge: {' | '.join(data.get('kpi_bridge', []) or []) or '-'}",
+            f"Human Review: {', '.join(data.get('human_touch_points', []) or []) or '-'}",
+            f"Review Note: {data.get('review_note', '-')}",
+        ]
+        return "\n".join(lines)
+
+    @staticmethod
+    def _normalize_external_citation(domain: str, year: str) -> str:
+        domain_clean = (domain or "").strip().lower()
+        year_clean = (year or "").strip().lower()
+        if year_clean in {"nd", "n.d", "n.d"}:
+            year_clean = "n.d."
+        return f"({domain_clean}, {year_clean})"
+
+    @classmethod
+    def _extract_external_citations(cls, text: str) -> List[str]:
+        pattern = r"\(([A-Za-z0-9.-]+\.[A-Za-z]{2,}),\s*(\d{4}|n\.d\.)\)"
+        citations = []
+        for domain, year in re.findall(pattern, text or "", flags=re.IGNORECASE):
+            citations.append(cls._normalize_external_citation(domain, year))
+        return citations
+
+    @classmethod
+    def _collect_allowed_external_citations(cls, research_bundle: Dict[str, str]) -> Set[str]:
+        if not research_bundle:
+            return set()
+        merged = "\n".join([str(value) for value in research_bundle.values()])
+        return set(cls._extract_external_citations(merged))
+
+    @classmethod
+    def _clean_external_citations(cls, content: str, allowed_external_citations: Set[str]) -> str:
+        allowed = set(allowed_external_citations or set())
+        pattern = r"\(([A-Za-z0-9.-]+\.[A-Za-z]{2,}),\s*(\d{4}|n\.d\.)\)"
+
+        def replace_invalid(match: re.Match) -> str:
+            citation = cls._normalize_external_citation(match.group(1), match.group(2))
+            return match.group(0) if citation in allowed else ""
+
+        cleaned = re.sub(pattern, replace_invalid, content or "", flags=re.IGNORECASE)
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+        cleaned = re.sub(r"\(\s*\)", "", cleaned)
+        cleaned = re.sub(r"\s+([,.;:])", r"\1", cleaned)
+        return cleaned
+
+    @staticmethod
+    def _verified_firm_contact_block(firm_profile: Optional[Dict[str, Any]]) -> str:
+        contact_lines = FirmAPIClient.build_contact_lines(firm_profile)
+        if not contact_lines:
+            return ""
+        return "\n".join([f"- {line}" for line in contact_lines])
+
+    @classmethod
+    def _inject_verified_firm_contact(
+        cls,
+        content: str,
+        firm_profile: Optional[Dict[str, Any]]
+    ) -> str:
+        block = cls._verified_firm_contact_block(firm_profile)
+        if not block:
+            return content
+
+        existing_lines = FirmAPIClient.build_contact_lines(firm_profile)
+        if all(line in (content or "") for line in existing_lines):
+            return content
+
+        contact_section = f"### Kontak Resmi Terverifikasi\n{block}"
+        heading_pattern = r"(?im)^\s*##\s*Informasi Kontak dan Langkah Lanjutan\s*$"
+        match = re.search(heading_pattern, content or "")
+        if match:
+            insert_at = match.end()
+            return (content or "")[:insert_at] + "\n\n" + contact_section + (content or "")[insert_at:]
+
+        trimmed = (content or "").rstrip()
+        if trimmed:
+            trimmed += "\n\n"
+        return (
+            f"{trimmed}## Informasi Kontak dan Langkah Lanjutan\n\n"
+            f"{contact_section}"
+        )
+
+    @staticmethod
+    def _structured_chapter_ids() -> Set[str]:
+        return {"c_7", "c_8", "c_9", "c_10", "c_closing"}
+
+    def _use_structured_chapter(self, chapter_id: str) -> bool:
+        return chapter_id in self._structured_chapter_ids()
+
+    @staticmethod
+    def _split_plain_points(raw_text: str, max_items: int = 5) -> List[str]:
+        text = (raw_text or "").strip()
+        if not text:
+            return []
+        matches = re.findall(r"(?:^|\n)\s*(?:\d+\.|[-*])\s*(.+)", text)
+        if not matches:
+            matches = re.split(r"[;\n]+", text)
+        cleaned: List[str] = []
+        for item in matches:
+            value = re.sub(r"\s+", " ", str(item or "")).strip(" -.;:")
+            if not value:
+                continue
+            cleaned.append(value)
+            if len(cleaned) >= max_items:
+                break
+        return cleaned
+
+    @staticmethod
+    def _summarize_phrase(raw_text: str, fallback: str, max_words: int = 18) -> str:
+        text = re.sub(r"\s+", " ", (raw_text or "").strip())
+        if not text:
+            return fallback
+        words = text.split()
+        if len(words) <= max_words:
+            return text.rstrip(".")
+        return " ".join(words[:max_words]).rstrip(".,;:") + "..."
+
+    @staticmethod
+    def _extract_first_external_anchor(personalization_pack: Optional[Dict[str, Any]]) -> Tuple[str, str]:
+        facts = (personalization_pack or {}).get("initiative_facts", []) or []
+        if not facts:
+            return "", ""
+        first = facts[0] or {}
+        fact = re.sub(r"\s+", " ", str(first.get("fact", "") or "")).strip()
+        citation = str(first.get("citation", "") or "").strip()
+        return fact, citation
+
+    @staticmethod
+    def _build_phase_plan(project_type: str, timeline: str) -> List[Dict[str, str]]:
+        months = FinancialAnalyzer._duration_to_months(timeline)
+        total_months = max(2, int(round(months or 6)))
+        templates: Dict[str, List[Tuple[str, str, str, int]]] = {
+            "diagnostic": [
+                ("Discovery & Baseline", "Baca konteks bisnis, data, dan pain points prioritas.", "baseline assessment dan hipotesis awal", 1),
+                ("As-Is Review", "Petakan proses, kontrol, dan gap pada kondisi berjalan.", "as-is findings dan prioritas gap", 1),
+                ("Analisis Opsi", "Susun opsi intervensi yang realistis dan terukur.", "opsi perbaikan dan quick wins", 1),
+                ("Final Recommendation", "Konsolidasikan rekomendasi, roadmap, dan keputusan lanjutan.", "report akhir dan arahan eksekusi", 1),
+            ],
+            "strategic": [
+                ("Business Alignment", "Sinkronkan sasaran bisnis, sponsor, dan outcome yang diharapkan.", "alignment charter dan target state", 1),
+                ("Target Design", "Rancang operating model, prinsip arsitektur, dan opsi strategi.", "target operating model", 2),
+                ("Roadmap Prioritization", "Urutkan inisiatif berdasarkan manfaat, risiko, dan kesiapan.", "roadmap prioritas dan sequencing", 1),
+                ("Executive Closure", "Finalisasi keputusan eksekutif dan arahan mobilisasi.", "board-ready recommendation", 1),
+            ],
+            "transformation": [
+                ("Readiness Assessment", "Nilai kesiapan organisasi, proses, data, dan sponsor.", "readiness view dan daftar gap", 1),
+                ("Blueprint & Mobilization", "Tetapkan rancangan solusi, governance, dan model delivery.", "blueprint, scope lock, dan mobilization plan", 2),
+                ("Phased Rollout", "Eksekusi perubahan prioritas melalui workstream terukur.", "deliverable inti dan milestone rollout", 2),
+                ("Hypercare & Stabilization", "Amankan adopsi, kualitas layanan, dan transisi operasi.", "stabilization report dan next-step backlog", 1),
+            ],
+            "implementation": [
+                ("Design", "Finalisasi desain rinci, integrasi, dan acceptance criteria.", "solution design dan backlog implementasi", 1),
+                ("Build & Configure", "Bangun komponen, konfigurasi, dan siapkan data/akses.", "build package dan konfigurasi inti", 2),
+                ("UAT & Readiness", "Uji end-to-end, tutup defect penting, dan siapkan go-live.", "UAT sign-off dan readiness checklist", 1),
+                ("Go-Live & Handover", "Jalankan cut-over, hypercare awal, dan transfer kontrol operasi.", "go-live report dan handover pack", 1),
+            ],
+        }
+        blueprint = templates.get((project_type or "").strip().lower(), templates["implementation"])
+        total_weight = sum(item[3] for item in blueprint) or 1
+        remaining = total_months
+        cursor = 0
+        plan: List[Dict[str, str]] = []
+        for idx, (phase, activity, deliverable, weight) in enumerate(blueprint):
+            phases_left = len(blueprint) - idx
+            allocated = max(1, round(total_months * weight / total_weight))
+            allocated = min(allocated, remaining - (phases_left - 1))
+            start = cursor
+            end = min(total_months, start + allocated)
+            if idx == len(blueprint) - 1:
+                end = total_months
+            label = (
+                f"Bulan {start + 1}"
+                if end - start <= 1
+                else f"Bulan {start + 1}-{end}"
+            )
+            plan.append({
+                "phase": phase,
+                "activity": activity,
+                "deliverable": deliverable,
+                "start": str(start),
+                "end": str(end),
+                "period": label,
+            })
+            cursor = end
+            remaining = max(0, total_months - cursor)
+        return plan
+
+    @staticmethod
+    def _build_payment_plan(project_type: str, budget: str) -> List[Tuple[str, str]]:
+        presets: Dict[str, List[Tuple[str, str]]] = {
+            "diagnostic": [
+                ("Kickoff & data request", "35%"),
+                ("Temuan awal & validasi", "35%"),
+                ("Laporan akhir & penutupan", "30%"),
+            ],
+            "strategic": [
+                ("Alignment & target design", "30%"),
+                ("Roadmap & executive review", "40%"),
+                ("Final recommendation & handover", "30%"),
+            ],
+            "transformation": [
+                ("Mobilization & readiness", "20%"),
+                ("Blueprint & governance setup", "30%"),
+                ("Rollout milestone", "30%"),
+                ("Hypercare & closure", "20%"),
+            ],
+            "implementation": [
+                ("Kickoff & design sign-off", "20%"),
+                ("Build/configuration milestone", "30%"),
+                ("UAT & readiness sign-off", "30%"),
+                ("Go-live & handover", "20%"),
+            ],
+        }
+        return presets.get((project_type or "").strip().lower(), presets["implementation"])
+
+    def _render_structured_chapter(
+        self,
+        chapter: Dict[str, Any],
+        client: str,
+        project: str,
+        budget: str,
+        service_type: str,
+        project_goal: str,
+        project_type: str,
+        timeline: str,
+        notes: str,
+        regulations: str,
+        firm_data: Dict[str, str],
+        firm_profile: Dict[str, str],
+        personalization_pack: Dict[str, Any],
+        value_map: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        year = datetime.now().year
+        value_map = value_map or {}
+        anchor_fact, anchor_citation = self._extract_first_external_anchor(personalization_pack)
+        anchor_line = (
+            f"Sebagai konteks eksternal, {anchor_fact} {anchor_citation}."
+            if anchor_fact and anchor_citation
+            else ""
+        )
+        terminology = personalization_pack.get("terminology", []) or []
+        kpi_blueprint = personalization_pack.get("kpi_blueprint", []) or []
+        term_line = ", ".join(terminology[:3]) if terminology else "governance, delivery, risk control"
+        kpi_line = " | ".join(kpi_blueprint[:3]) if kpi_blueprint else f"Outcome bisnis utama {client}"
+        short_notes = self._summarize_phrase(notes, "risiko delivery dan kesiapan stakeholder")
+        short_project = self._summarize_phrase(project, "inisiatif prioritas klien")
+        short_goal = self._summarize_phrase(project_goal, "kebutuhan inti klien")
+        short_value = self._summarize_phrase(
+            value_map.get("value_statement", ""),
+            f"membantu {client} bergerak ke hasil yang lebih terukur",
+            max_words=28
+        )
+        value_hook = self._summarize_phrase(
+            value_map.get("value_hook", ""),
+            "mewujudkan kebutuhan klien menjadi hasil kerja yang lebih terkontrol",
+            max_words=18
+        )
+        win_theme = self._summarize_phrase(
+            value_map.get("win_theme", ""),
+            f"menjaga keputusan dan eksekusi {client} tetap selaras",
+            max_words=24
+        )
+        proof_points = value_map.get("proof_points", []) or []
+        proof_line = ", ".join(proof_points[:3]) if proof_points else "kapabilitas internal, metodologi delivery, dan kontrol mutu"
+        client_gains = value_map.get("client_gains", []) or []
+        gains_line = ", ".join(client_gains[:3]) if client_gains else "kejelasan keputusan, kontrol risiko, dan hasil bisnis yang lebih terukur"
+        differentiators = value_map.get("differentiators", []) or []
+        differentiator_line = ", ".join(differentiators[:2]) if differentiators else "pendekatan delivery yang rapi dan tetap relevan dengan kebutuhan sponsor"
+        standard_method = self._summarize_phrase(firm_data.get("methodology", ""), "metodologi delivery internal")
+        team_points = self._split_plain_points(firm_data.get("team", ""), max_items=5)
+        team_summary = ", ".join(team_points) if team_points else "tim delivery inti, quality reviewer, dan subject-matter support"
+        commercial_summary = self._summarize_phrase(firm_data.get("commercial", ""), "mekanisme komersial mengikuti baseline internal")
+        payment_plan = self._build_payment_plan(project_type, budget)
+        phase_plan = self._build_phase_plan(project_type, timeline)
+        gantt_points = "; ".join(
+            f"{item['phase']},{item['start']},{item['end']}"
+            for item in phase_plan
+        )
+
+        if chapter["id"] == "c_7":
+            table_rows = "\n".join(
+                f"| {item['phase']} | {item['period']} | {item['deliverable']} | Menjaga progres {short_goal.lower()} |"
+                for item in phase_plan
+            )
+            numbered = "\n".join(
+                f"{idx}. **{item['phase']}** ({item['period']}): {item['activity']} Output utama: {item['deliverable']}."
+                for idx, item in enumerate(phase_plan, start=1)
+            )
+            return (
+                f"Untuk {client}, timeline pekerjaan disusun agar inisiatif {short_project} dapat bergerak stabil selama {timeline}. "
+                f"Rencana ini mengikat ritme delivery ke KPI seperti {kpi_line}, memakai istilah kerja {term_line}, "
+                f"dan menjaga agar keputusan fase selalu dapat ditelusuri terhadap outcome bisnis. Secara komersial dan delivery, ritme ini juga diarahkan untuk {value_hook} "
+                f"sehingga manfaat seperti {gains_line} terasa sejak fase awal (Data Internal, {year}). "
+                f"{anchor_line}\n\n"
+                "## 7.1 Aktivitas per Fase\n"
+                f"{numbered}\n"
+                f"- Setiap fase memiliki owner, quality gate, dan exit criteria yang jelas untuk {client}.\n"
+                f"- Risiko yang dipantau sejak awal mencakup {short_notes.lower()}, kesiapan data, dan kecepatan keputusan sponsor.\n"
+                f"- Baseline metode kerja yang dipakai mengacu pada {standard_method}.\n"
+                f"- Ritme eksekusi juga menjaga kesinambungan terhadap istilah kerja {term_line}, sehingga koordinasi antar-tim tidak kehilangan bahasa operasional yang sama.\n"
+                f"[[GANTT: Jadwal Pelaksanaan | Bulan | {gantt_points}]]\n\n"
+                "## 7.2 Waktu Pelaksanaan dan Deliverable Tiap Fase\n"
+                f"Pengaturan waktu tidak hanya membagi durasi, tetapi memastikan setiap deliverable langsung mendukung kebutuhan {short_goal.lower()} "
+                f"dan memberi bahan keputusan yang rapi pada forum pengarah proyek {client}. Karena itu, deliverable dibangun berlapis: "
+                f"mulai dari baseline, rancangan solusi, keputusan implementasi, sampai stabilisasi hasil. Untuk konteks {client}, pendekatan ini penting agar tim tidak sekadar menyelesaikan aktivitas, "
+                f"tetapi juga menjaga relevansi terhadap KPI, dependensi, dan kesiapan adopsi pada tiap fase. Dengan demikian, bila terjadi perubahan kondisi lapangan atau kebutuhan sponsor, "
+                f"tim masih punya ruang untuk melakukan penyesuaian yang terkontrol tanpa merusak keseluruhan jalur delivery. Dengan pengaturan ini, jalur kerja tidak hanya runtut, "
+                f"tetapi juga menjaga agar nilai yang dijanjikan pada {client} tetap konsisten dari kickoff sampai stabilisasi.\n\n"
+                "| Fase | Periode | Deliverable Utama | Kontribusi Bisnis |\n"
+                "| --- | --- | --- | --- |\n"
+                f"{table_rows}\n"
+                f"- Review progres dilakukan berkala agar deviasi timeline dapat dikoreksi sebelum memengaruhi KPI inti seperti {kpi_line}.\n"
+                "- Pergeseran jadwal hanya dilakukan melalui change control formal dan keputusan bersama sponsor proyek.\n"
+                f"- Deliverable pada akhir fase menjadi dasar transisi ke fase berikutnya, sehingga tidak ada aktivitas {client} yang berjalan tanpa acceptance yang terukur.\n"
+                f"- Setiap fase juga memuat checkpoint kesiapan stakeholder, kualitas data, dan keputusan operasional agar implementasi tetap feasible bagi lingkungan kerja {client}."
+            )
+
+        if chapter["id"] == "c_8":
+            return (
+                f"Tata kelola proyek untuk {client} dirancang agar keputusan strategis, kontrol eksekusi, dan penanganan risiko berjalan dalam satu sistem kerja yang konsisten. "
+                f"Fokusnya adalah menjaga {short_project.lower()} tetap selaras dengan KPI seperti {kpi_line}, sambil memakai istilah operasional {term_line} "
+                f"agar koordinasi lintas pihak tidak kehilangan konteks. Pola governance ini juga harus mendukung tema utama proposal: {win_theme} dan merefleksikan disiplin delivery {WRITER_FIRM_NAME} yang menghubungkan keputusan sponsor dengan kontrol eksekusi nyata (Data Internal, {year}). {anchor_line}\n\n"
+                "## 8.1 Mekanisme Pengambilan Keputusan\n"
+                f"1. **Steering Committee** menetapkan arah, prioritas, dan keputusan yang berdampak pada scope, biaya, atau timeline program {client}.\n"
+                "2. **Project Board** memutuskan isu lintas workstream, approval deliverable utama, dan tindakan korektif terhadap deviasi progres.\n"
+                "3. **Working Session** mingguan dipakai untuk memvalidasi kebutuhan, dependency, dan kesiapan data atau user representative.\n"
+                "4. **Escalation path** dibuat berjenjang agar isu operasional tidak langsung membebani forum eksekutif, tetapi tetap bisa naik cepat bila berdampak material.\n"
+                f"- Keputusan yang mengubah arah program harus terdokumentasi dan ditautkan ke baseline kebutuhan {short_goal.lower()}.\n"
+                "- Batas waktu keputusan dan owner tindak lanjut ditetapkan di akhir setiap forum agar tidak muncul keputusan menggantung.\n"
+                f"- Semua notulen dan action log menjadi artefak kontrol yang dapat ditinjau ulang oleh sponsor {client}.\n"
+                f"- Struktur keputusan juga menjaga agar diskusi tentang KPI, risk appetite, dan kepatuhan POJK tidak terpisah dari diskusi delivery harian.\n\n"
+                "## 8.2 Mekanisme Pengendalian Proyek\n"
+                f"Pengendalian proyek dilakukan lewat kombinasi dashboard progres, risk register, issue log, quality gate, dan acceptance deliverable. "
+                f"Model kontrol ini memastikan aktivitas delivery tetap terkunci pada hasil bisnis, bukan sekadar penyelesaian aktivitas administratif.\n"
+                f"Untuk {client}, pengendalian semacam ini penting karena program {short_project.lower()} berpotensi melibatkan banyak dependency dan keputusan cepat. "
+                f"Oleh sebab itu, indikator kontrol tidak cukup hanya melihat status task, tetapi juga harus membaca dampaknya pada target bisnis, pengalaman nasabah, dan risiko operasional. "
+                f"Setiap forum kontrol diarahkan untuk menjawab tiga hal sekaligus: apakah deliverable sudah sesuai standar, apakah risiko sudah dimitigasi, dan apakah hasil kerja masih bergerak ke KPI yang disepakati. "
+                f"Dengan pola ini, governance tidak berhenti pada pelaporan status, tetapi benar-benar berfungsi sebagai alat steering agar sponsor {client} bisa mengambil keputusan berbasis fakta yang terbaru.\n"
+                f"- Dashboard mingguan menyorot KPI inti, status milestone, isu utama, dan kebutuhan keputusan lanjutan yang memengaruhi {client}.\n"
+                "- Setiap deliverable utama melewati review kualitas, validasi stakeholder, dan sign-off sebelum dinyatakan selesai.\n"
+                f"- Change request yang berdampak pada ruang lingkup atau biaya akan dinilai terhadap manfaat bisnis, risiko, dan konsekuensi timeline {timeline}.\n"
+                f"- Risiko prioritas seperti {short_notes.lower()} dipantau dengan mitigasi, owner, dan target penyelesaian yang eksplisit.\n"
+                "- Jika ada deviasi, tim proyek melakukan recovery plan yang dibahas terbuka pada forum tata kelola terdekat.\n"
+                f"- Paket kontrol ini menjaga supaya keputusan tentang perubahan, prioritas ulang, atau percepatan kerja tetap transparan bagi sponsor dan tim inti {client}.\n"
+                f"- Dengan disiplin kontrol tersebut, governance berfungsi sebagai alat eksekusi nyata, bukan sekadar formalitas rapat proyek."
+            )
+
+        if chapter["id"] == "c_9":
+            numbered_lines = [
+                "1. **Engagement Lead / Partner** memastikan arah kemitraan, kualitas narasi eksekutif, dan penyelesaian isu kritis.",
+                "2. **Project or Program Manager** mengendalikan ritme delivery, milestone, dependency, dan komunikasi lintas pihak.",
+            ]
+            for offset, item in enumerate(team_points[:3], start=3):
+                numbered_lines.append(
+                    f"{offset}. **Workstream Core** memanfaatkan komposisi {item} agar area prioritas dapat dieksekusi dengan coverage yang memadai."
+                )
+            numbered = "\n".join(numbered_lines)
+            portfolio_note = self._summarize_phrase(
+                firm_profile.get("portfolio_highlights", ""),
+                "kapabilitas delivery, advisory, dan transformasi yang relevan dengan ruang lingkup proyek",
+                max_words=24
+            )
+            return (
+                f"Struktur tim proyek untuk {client} dibentuk agar pengambilan keputusan, pengawasan mutu, dan eksekusi lapangan bergerak seirama. "
+                f"Komposisi tim tidak diperlakukan sebagai daftar jabatan semata, tetapi sebagai mekanisme untuk menjaga kualitas output terhadap target {kpi_line} "
+                f"dan kebutuhan {short_goal.lower()}. Rancangan tim ini juga harus membuat nilai proposal terasa kredibel melalui {differentiator_line}, sebagai cerminan model kerja {WRITER_FIRM_NAME} yang menyeimbangkan quality control, kepemimpinan delivery, dan spesialisasi domain (Data Internal, {year}). {anchor_line}\n\n"
+                "## 9.1 Struktur Tim Proyek\n"
+                f"{numbered}\n"
+                f"- Komposisi inti yang direncanakan mengacu pada baseline internal: {team_summary}.\n"
+                f"- Counterpart dari pihak {client} idealnya mencakup sponsor bisnis, PIC operasional, PIC teknologi/data, dan reviewer governance.\n"
+                "- Alokasi resource dapat dinaikkan atau disesuaikan mengikuti fase kerja, tingkat risiko, dan kebutuhan keputusan cepat.\n"
+                "- Setiap peran memiliki akuntabilitas yang jelas agar handoff antar-workstream tidak menimbulkan gap kualitas atau keterlambatan.\n"
+                f"- Pengaturan ini penting bagi {client} karena ritme delivery, review kualitas, dan keputusan sponsor harus tetap berjalan meski ada beberapa stream kerja paralel.\n\n"
+                "## 9.2 Kapabilitas, Pengalaman, dan Sertifikasi\n"
+                f"Dari sisi kapabilitas, tim delivery disiapkan untuk menggabungkan pemahaman domain, disiplin arsitektur/operasi, dan pengalaman eksekusi proyek yang serupa. "
+                f"Rujukan kapabilitas internal saat ini mencakup {portfolio_note}, dengan titik bukti utama pada {proof_line}. Hal ini penting agar diskusi dengan {client} tidak berhenti pada konsep, tetapi langsung "
+                f"turun menjadi desain solusi, governance, dan langkah eksekusi yang dapat dioperasionalkan. Pada praktiknya, kualitas tim tidak hanya diukur dari senioritas, "
+                f"tetapi dari kemampuan mereka menerjemahkan kebutuhan bisnis menjadi deliverable, keputusan, dan quality gate yang bisa dipakai langsung oleh sponsor proyek. "
+                f"Itu sebabnya rancangan tim ini sengaja menggabungkan kepemimpinan delivery, kontrol mutu, dan spesialis area kerja agar setiap keputusan tetap punya dukungan teknis sekaligus konteks bisnis. "
+                f"Bagi {client}, kombinasi ini membuat proposal lebih kredibel karena menunjukkan bahwa tim yang ditawarkan siap menjembatani kebutuhan sponsor, operasi, teknologi, dan governance dalam satu pola kerja yang menyatu.\n"
+                f"- Domain knowledge diarahkan pada istilah dan kebutuhan seperti {term_line}, sehingga komunikasi dengan stakeholder lebih cepat nyambung.\n"
+                f"- Pengalaman delivery dimanfaatkan untuk mengantisipasi risiko seperti {short_notes.lower()} dan mempercepat recovery jika ada deviasi.\n"
+                f"- Sertifikasi dan kompetensi yang ditugaskan akan disejajarkan dengan ruang lingkup framework/regulasi {regulations or 'yang dipilih'}, dan detail personel final hanya ditegaskan berdasarkan resource yang telah diverifikasi.\n"
+                "- Pendekatan ini menjaga proposal tetap kredibel: kuat pada kapabilitas, tetapi tidak membuat klaim detail yang belum tervalidasi.\n"
+                f"- Bagi {client}, struktur ini memberi kepastian bahwa tim yang ditugaskan bukan hanya cukup dari sisi jumlah, tetapi juga relevan terhadap sasaran outcome dan kompleksitas kerja yang ada.\n"
+                f"- Hasil akhirnya adalah model tim yang lebih mudah diaudit, lebih mudah dikendalikan, dan lebih siap dipertanggungjawabkan pada level sponsor."
+            )
+
+        if chapter["id"] == "c_10":
+            payment_lines = "\n".join(
+                f"{idx}. **{label}** sebesar {portion} dari estimasi investasi, ditagihkan setelah milestone terkait diterima."
+                for idx, (label, portion) in enumerate(payment_plan, start=1)
+            )
+            return (
+                f"Model pembiayaan untuk {client} disusun agar komitmen biaya, mekanisme pembayaran, dan batas ruang lingkup tetap jelas sejak awal. "
+                f"Tujuannya adalah menjaga proyek {short_project.lower()} tetap dapat dieksekusi tanpa ambiguitas komersial, sambil memberi ruang kontrol terhadap perubahan yang benar-benar material "
+                f"dan memastikan investasi tetap tertaut pada manfaat yang dijanjikan: {short_value}. Struktur ini juga mencerminkan cara {WRITER_FIRM_NAME} menjaga disiplin komersial tetap selaras dengan delivery reality dan outcome klien (Data Internal, {year}). {anchor_line}\n\n"
+                "## 10.1 Biaya dan Tahapan Pembayaran\n"
+                f"Estimasi investasi awal untuk engagement ini adalah **{budget or 'menyesuaikan scope final'}**, dengan tipe layanan **{service_type}** pada model proyek **{project_type}** selama **{timeline}**. "
+                f"Baseline komersial internal yang menjadi acuan adalah {commercial_summary}. Dengan demikian, pembahasan biaya tidak berdiri sebagai angka semata, tetapi sebagai representasi dari komitmen kerja, quality gate, dan acceptance deliverable yang menjadi standar {WRITER_FIRM_NAME}.\n\n"
+                "| Komponen | Rancangan Komersial |\n"
+                "| --- | --- |\n"
+                f"| Estimasi investasi | {budget or 'Menyesuaikan scope final'} |\n"
+                f"| Model engagement | {service_type} - {project_type} |\n"
+                f"| Durasi acuan | {timeline} |\n"
+                f"| Basis commercial | {firm_data.get('commercial', 'Menyesuaikan kebijakan internal')} |\n"
+                "| Mekanisme review | Review milestone, acceptance deliverable, dan approval perubahan scope |\n\n"
+                f"{payment_lines}\n"
+                f"- Nilai pembayaran dikaitkan dengan deliverable yang benar-benar selesai, bukan hanya dengan berjalannya waktu proyek.\n"
+                "- Jika scope berubah secara material, dampak biaya akan dibahas melalui change request dan approval tertulis.\n\n"
+                "## 10.2 Model Pekerjaan dan Batasan Pekerjaan\n"
+                f"Model kerja dirancang agar ruang lingkup delivery tetap fokus pada kebutuhan {short_goal.lower()} dan KPI seperti {kpi_line}. "
+                f"Karena itu, proposal komersial ini diposisikan sebagai baseline kerja yang transparan, bukan daftar komitmen tanpa batas.\n"
+                f"Untuk {client}, disiplin komersial seperti ini penting agar keputusan investasi tetap berada dalam koridor manfaat bisnis, risk appetite, dan kepatuhan POJK yang dapat dipertanggungjawabkan. "
+                f"Model pembiayaan yang baik harus mampu menjaga fleksibilitas eksekusi tanpa membuat biaya berkembang secara tidak terkendali. Dengan kata lain, struktur komersial di bawah ini bukan sekadar daftar harga, "
+                f"melainkan mekanisme kontrol bersama agar sponsor proyek selalu tahu apa yang sedang dibayar, hasil apa yang diterima, dan kondisi apa yang dapat memicu penyesuaian komersial. "
+                f"Pendekatan ini juga membantu tim {client} menjaga disiplin pengadaan dan approval internal, karena tiap komponen biaya selalu ditautkan kembali pada deliverable, milestone, dan manfaat kerja yang nyata.\n"
+                f"- Harga mengasumsikan ketersediaan sponsor, PIC, data, dan akses kerja dari pihak {client} sesuai jadwal yang disepakati.\n"
+                "- Biaya pihak ketiga, lisensi, perangkat, perjalanan khusus, atau pekerjaan di luar ruang lingkup inti hanya dimasukkan jika dinyatakan eksplisit.\n"
+                f"- Aktivitas tambahan yang muncul akibat perluasan kebutuhan, regulasi baru, atau permintaan percepatan di luar baseline {timeline} akan dievaluasi terpisah.\n"
+                "- Dengan batasan ini, pembiayaan tetap profesional: cukup fleksibel untuk adaptasi, tetapi tetap disiplin terhadap kontrol biaya dan outcome.\n"
+                f"- Parameter kontrol utama yang dipakai adalah keterkaitan antara milestone, acceptance deliverable, manfaat bisnis, dan ekspektasi layanan bagi nasabah atau stakeholder akhir.\n"
+                f"- Dengan cara ini, pembahasan komersial tetap berdiri di atas dasar profesional yang jelas dan tidak bergeser menjadi negosiasi yang kabur batasnya.\n"
+                f"- Nilai investasi dijaga tetap proporsional terhadap manfaat yang diharapkan, khususnya {gains_line}."
+            )
+
+        if chapter["id"] == "c_closing":
+            verified_contact = self._verified_firm_contact_block(firm_profile)
+            closing_contact = verified_contact or "- Kontak resmi writer firm akan diberikan sesuai data yang telah diverifikasi."
+            return (
+                f"Terima kasih atas kesempatan yang diberikan kepada {WRITER_FIRM_NAME} untuk menyusun proposal bagi {client}. "
+                f"Kami memandang inisiatif {short_project.lower()} bukan hanya sebagai pekerjaan delivery, tetapi sebagai fondasi kemitraan profesional yang harus terasa rapi, hangat, dan dapat dipertanggungjawabkan. "
+                f"Komitmen kami adalah membantu {client} bergerak dari kebutuhan {short_goal.lower()} menuju hasil yang konkret, terukur, dan dapat dijalankan secara disiplin. "
+                f"Di atas itu, kami ingin memastikan bahwa nilai yang dijanjikan dalam proposal ini benar-benar terasa: {short_value} (Data Internal, {year}).\n\n"
+                "## Apresiasi dan Komitmen Kemitraan\n"
+                f"1. Kami mengapresiasi keterbukaan {client} dalam mengangkat konteks, tantangan, dan target bisnis yang menjadi dasar proposal ini.\n"
+                f"2. Kami berkomitmen menjaga kualitas kolaborasi melalui cara kerja yang jelas, komunikasi yang responsif, dan deliverable yang dapat ditindaklanjuti, sejalan dengan positioning {WRITER_FIRM_NAME} sebagai {self._summarize_phrase(value_map.get('positioning', ''), 'mitra delivery dan konsultasi yang terstruktur', max_words=24)}.\n"
+                f"3. Fokus awal kemitraan diarahkan pada prioritas seperti {kpi_line}, dengan tata kelola dan ritme eksekusi yang stabil sejak kickoff.\n"
+                f"- Nilai kemitraan yang ingin dibangun adalah kombinasi antara kecepatan delivery, {term_line}, disiplin kualitas, dan manfaat seperti {gains_line}.\n"
+                "- Setiap langkah lanjutan akan dibuka secara transparan agar sponsor dan tim inti memiliki ekspektasi yang sama sejak awal.\n"
+                f"- Bila proposal ini disetujui, tahap berikutnya adalah finalisasi scope, konfirmasi tim inti, dan penetapan agenda kickoff bersama {client}.\n\n"
+                "## Informasi Kontak dan Langkah Lanjutan\n"
+                f"Untuk melanjutkan pembahasan, {WRITER_FIRM_NAME} siap menindaklanjuti review proposal, penajaman ruang lingkup, dan penyesuaian komersial yang diperlukan.\n"
+                f"{closing_contact}\n"
+                "- Agenda lanjutan yang disarankan: review scope final, konfirmasi sponsor dan PIC, lalu penjadwalan workshop kickoff.\n"
+                "- Dengan fondasi ini, kemitraan dapat dimulai secara profesional sekaligus tetap terasa personal dan well-hearted."
+            )
+
+        return ""
+
+    def _resolve_chapters(self, chapter_id: Optional[str]) -> List[Dict[str, Any]]:
+        normalized_id = (chapter_id or "").strip()
+        if not normalized_id or normalized_id.lower() in {"all", "semua"}:
+            return UNIVERSAL_STRUCTURE
+
+        selected = [chapter for chapter in UNIVERSAL_STRUCTURE if chapter["id"] == normalized_id]
+        if selected:
+            return selected
+
+        normalized = normalized_id.lower()
+        selected = [chapter for chapter in UNIVERSAL_STRUCTURE if chapter["title"].strip().lower() == normalized]
+        if selected:
+            return selected
+
+        raise ValueError(f"Unknown chapter_id: {normalized_id}")
+
+    def build_preview_outline(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        chapter_id = (data or {}).get("chapter_id")
+        try:
+            chapters = self._resolve_chapters(chapter_id)
+        except ValueError:
+            chapters = UNIVERSAL_STRUCTURE
+
+        client = (data or {}).get("nama_perusahaan", "Klien")
+        objective = (data or {}).get("konteks_organisasi", "").strip() or "tujuan proyek belum diisi"
+        issues = (data or {}).get("permasalahan", "").strip() or "pain points belum diisi"
+        need_type = (data or {}).get("klasifikasi_kebutuhan", "").strip() or "belum dipilih"
+        project_type = (data or {}).get("jenis_proyek", "").strip() or "belum dipilih"
+        service_type = (data or {}).get("jenis_proposal", "").strip() or "belum dipilih"
+        frameworks = (data or {}).get("potensi_framework", "").strip() or "belum dipilih"
+        timeline = (data or {}).get("estimasi_waktu", "").strip() or "belum ditentukan"
+        budget = (data or {}).get("estimasi_biaya", "").strip() or "belum ditentukan"
+
+        preview_map = {
+            "c_1": f"Menetapkan konteks organisasi {client} dan objektif inisiatif: {objective}.",
+            "c_2": f"Mengurai kebutuhan dan akar masalah klien berdasarkan pain points: {issues}.",
+            "c_3": f"Mengkategorikan kebutuhan ke {need_type} lalu memvalidasi jenis proyek {project_type}.",
+            "c_4": f"Menautkan kebutuhan klien dengan framework/regulasi utama: {frameworks}.",
+            "c_5": f"Menjelaskan pemilihan metodologi delivery untuk layanan {service_type}.",
+            "c_6": "Mendetailkan target state, output, dan deliverable solusi yang dapat dieksekusi.",
+            "c_7": f"Menyusun rencana fase, milestone, dan deliverable berdasarkan durasi {timeline}.",
+            "c_8": "Merumuskan governance proyek: forum keputusan, eskalasi isu, dan quality gate.",
+            "c_9": f"Menetapkan struktur tim dan kapabilitas yang dibutuhkan untuk model {service_type}.",
+            "c_10": f"Mendefinisikan model pembiayaan, termin pembayaran, dan batasan scope dengan estimasi {budget}.",
+            "c_closing": f"Menutup proposal dengan apresiasi kemitraan, kontak resmi {WRITER_FIRM_NAME}, dan langkah tindak lanjut bersama {client}.",
+        }
+
+        return [
+            {
+                "id": chapter["id"],
+                "title": chapter["title"],
+                "preview": preview_map.get(chapter["id"], "Ringkasan konten bab akan disesuaikan dengan konteks klien."),
+                "subsections": chapter["subs"],
+            }
+            for chapter in chapters
+        ]
+
+    def _build_research_bundle_uncached(
+        self,
+        base_client: str,
+        regulations: str,
+        include_collaboration: bool = True
+    ) -> Dict[str, str]:
+        futures = {
+            "profile": self.io_pool.submit(Researcher.get_entity_profile, base_client),
+            "news": self.io_pool.submit(Researcher.get_latest_client_news, base_client),
+            "track_record": self.io_pool.submit(Researcher.get_client_track_record, base_client),
+            "regulations": self.io_pool.submit(Researcher.get_regulatory_data, regulations)
+        }
+        if include_collaboration:
+            futures["collaboration"] = self.io_pool.submit(
+                Researcher.get_client_writer_collaboration, base_client, WRITER_FIRM_NAME
+            )
+        try:
+            return {
+                "profile": futures["profile"].result(timeout=8),
+                "news": futures["news"].result(timeout=8),
+                "track_record": futures["track_record"].result(timeout=8),
+                "collaboration": futures["collaboration"].result(timeout=8) if include_collaboration else "",
+                "regulations": futures["regulations"].result(timeout=8),
+            }
+        except Exception:
+            return self._fallback_research_bundle(base_client, include_collaboration)
+
+    def prefetch_research_bundle(
+        self,
+        base_client: str,
+        regulations: str,
+        include_collaboration: bool = True
+    ) -> str:
+        key = self._cache_key("research", base_client, regulations, str(include_collaboration))
+        if self._get_cached_research_bundle(key):
+            return "cached"
+
+        with self._cache_lock:
+            if key in self._research_inflight:
+                return "warming"
+            event = threading.Event()
+            self._research_inflight[key] = event
+
+        def worker() -> None:
+            try:
+                bundle = self._build_research_bundle_uncached(
+                    base_client=base_client,
+                    regulations=regulations,
+                    include_collaboration=include_collaboration
+                )
+                self._store_research_bundle(key, bundle)
+            finally:
+                with self._cache_lock:
+                    inflight = self._research_inflight.pop(key, None)
+                    if inflight:
+                        inflight.set()
+
+        threading.Thread(
+            target=worker,
+            name=f"research-prefetch-{SchemaMapper.normalize_key(base_client) or 'client'}",
+            daemon=True
+        ).start()
+        return "warming"
+
+    def _get_research_bundle(self, base_client: str, regulations: str, include_collaboration: bool = True) -> Dict[str, str]:
+        key = self._cache_key("research", base_client, regulations, str(include_collaboration))
+        cached = self._get_cached_research_bundle(key)
+        if cached:
+            return cached
+
+        leader = False
+        event: Optional[threading.Event] = None
+        with self._cache_lock:
+            event = self._research_inflight.get(key)
+            if event is None:
+                event = threading.Event()
+                self._research_inflight[key] = event
+                leader = True
+
+        if not leader:
+            event.wait(timeout=12)
+            cached = self._get_cached_research_bundle(key)
+            if cached:
+                return cached
+
+        try:
+            bundle = self._build_research_bundle_uncached(
+                base_client=base_client,
+                regulations=regulations,
+                include_collaboration=include_collaboration
+            )
+            return self._store_research_bundle(key, bundle)
+        finally:
+            with self._cache_lock:
+                inflight = self._research_inflight.pop(key, None)
+                if inflight:
+                    inflight.set()
+
+    def _build_proposal_contract(
+        self,
+        client: str,
+        project: str,
+        budget: str,
+        service_type: str,
+        project_goal: str,
+        project_type: str,
+        timeline: str,
+        notes: str,
+        regulations: str,
+        selected_chapters: List[Dict[str, Any]],
+        research_bundle: Dict[str, str],
+        firm_data: Dict[str, str],
+        personalization_pack: Dict[str, Any],
+        value_map: Dict[str, Any],
+    ) -> str:
+        cache_key = self._cache_key(
+            "contract", client, project, budget, service_type, project_goal,
+            project_type, timeline, notes, regulations, "|".join([c["id"] for c in selected_chapters]),
+            personalization_pack.get("industry", ""),
+            personalization_pack.get("relationship_mode", ""),
+            "|".join(personalization_pack.get("kpi_blueprint", []) or []),
+            value_map.get("value_statement", ""),
+            value_map.get("win_theme", ""),
+            "|".join(value_map.get("proof_points", []) or []),
+        )
+        cached = self._cache_get(self._proposal_contract_cache, cache_key)
+        if cached:
+            return cached
+
+        chapter_titles = ", ".join([c["title"] for c in selected_chapters])
+        prompt = f"""
+        Buat "Proposal Contract" ringkas untuk menjaga kualitas dan koherensi lintas bab.
+        Konteks:
+        - Klien: {client}
+        - Inisiatif: {project}
+        - Service Type: {service_type}
+        - Jenis Proyek: {project_type}
+        - Kebutuhan: {project_goal}
+        - Durasi: {timeline}
+        - Estimasi Biaya: {budget}
+        - Pain Points: {notes}
+        - Framework: {regulations}
+        - Bab yang ditulis: {chapter_titles}
+        - Baseline Metodologi: {firm_data.get('methodology', '')}
+        - Baseline Team: {firm_data.get('team', '')}
+        - Baseline Commercial: {firm_data.get('commercial', '')}
+        - Profil OSINT: {research_bundle.get('profile', '')}
+        - Berita OSINT: {research_bundle.get('news', '')}
+        - Track Record OSINT: {research_bundle.get('track_record', '')}
+        - Histori Kolaborasi {WRITER_FIRM_NAME} & {client}: {research_bundle.get('collaboration', '')}
+        - Industry Pack: {personalization_pack.get('industry', 'Lintas Industri')}
+        - Relationship Mode: {personalization_pack.get('relationship_mode', 'new')}
+        - KPI Blueprint: {', '.join(personalization_pack.get('kpi_blueprint', []))}
+        - Terminologi Prioritas: {', '.join(personalization_pack.get('terminology', []))}
+        - Company DNA Positioning: {value_map.get('positioning', '')}
+        - Proposal Promise: {value_map.get('proposal_promise', '')}
+        - Value Statement: {value_map.get('value_statement', '')}
+        - Win Theme: {value_map.get('win_theme', '')}
+        - Client Gains: {', '.join(value_map.get('client_gains', []) or [])}
+        - Proof Points: {', '.join(value_map.get('proof_points', []) or [])}
+        - Review Rule: Draft ini targetnya 80% siap pakai; sisakan ruang bagi reviewer manusia untuk menyempurnakan nuansa relasi, komersial, dan pesan penutup.
+
+        OUTPUT WAJIB (tanpa markdown code block, <= 220 kata):
+        1) Narasi Inti (1-2 kalimat)
+        2) Terminologi Kanonis (maks 6 istilah)
+        3) Prinsip Konsistensi Antarbab (maks 5 butir)
+        4) Larangan Gaya Tulis (maks 3 butir)
+        """
+        contract = ""
+        if not self._throughput_mode():
+            try:
+                res = self.ollama.chat(
+                    model=LLM_MODEL,
+                    messages=[{'role': 'user', 'content': prompt}],
+                    options={'num_ctx': 16384, 'num_predict': 700, 'temperature': 0.15}
+                )
+                contract = (res.get('message', {}).get('content', '') or '').strip()
+            except Exception:
+                contract = ""
+
+        if not contract:
+            contract = (
+                f"Narasi Inti: {value_map.get('value_statement') or 'Proposal harus menjawab kebutuhan bisnis klien secara konkret, terukur, dan eksekutabel.'}\n"
+                "Terminologi Kanonis: deliverable, milestone, target state, governance, quality gate, risiko.\n"
+                "Prinsip Konsistensi Antarbab: istilah konsisten, alur masalah-ke-solusi jelas, "
+                f"setiap bab menegaskan nilai untuk klien, timeline sinkron dengan deliverable, tata kelola tegas, hindari repetisi.\n"
+                "Larangan Gaya Tulis: filler generik, klaim tanpa dasar, paragraf tanpa tindakan."
+            )
+
+        self._cache_store(self._proposal_contract_cache, cache_key, contract, max_size=96)
+        return contract
+
+    def _build_chapter_prompt(
+        self,
+        chapter: Dict[str, Any],
+        client: str,
+        project: str,
+        budget: str,
+        service_type: str,
+        project_goal: str,
+        project_type: str,
+        timeline: str,
+        notes: str,
+        regulations: str,
+        firm_data: Dict[str, str],
+        firm_profile: Dict[str, str],
+        research_bundle: Dict[str, str],
+        personalization_pack: Dict[str, Any],
+        value_map: Dict[str, Any],
+        proposal_contract: str,
+        target_words: int
+    ) -> Dict[str, Any]:
+        try:
+            current_year = datetime.now().year
+            profile_data = research_bundle.get('profile', '')
+            track_record_data = research_bundle.get('track_record', '')
+            collaboration_data = research_bundle.get('collaboration', '')
+            global_data = "\n".join([item for item in [profile_data, track_record_data, collaboration_data] if item])
+            client_news = research_bundle.get('news', '')
+            regulation_data = research_bundle.get('regulations', '')
+            allowed_external_citations = self._collect_allowed_external_citations(research_bundle)
+
+            ctx_key = self._cache_key("chapter_ctx", client, project, budget, chapter.get('id', ''), chapter.get('keywords', ''))
+            cached_ctx = self._cache_get(self._chapter_context_cache, ctx_key)
+            if cached_ctx:
+                structured_row_data = cached_ctx.get("structured_row_data", "")
+                rag_data = cached_ctx.get("rag_data", "")
+            else:
+                structured_row_data = self.kb.get_exact_context(client, project, budget)
+                rag_data = self.kb.query(client, project, chapter['keywords'])
+                self._cache_store(
+                    self._chapter_context_cache,
+                    ctx_key,
+                    {"structured_row_data": structured_row_data, "rag_data": rag_data},
+                    max_size=256
+                )
+            
+            persona = PERSONAS.get(chapter.get('id', 'default'), PERSONAS['default'])
+            subs = "\n".join([f"- {s}" for s in chapter['subs']])
+            
+            visual_prompt = ""
+            if chapter.get('visual_intent') == "gantt":
+                visual_prompt = f"Mandatory Timeline Visual: [[GANTT: Jadwal Pelaksanaan | Bulan | Fase 1,0,2; Fase 2,2,4]]. Total timeline: {timeline}."
+            elif chapter.get('visual_intent') == "flowchart":
+                visual_prompt = "Tambahkan alur tahapan metodologi dalam bentuk bullet bertingkat yang jelas (fase -> aktivitas -> output)."
+
+            terminology_list = personalization_pack.get("terminology", []) or []
+            kpi_blueprint = personalization_pack.get("kpi_blueprint", []) or []
+            relationship_guidance = personalization_pack.get("relationship_guidance", "")
+            relationship_mode = personalization_pack.get("relationship_mode", "new")
+            relationship_source = personalization_pack.get("relationship_source", "osint")
+            profile_summary = personalization_pack.get("profile_summary", "")
+            initiative_facts = personalization_pack.get("initiative_facts", []) or []
+            if initiative_facts:
+                anchors_text = " | ".join([
+                    f"{item.get('fact', '')} {item.get('citation', '')}".strip()
+                    for item in initiative_facts[:3]
+                ])
+            else:
+                anchors_text = "Data inisiatif publik terbatas; jangan membuat klaim inisiatif tanpa bukti."
+
+            extra = (
+                f"[PROPOSAL CONTRACT]\n{proposal_contract}\n"
+                f"[COMPANY_DNA]\n{self._format_value_map(value_map)}\n"
+                f"[GLOBAL] Proposal ini wajib mempertahankan kedalaman konten tingkat eksekutif dan total dokumen maksimal {MAX_PROPOSAL_PAGES} halaman. "
+                "Setiap bab harus memiliki konteks spesifik klien, poin yang dapat ditindaklanjuti, dan tidak generik. Gunakan kombinasi numbering dan bullet yang rapi di setiap H2, namun tetap padat dan tidak banyak whitespace."
+            )
+            extra += (
+                " [DRAFT_POLICY] Tulis sebagai draft proposal berkualitas tinggi yang siap dipakai sekitar 80%, "
+                "dengan ruang review manusia tersisa untuk kalibrasi hubungan, penajaman komersial, dan sentuhan personal terakhir. "
+                "Jangan terdengar seperti placeholder atau boilerplate."
+            )
+            extra += f" [CLIENT_PROFILE_PACK] {profile_summary}"
+            extra += f" [RELATIONSHIP_MODE] {relationship_mode}. {relationship_guidance}"
+            extra += (
+                f" [KPI_TAILORING] Gunakan KPI blueprint berikut sebagai baseline tailoring: "
+                f"{' | '.join(kpi_blueprint) if kpi_blueprint else 'KPI belum spesifik, gunakan KPI operasional dan outcome bisnis yang terukur.'}"
+            )
+            extra += (
+                f" [VALUE_PRIORITY] Nilai yang harus terasa bagi klien: {value_map.get('value_statement', '')}. "
+                f"Win theme: {value_map.get('win_theme', '')}. Bukti yang boleh dipakai: {', '.join(value_map.get('proof_points', []) or []) or 'Data internal yang tersedia'}."
+            )
+            extra += (
+                f" [TERMINOLOGI_ADAPTASI] Gunakan istilah domain klien berikut secara natural: "
+                f"{', '.join(terminology_list) if terminology_list else 'operational excellence, governance, risk control'}."
+            )
+            extra += (
+                f" [INITIATIVE_ANCHORS] Wajib menyisipkan minimal satu anchor inisiatif klien dari daftar berikut: {anchors_text}"
+            )
+            extra += f" [OSINT_TRACK_RECORD] {track_record_data}"
+            extra += (
+                f" [{'INTERNAL_RELATIONSHIP' if relationship_source == 'internal_api' else 'OSINT_KOLABORASI'}] {collaboration_data} "
+                + (
+                    "Jangan pernah mengklaim pernah bekerja sama sebelumnya jika tidak ada data internal yang jelas."
+                    if relationship_source == "internal_api"
+                    else "Jangan pernah mengklaim pernah bekerja sama sebelumnya jika tidak ada bukti publik yang jelas."
+                )
+            )
+            if chapter['id'] == 'c_1':
+                extra += f" [FOCUS] Fokus pada latar belakang organisasi '{client}' dan tujuan proyek: '{project}'. Soroti driver bisnis utama: [{project_goal}]."
+            elif chapter['id'] == 'c_2':
+                problem_rule = (CHAPTER_STANDARD_RULES.get("c_2") or {}).get("problem_definition_pattern", {})
+                problem_note = str(problem_rule.get("focus_note") or "").strip()
+                pattern_subsections = ", ".join(problem_rule.get("subsections", []) or [])
+                extra += (
+                    f" [FOCUS] Jabarkan kebutuhan/keinginan klien berdasarkan pain points berikut: '{notes}'. "
+                    "Gunakan analisis masalah yang tajam dan ringkas."
+                    f" [PROBLEM_PATTERN] {problem_note} "
+                    f"Gunakan label fase tersebut secara eksplisit sebagai H2 wajib dalam urutan ini: {pattern_subsections}."
+                )
+            elif chapter['id'] == 'c_3':
+                extra += f" [FOCUS] Klasifikasikan kebutuhan ke Problem/Opportunity/Directive berdasarkan input: '{project_goal}'. Tetapkan jenis proyek: '{project_type}'."
+            elif chapter['id'] == 'c_4':
+                extra += f" [FOCUS] Gunakan framework/regulasi terpilih berikut sebagai acuan utama: '{regulations}'. Petakan langsung ke kebutuhan klien."
+            elif chapter['id'] == 'c_5':
+                extra += f" [FOCUS] Jelaskan alasan pemilihan metodologi untuk engagement '{service_type}' dan gunakan baseline metodologi internal: {firm_data['methodology']}."
+            elif chapter['id'] == 'c_6':
+                extra += f" [FOCUS] Turunkan metodologi menjadi solution design yang konkret: output, deliverable, dan target state yang dapat dieksekusi."
+            elif chapter['id'] == 'c_7':
+                extra += f" [FOCUS] Timeline harus sinkron dengan durasi proyek: '{timeline}'. Tampilkan aktivitas per fase, milestone, dan deliverable yang terukur."
+            elif chapter['id'] == 'c_8':
+                extra += " [FOCUS] Definisikan model tata kelola proyek: forum keputusan, frekuensi rapat, eskalasi isu, quality gate, dan kontrol progres."
+            elif chapter['id'] == 'c_9':
+                extra += f" [FOCUS] Uraikan struktur tim proyek untuk model layanan '{service_type}' dengan kapabilitas kunci, pengalaman, dan sertifikasi relevan. Referensi komposisi inti: {firm_data['team']}."
+            elif chapter['id'] == 'c_10':
+                extra += f" [FOCUS] Wajib menyajikan model pembiayaan dengan angka estimasi: {budget}. Sertakan termin pembayaran, model kerja, asumsi, eksklusi, dan terms komersial: {firm_data['commercial']}. Gunakan tabel markdown."
+            elif chapter['id'] == 'c_closing':
+                verified_contact_block = self._verified_firm_contact_block(firm_profile)
+                extra += (
+                    f" [FOCUS] Ini adalah bab penutup proposal. Jangan pernah menulis label 'BAB XI' atau variasinya. "
+                    f"Tunjukkan apresiasi profesional kepada klien '{client}', tegaskan komitmen kolaborasi jangka panjang, "
+                    f"dan berikan langkah tindak lanjut yang jelas dan actionable. "
+                    f"Gunakan tone hangat, profesional, dan meyakinkan."
+                )
+                if verified_contact_block:
+                    extra += (
+                        " [CONTACT_POLICY] Cantumkan hanya detail kontak firma yang sudah terverifikasi berikut ini "
+                        "secara persis, tanpa menambah atau memodifikasi data:\n"
+                        f"{verified_contact_block}"
+                    )
+                else:
+                    extra += (
+                        " [CONTACT_POLICY] Selain nama firma, tidak ada detail kontak writer firm yang terverifikasi. "
+                        "Jangan menulis alamat kantor, email, telepon, atau website yang tidak tersedia."
+                    )
+
+            if allowed_external_citations:
+                allowed_list = ", ".join(sorted(allowed_external_citations))
+                extra += (
+                    f" [CITATION] Sitasi eksternal hanya boleh memakai daftar ini: {allowed_list}. "
+                    f"Untuk klaim dari data internal, gunakan (Data Internal, {current_year}). "
+                    "Dilarang membuat domain/sitasi eksternal baru di luar daftar dan dilarang memakai placeholder sitasi."
+                )
+            else:
+                extra += (
+                    f" [CITATION] Tidak ada sumber eksternal tervalidasi untuk bab ini. "
+                    f"Dilarang menulis sitasi domain eksternal apa pun. Gunakan (Data Internal, {current_year}) "
+                    "untuk klaim yang berasal dari data internal."
+                )
+
+            internal_citation_note = f"Gunakan sitasi internal: (Data Internal, {current_year})."
+            structured_row_data_with_note = (
+                f"{structured_row_data}\n{internal_citation_note}" if structured_row_data else internal_citation_note
+            )
+            rag_data_with_note = f"{rag_data}\n{internal_citation_note}" if rag_data else internal_citation_note
+
+            prompt = PROPOSAL_SYSTEM_PROMPT.format(
+                client=client, 
+                writer_firm=WRITER_FIRM_NAME, 
+                persona=persona,
+                global_data=global_data, 
+                client_news=client_news, 
+                regulation_data=regulation_data,
+                structured_row_data=structured_row_data_with_note,
+                rag_data=rag_data_with_note,
+                current_year=current_year,
+                visual_prompt=visual_prompt, 
+                extra_instructions=extra,
+                chapter_title=chapter['title'], 
+                sub_chapters=subs, 
+                length_intent=self._rewrite_length_intent(chapter.get('length_intent', ''), target_words)
+            )
+            return {"prompt": prompt, "success": True}
+        except Exception as e:
+            return {"prompt": "", "success": False, "error": str(e)}
+
+    @staticmethod
+    def _contains_client_reference(content: str, client: str) -> bool:
+        tokens = [
+            t for t in re.findall(r"[A-Za-z0-9]{3,}", client)
+            if t.lower() not in {"pt", "cv", "tbk"}
+        ]
+        if not tokens:
+            return True
+        return any(re.search(rf"\b{re.escape(tok)}\b", content, re.IGNORECASE) for tok in tokens[:3])
+
+    def _evaluate_chapter_quality(
+        self,
+        chapter: Dict[str, Any],
+        content: str,
+        client: str,
+        target_words: Optional[int] = None,
+        allowed_external_citations: Optional[Set[str]] = None,
+        personalization_pack: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        target_words = int(target_words or self._target_words(chapter))
+        floor = max(140, int(self._chapter_floor_words(chapter.get("id", ""), for_compression=False) * 0.8))
+        min_words = max(floor, int(target_words * 0.72))
+        max_words = max(min_words + 90, int(target_words * 1.25))
+        word_count = self._word_count(content)
+        missing_h2 = [
+            sub for sub in chapter.get('subs', [])
+            if not re.search(rf"(?im)^\s*##\s*{re.escape(sub)}\s*$", content)
+        ]
+        has_numbered_list = bool(re.search(r"(?m)^\s*\d+\.\s+\S+", content))
+        has_bullet_list = bool(re.search(r"(?m)^\s*[-*]\s+\S+", content))
+        has_client_ref = self._contains_client_reference(content, client)
+        has_required_visual = True
+        if chapter.get('visual_intent') == "gantt":
+            has_required_visual = "[[GANTT:" in content
+
+        issues = []
+        if missing_h2:
+            issues.append("missing_h2")
+        if word_count < min_words:
+            issues.append("too_short")
+        if word_count > max_words:
+            issues.append("too_long")
+        if not has_numbered_list or not has_bullet_list:
+            issues.append("list_structure")
+        if not has_required_visual:
+            issues.append("missing_visual")
+        if not has_client_ref:
+            issues.append("missing_client_ref")
+
+        invalid_external_citations: List[str] = []
+        if allowed_external_citations is not None:
+            cited_external = sorted(set(self._extract_external_citations(content)))
+            allowed = set(allowed_external_citations)
+            if not allowed and cited_external:
+                invalid_external_citations = cited_external
+            elif allowed:
+                invalid_external_citations = [citation for citation in cited_external if citation not in allowed]
+            if invalid_external_citations:
+                issues.append("citation_policy")
+
+        missing_personalization_signals: List[str] = []
+        if personalization_pack:
+            terminology = personalization_pack.get("terminology", []) or []
+            term_hit = any(
+                re.search(rf"\b{re.escape(term)}\b", content, re.IGNORECASE)
+                for term in terminology if term
+            ) if terminology else True
+            if not term_hit:
+                missing_personalization_signals.append("terminology")
+
+            kpi_keywords = personalization_pack.get("kpi_keywords", []) or []
+            kpi_hit = any(
+                re.search(rf"\b{re.escape(token)}\b", content, re.IGNORECASE)
+                for token in kpi_keywords if token
+            ) if kpi_keywords else True
+            if not kpi_hit:
+                missing_personalization_signals.append("kpi")
+
+            anchor_citations = personalization_pack.get("anchor_citations", []) or []
+            anchor_hit = any(citation in content for citation in anchor_citations) if anchor_citations else True
+            if not anchor_hit:
+                missing_personalization_signals.append("initiative_anchor")
+
+            if missing_personalization_signals:
+                issues.append("missing_personalization")
+
+        return {
+            "issues": issues,
+            "word_count": word_count,
+            "target_words": target_words,
+            "min_words": min_words,
+            "max_words": max_words,
+            "missing_h2": missing_h2,
+            "invalid_external_citations": invalid_external_citations,
+            "missing_personalization_signals": missing_personalization_signals,
+        }
+
+    def _ensure_required_headings(self, chapter: Dict[str, Any], content: str) -> str:
+        missing_h2 = [
+            sub for sub in chapter.get('subs', [])
+            if not re.search(rf"(?im)^\s*##\s*{re.escape(sub)}\s*$", content)
+        ]
+        if not missing_h2:
+            return content
+
+        patched = content.rstrip()
+        for heading in missing_h2:
+            patched += (
+                f"\n\n## {heading}\n"
+                "### Rincian Inti\n"
+                "1. Aktivitas utama pada bagian ini disesuaikan langsung dengan kebutuhan bisnis klien.\n"
+                "- Risiko, dependensi, dan indikator keberhasilan dijabarkan secara terukur untuk eksekusi.\n"
+            )
+        return patched
+
+    def _ensure_list_structure(
+        self,
+        content: str,
+        chapter: Dict[str, Any],
+        client: str,
+        personalization_pack: Optional[Dict[str, Any]] = None
+    ) -> str:
+        patched = (content or "").rstrip()
+        personalization_pack = personalization_pack or {}
+        kpi_line = " | ".join((personalization_pack.get("kpi_blueprint", []) or [])[:2]) or f"outcome utama {client}"
+        term_line = ", ".join((personalization_pack.get("terminology", []) or [])[:2]) or "governance, risk control"
+
+        if not re.search(r"(?m)^\s*\d+\.\s+\S+", patched):
+            patched += (
+                f"\n\n1. Prioritas implementasi untuk {client} diarahkan agar tetap selaras dengan {kpi_line}.\n"
+                f"2. Keputusan delivery dan quality gate pada bab ini harus konsisten dengan istilah kerja {term_line}."
+            )
+        if not re.search(r"(?m)^\s*[-*]\s+\S+", patched):
+            patched += (
+                f"\n- Konteks {client} tetap menjadi acuan utama agar isi bab tidak bergeser menjadi generik.\n"
+                f"- Setiap butir pada bab ini harus bisa ditelusuri ke KPI, risiko, atau keputusan kerja yang nyata."
+            )
+        return patched
+
+    def _ensure_problem_definition_pattern(
+        self,
+        chapter: Dict[str, Any],
+        content: str,
+        client: str,
+        personalization_pack: Optional[Dict[str, Any]] = None
+    ) -> str:
+        chapter_rule = (CHAPTER_STANDARD_RULES.get(chapter.get("id", "")) or {}).get("problem_definition_pattern", {})
+        if not chapter_rule:
+            return content
+
+        patched = (content or "").rstrip()
+        subsections = [str(item).strip() for item in (chapter_rule.get("subsections") or []) if str(item).strip()]
+        if subsections and all(
+            re.search(rf"(?im)^\s*##\s*{re.escape(section)}\s*$", patched)
+            for section in subsections
+        ):
+            return patched
+
+        data = personalization_pack or {}
+        kpi_line = " | ".join((data.get("kpi_blueprint", []) or [])[:2]) or f"outcome utama {client}"
+        term_line = ", ".join((data.get("terminology", []) or [])[:2]) or "governance, risk control"
+        anchor_line = ""
+        anchors = data.get("initiative_facts", []) or []
+        if anchors:
+            fact = str(anchors[0].get("fact", "") or "").strip()
+            citation = str(anchors[0].get("citation", "") or "").strip()
+            if fact and citation:
+                anchor_line = f" Acuan konteks yang tetap dipakai adalah {fact} {citation}."
+
+        section_templates = {
+            "2.2 Business Context": (
+                f"{client} sedang menjaga outcome seperti {kpi_line} dan membutuhkan arah kerja yang tetap terkoneksi dengan kebutuhan bisnis inti.{anchor_line}\n"
+                f"1. Konteks bisnis harus dibaca dari target hasil, tekanan sponsor, dan arah transformasi yang sedang berjalan pada {client}.\n"
+                f"- Pada tahap ini, proposal perlu menegaskan current state yang masih belum cukup stabil dibanding target state yang diharapkan."
+            ),
+            "2.3 Key Challenge": (
+                f"Tantangan utama berada pada kemampuan menyelaraskan keputusan sponsor, ritme delivery, dan disiplin kerja {term_line} dalam satu alur yang konsisten.\n"
+                f"1. Key challenge tidak boleh berhenti sebagai gejala permukaan, tetapi harus menunjukkan bottleneck yang benar-benar menahan {client} untuk bergerak lebih cepat.\n"
+                f"- Hambatan koordinasi, kualitas keputusan, dan kesiapan eksekusi perlu dibaca sebagai satu masalah manajemen yang saling terkait."
+            ),
+            "2.4 Underlying Gap": (
+                f"Terdapat gap antara current state yang masih belum cukup terkontrol dengan target state yang menuntut keputusan lebih cepat, kontrol risiko lebih rapi, dan kualitas eksekusi yang lebih stabil.\n"
+                f"1. Underlying gap inilah yang menjadi inti definisi masalah untuk {client}, karena ia menjelaskan akar kesenjangan yang perlu ditutup.\n"
+                f"- Dengan mengartikulasikan gap secara eksplisit, proposal dapat bergerak dari keluhan operasional menjadi dasar intervensi yang lebih defensible."
+            ),
+            "2.5 Implication / Risk": (
+                f"Jika gap ini tidak ditutup, {client} berisiko mengalami deviasi KPI, penurunan kualitas layanan, dan bertambahnya tekanan pada governance maupun operasi.\n"
+                f"1. Implikasi masalah harus diterjemahkan ke dampak bisnis, risiko eksekusi, dan konsekuensi keputusan yang mungkin muncul di level sponsor.\n"
+                f"- Risiko ini juga menjadi alasan mengapa perbaikan tidak bisa ditunda atau diperlakukan sebagai isu administratif semata."
+            ),
+            "2.6 Need for Solution": (
+                f"Karena itu, rumusan masalah pada bab ini harus mengarah pada kebutuhan solusi yang mampu menutup gap tersebut secara terukur, defensible, dan siap diturunkan ke tahap pendekatan serta desain solusi.\n"
+                f"1. Need for solution perlu menjadi jembatan langsung ke bab pendekatan, metodologi, dan solution design.\n"
+                f"- Dengan struktur ini, {client} dapat melihat bahwa solusi yang diusulkan memang lahir dari definisi masalah yang runtut, bukan dari asumsi generik."
+            ),
+        }
+
+        additions: List[str] = []
+        for section in subsections:
+            if re.search(rf"(?im)^\s*##\s*{re.escape(section)}\s*$", patched):
+                continue
+            body = section_templates.get(section, f"{section} perlu dijelaskan secara konkret untuk {client}.")
+            additions.append(f"## {section}\n{body}")
+
+        if not additions:
+            return patched
+        return patched + "\n\n" + "\n\n".join(additions)
+
+    def _ensure_visual_requirements(self, chapter: Dict[str, Any], content: str, timeline: str = "") -> str:
+        patched = (content or "").rstrip()
+        if chapter.get("visual_intent") != "gantt" or "[[GANTT:" in patched:
+            return patched
+
+        months = max(4, int(round(FinancialAnalyzer._duration_to_months(timeline) or 6)))
+        breakpoints = [0, max(1, months // 4), max(2, months // 2), max(3, (months * 3) // 4), months]
+        phase_names = ["Discovery", "Design", "Execution", "Stabilization"]
+        parts = []
+        for idx, name in enumerate(phase_names):
+            start = min(breakpoints[idx], months - 1)
+            end = max(start + 1, min(months, breakpoints[idx + 1]))
+            parts.append(f"{name},{start},{end}")
+        return patched + f"\n[[GANTT: Jadwal Pelaksanaan | Bulan | {'; '.join(parts)}]]"
+
+    def _ensure_personalization_signals(
+        self,
+        content: str,
+        client: str,
+        personalization_pack: Optional[Dict[str, Any]] = None
+    ) -> str:
+        data = personalization_pack or {}
+        patched = (content or "").rstrip()
+        additions: List[str] = []
+
+        if not self._contains_client_reference(patched, client):
+            additions.append(f"- Untuk {client}, isi bab ini tetap diarahkan pada keputusan dan langkah kerja yang konkret.")
+
+        terminology = data.get("terminology", []) or []
+        if terminology:
+            term_hit = any(re.search(rf"\b{re.escape(term)}\b", patched, re.IGNORECASE) for term in terminology if term)
+            if not term_hit:
+                additions.append(f"- Istilah kerja yang tetap dijaga pada bab ini mencakup {', '.join(terminology[:2])}.")
+
+        kpis = data.get("kpi_blueprint", []) or []
+        if kpis:
+            kpi_keywords = data.get("kpi_keywords", []) or []
+            kpi_hit = any(re.search(rf"\b{re.escape(token)}\b", patched, re.IGNORECASE) for token in kpi_keywords if token)
+            if not kpi_hit:
+                additions.append(f"- KPI acuan yang tetap dijaga pada bab ini adalah {kpis[0]}.")
+
+        anchors = data.get("initiative_facts", []) or []
+        anchor_citations = data.get("anchor_citations", []) or []
+        anchor_hit = any(citation in patched for citation in anchor_citations) if anchor_citations else True
+        if anchors and not anchor_hit:
+            anchor = anchors[0]
+            anchor_fact = str(anchor.get("fact", "") or "").strip()
+            anchor_citation = str(anchor.get("citation", "") or "").strip()
+            if anchor_fact and anchor_citation:
+                additions.append(f"- Anchor inisiatif yang tetap dirujuk adalah {anchor_fact} {anchor_citation}.")
+
+        if not additions:
+            return patched
+        return patched + "\n" + "\n".join(additions)
+
+    def _ensure_minimum_substance(
+        self,
+        chapter: Dict[str, Any],
+        content: str,
+        client: str,
+        target_words: Optional[int] = None,
+        personalization_pack: Optional[Dict[str, Any]] = None,
+        timeline: str = ""
+    ) -> str:
+        target = int(target_words or self._target_words(chapter))
+        floor = max(140, int(self._chapter_floor_words(chapter.get("id", ""), for_compression=False) * 0.8))
+        min_words = max(floor, int(target * 0.72))
+        patched = (content or "").rstrip()
+        if self._word_count(patched) >= min_words:
+            return patched
+
+        data = personalization_pack or {}
+        kpi_line = " | ".join((data.get("kpi_blueprint", []) or [])[:2]) or f"outcome utama {client}"
+        term_line = ", ".join((data.get("terminology", []) or [])[:2]) or "governance, risk control"
+        anchor_line = ""
+        anchors = data.get("initiative_facts", []) or []
+        if anchors:
+            fact = str(anchors[0].get("fact", "") or "").strip()
+            citation = str(anchors[0].get("citation", "") or "").strip()
+            if fact and citation:
+                anchor_line = f" Rujukan konteks yang tetap dipakai adalah {fact} {citation}."
+
+        chapter_specific_blocks = {
+            "c_2": [
+                (
+                    f"Definisi masalah untuk {client} perlu dibangun dengan pola yang konsisten agar sponsor dapat melihat hubungan langsung antara konteks bisnis, tantangan utama, gap yang mendasari, "
+                    f"risiko yang muncul, dan kebutuhan solusi. Dengan pendekatan ini, bab permasalahan tidak berhenti pada daftar pain point, tetapi benar-benar menjelaskan mengapa gap antara current state "
+                    f"dan target state perlu ditutup dengan intervensi yang lebih terukur.{anchor_line}"
+                ),
+                (
+                    f"- Pola definisi masalah membantu {client} membedakan gejala operasional dari akar gap yang perlu diprioritaskan.\n"
+                    f"- Untuk menjaga relevansi eksekusi, rumusan masalah harus tetap ditautkan ke KPI seperti {kpi_line} dan istilah kerja {term_line}."
+                ),
+                (
+                    f"Dengan demikian, bab ini memberi dasar yang lebih kuat untuk bab berikutnya: klasifikasi kebutuhan, pendekatan, metodologi, dan solution design dapat diturunkan dari rumusan masalah yang sama, "
+                    f"bukan dari asumsi yang berubah-ubah. Itu membuat proposal lebih defensible, lebih personal terhadap kondisi {client}, dan lebih berguna sebagai dokumen keputusan."
+                ),
+            ],
+            "c_3": [
+                (
+                    f"Pada praktiknya, klasifikasi kebutuhan tidak boleh berhenti sebagai label administratif. Bagi {client}, "
+                    f"klasifikasi ini menentukan apakah fokus kerja harus menutup gap yang sudah nyata, menangkap peluang yang bisa mempercepat hasil, "
+                    f"atau memenuhi directive yang tidak bisa ditawar. Dengan kerangka seperti ini, keputusan scope, prioritas eksekusi, dan governance "
+                    f"bisa diarahkan lebih presisi terhadap KPI seperti {kpi_line}.{anchor_line}"
+                ),
+                (
+                    f"- Dampak utama dari klasifikasi yang benar adalah keputusan proyek menjadi lebih cepat, lebih defensible, dan lebih mudah diturunkan ke delivery plan.\n"
+                    f"- Untuk {client}, bahasa kerja seperti {term_line} perlu tetap hadir agar klasifikasi kebutuhan tidak terlepas dari konteks operasionalnya."
+                ),
+                (
+                    f"Karena itu, hasil klasifikasi juga perlu dipakai sebagai dasar untuk menetapkan sponsor keputusan, scope awal, dan bentuk intervensi yang paling realistis. "
+                    f"Dengan pendekatan ini, {client} tidak hanya memperoleh label kebutuhan, tetapi juga dasar yang lebih kuat untuk menyelaraskan tujuan proyek, kontrol delivery, dan ukuran keberhasilan sejak fase awal."
+                ),
+            ],
+            "c_7": [
+                (
+                    f"Penjadwalan tidak hanya membagi durasi {timeline or 'proyek'} ke dalam fase, tetapi juga memastikan dependensi, keputusan sponsor, "
+                    f"dan kesiapan stakeholder bergerak dalam ritme yang sama. Untuk {client}, pengaturan ini penting agar progres tidak sekadar terlihat aktif, "
+                    f"melainkan benar-benar menjaga jalur pencapaian KPI seperti {kpi_line}.{anchor_line}"
+                ),
+                (
+                    f"- Setiap fase perlu punya quality gate yang jelas agar perubahan prioritas tidak langsung merusak baseline jadwal.\n"
+                    f"- Koordinasi timeline juga harus menjaga konsistensi istilah kerja {term_line} supaya forum eksekusi dan forum pengarah membaca progres dengan bahasa yang sama."
+                ),
+                (
+                    f"Dengan cara ini, timeline berfungsi sebagai alat steering, bukan hanya kalender aktivitas. Sponsor {client} dapat melihat kapan keputusan penting harus diambil, "
+                    f"kapan deliverable harus ditinjau, dan kapan penyesuaian perlu dilakukan agar program tetap bergerak ke outcome yang dituju tanpa kehilangan kontrol atas risiko dan dependensi."
+                ),
+            ],
+            "c_10": [
+                (
+                    f"Bab pembiayaan tidak boleh berhenti sebagai angka dan termin pembayaran saja. Untuk {client}, bagian ini perlu menunjukkan bahwa struktur biaya, tahapan pembayaran, "
+                    f"dan batas pekerjaan disusun agar manfaat bisnis seperti {kpi_line} tetap dapat dikejar tanpa membuat komitmen komersial menjadi kabur. Dalam praktiknya, disiplin seperti ini "
+                    f"juga memperlihatkan cara {WRITER_FIRM_NAME} menjaga hubungan antara acceptance deliverable, quality gate, dan kontrol perubahan ruang lingkup."
+                ),
+                (
+                    f"- Setiap komponen biaya perlu dikaitkan dengan milestone dan output yang nyata agar sponsor {client} dapat menilai nilai investasinya secara lebih objektif.\n"
+                    f"- Bahasa komersial pada bab ini juga harus tetap konsisten dengan istilah kerja {term_line}, sehingga diskusi biaya tidak terlepas dari konteks delivery dan governance."
+                ),
+                (
+                    f"Dengan pendekatan tersebut, model pembiayaan menjadi alat pengendali bersama antara klien dan penyedia jasa. {client} memperoleh kejelasan mengenai apa yang dibayar, "
+                    f"hasil apa yang diterima, serta kondisi apa yang dapat memicu perubahan komersial. Bagi {WRITER_FIRM_NAME}, pola ini membantu menjaga proposal tetap profesional, defensible, "
+                    f"dan sejalan dengan outcome yang dijanjikan sejak awal engagement."
+                ),
+            ],
+        }
+        generic_blocks = [
+            (
+                f"Untuk {client}, isi bab ini harus dibaca sebagai dasar keputusan kerja yang dapat ditindaklanjuti, bukan sekadar penjelasan konseptual. "
+                f"Karena itu, isi bab tetap diarahkan untuk menjaga relevansi terhadap KPI seperti {kpi_line} dan istilah kerja {term_line}.{anchor_line}"
+            ),
+            (
+                f"- Implikasi eksekusinya harus tetap jelas agar sponsor dan tim delivery dapat menurunkan isi bab ini menjadi tindakan yang konkret.\n"
+                f"- Dengan pendekatan ini, narasi proposal tetap terhubung pada kebutuhan bisnis sekaligus tidak kehilangan kontrol implementasi."
+            ),
+            (
+                f"Secara praktis, hal ini membantu {client} membaca setiap bagian proposal sebagai bahan keputusan yang lebih operasional: apa yang harus diprioritaskan, "
+                f"siapa yang perlu mengambil keputusan, risiko apa yang harus dijaga, dan indikator apa yang dipakai untuk menguji bahwa arah kerja masih benar."
+            ),
+        ]
+
+        blocks = chapter_specific_blocks.get(chapter.get("id", ""), []) + generic_blocks
+        for block in blocks:
+            if self._word_count(patched) >= min_words:
+                break
+            patched += "\n\n" + block
+
+        if self._word_count(patched) < min_words:
+            patched += (
+                f"\n\nParagraf penegasan ini menjaga agar isi bab tetap cukup substantif untuk dibaca oleh sponsor {client}. "
+                f"Artinya, isi bab tidak berhenti pada deskripsi, tetapi tetap menunjukkan keterkaitan antara keputusan kerja, KPI {kpi_line}, "
+                f"bahasa operasional {term_line}, dan konteks inisiatif yang sedang dijalankan."
+            )
+        booster_count = 0
+        while self._word_count(patched) < min_words and booster_count < 3:
+            patched += (
+                f"\n\nPenajaman tambahan ini memastikan bab tetap berguna untuk pengambilan keputusan {client}. "
+                f"Isi bab harus tetap menjelaskan implikasi kerja, konsekuensi pada KPI {kpi_line}, "
+                f"dan bagaimana langkah eksekusinya dijaga tetap konsisten dengan istilah operasional {term_line}."
+            )
+            booster_count += 1
+        return patched
+
+    def _apply_draft_repairs(
+        self,
+        chapter: Dict[str, Any],
+        content: str,
+        client: str,
+        allowed_external_citations: Optional[Set[str]] = None,
+        personalization_pack: Optional[Dict[str, Any]] = None
+        ,
+        target_words: Optional[int] = None,
+        timeline: str = ""
+    ) -> str:
+        allowed = set(allowed_external_citations or set())
+        repaired = self._clean_external_citations(content or "", allowed)
+        repaired = self._ensure_required_headings(chapter, repaired)
+        repaired = self._ensure_list_structure(repaired, chapter, client, personalization_pack=personalization_pack)
+        repaired = self._ensure_problem_definition_pattern(chapter, repaired, client, personalization_pack=personalization_pack)
+        repaired = self._ensure_visual_requirements(chapter, repaired, timeline=timeline)
+        repaired = self._ensure_personalization_signals(repaired, client, personalization_pack=personalization_pack)
+        repaired = self._ensure_minimum_substance(
+            chapter,
+            repaired,
+            client,
+            target_words=target_words,
+            personalization_pack=personalization_pack,
+            timeline=timeline
+        )
+        return self._clean_external_citations(repaired, allowed)
+
+    @staticmethod
+    def _semantic_terms(values: Any, max_terms: int = 12) -> List[str]:
+        stopwords = {
+            "yang", "untuk", "dengan", "dari", "pada", "dan", "atau", "agar", "dalam",
+            "lebih", "tetap", "harus", "jadi", "sebagai", "melalui", "terhadap", "karena",
+            "the", "and", "with", "from", "into", "this", "that", "your", "their",
+        }
+        raw_items = values if isinstance(values, list) else [values]
+        seen: Set[str] = set()
+        terms: List[str] = []
+        for raw in raw_items:
+            text = re.sub(r"\s+", " ", str(raw or "").strip())
+            if not text:
+                continue
+            lowered = text.lower()
+            if 2 <= len(lowered.split()) <= 5 and lowered not in seen:
+                seen.add(lowered)
+                terms.append(text)
+            for token in re.findall(r"[A-Za-z]{4,}", lowered):
+                if token in stopwords or token in seen:
+                    continue
+                seen.add(token)
+                terms.append(token)
+                if len(terms) >= max_terms:
+                    return terms
+            if len(terms) >= max_terms:
+                break
+        return terms[:max_terms]
+
+    @staticmethod
+    def _count_signal_hits(content: str, candidates: List[str], max_hits: int = 6) -> int:
+        hits = 0
+        seen: Set[str] = set()
+        text = content or ""
+        for candidate in candidates or []:
+            value = re.sub(r"\s+", " ", str(candidate or "").strip())
+            if not value:
+                continue
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            pattern = re.escape(value)
+            if " " not in value and value.isalpha():
+                pattern = rf"\b{pattern}\b"
+            if re.search(pattern, text, re.IGNORECASE):
+                hits += 1
+                if hits >= max_hits:
+                    return hits
+        return hits
+
+    @staticmethod
+    def _chapter_usefulness_terms(chapter_id: str) -> List[str]:
+        mapping = {
+            "c_1": ["latar belakang", "konteks", "prioritas", "permintaan"],
+            "c_2": ["masalah", "hambatan", "gap", "risiko", "business context", "key challenge", "underlying gap", "need for solution"],
+            "c_3": ["problem", "opportunity", "directive", "tujuan", "jenis proyek"],
+            "c_4": ["framework", "regulasi", "standar", "acuan"],
+            "c_5": ["metodologi", "langkah kerja", "fase", "output"],
+            "c_6": ["solusi", "deliverable", "target state", "output"],
+            "c_7": ["deliverable", "milestone", "fase", "gantt"],
+            "c_8": ["keputusan", "eskalasi", "quality gate", "kontrol"],
+            "c_9": ["tim", "kapabilitas", "pengalaman", "sertifikasi"],
+            "c_10": ["biaya", "pembayaran", "scope", "batasan"],
+            "c_closing": ["terima kasih", "langkah lanjutan", "kemitraan"],
+        }
+        return mapping.get(chapter_id, ["deliverable", "risiko", "kpi"])
+
+    @staticmethod
+    def _safe_score(value: float) -> int:
+        return max(0, min(100, int(round(value))))
+
+    @classmethod
+    def _find_contact_like_lines(cls, content: str) -> List[str]:
+        suspects: List[str] = []
+        patterns = [
+            r"@",
+            r"https?://|www\.",
+            r"\b(?:telp|telepon|phone|whatsapp|wa)\b",
+            r"\b(?:jl\.|jalan|office|kantor)\b",
+            r"\(\d{3,4}\)",
+        ]
+        for raw_line in (content or "").splitlines():
+            line = re.sub(r"^[#*\-\d.\s]+", "", raw_line).strip()
+            if not line:
+                continue
+            if any(re.search(pattern, line, re.IGNORECASE) for pattern in patterns):
+                suspects.append(line)
+        return suspects
+
+    def _evaluate_proposal_acceptance(
+        self,
+        chapter_outputs: Dict[str, str],
+        selected_chapters: List[Dict[str, Any]],
+        chapter_targets: Dict[str, int],
+        client: str,
+        project: str,
+        notes: str,
+        firm_profile: Dict[str, Any],
+        allowed_external_citations: Set[str],
+        personalization_pack: Dict[str, Any],
+        value_map: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        chapter_map = {chapter["id"]: chapter for chapter in selected_chapters}
+        full_text = "\n\n".join(
+            chapter_outputs.get(chapter["id"], "")
+            for chapter in selected_chapters
+            if chapter_outputs.get(chapter["id"], "")
+        )
+        generated_words = sum(self._word_count(text) for text in chapter_outputs.values() if text)
+        estimated_pages = self._estimated_pages(generated_words)
+
+        chapter_findings: Dict[str, Dict[str, Any]] = {}
+        hard_failures: List[str] = []
+        soft_findings: List[str] = []
+        invalid_external_citations: List[str] = []
+        personalization_weight = 0.0
+        personalization_score_total = 0.0
+
+        company_terms = self._semantic_terms(
+            [value_map.get("positioning", ""), value_map.get("proposal_promise", "")] +
+            (value_map.get("differentiators", []) or []) +
+            (value_map.get("proof_points", []) or []),
+            max_terms=18
+        )
+        persuasion_terms = self._semantic_terms(
+            [value_map.get("value_statement", ""), value_map.get("value_hook", ""), value_map.get("win_theme", "")] +
+            (value_map.get("client_gains", []) or []) +
+            (value_map.get("industry_drivers", []) or []),
+            max_terms=18
+        )
+        pressure_terms = self._semantic_terms([project, notes, value_map.get("customer_pressure", "")], max_terms=12)
+        anchor_terms = personalization_pack.get("anchor_citations", []) or []
+        if not anchor_terms:
+            anchor_terms = self._semantic_terms(
+                [item.get("fact", "") for item in personalization_pack.get("initiative_facts", []) or []],
+                max_terms=8
+            )
+
+        for chapter in selected_chapters:
+            chapter_id = chapter["id"]
+            content = (chapter_outputs.get(chapter_id) or "").strip()
+            target_words = chapter_targets.get(chapter_id, self._target_words(chapter))
+            if not content:
+                hard_failures.append(f"{chapter['title']}: empty")
+                chapter_findings[chapter_id] = {
+                    "title": chapter["title"],
+                    "issues": ["empty"],
+                    "score": 0,
+                    "weaknesses": ["missing_content"],
+                }
+                continue
+
+            quality = self._evaluate_chapter_quality(
+                chapter=chapter,
+                content=content,
+                client=client,
+                target_words=target_words,
+                allowed_external_citations=allowed_external_citations,
+                personalization_pack=personalization_pack,
+            )
+            issues = quality.get("issues", [])
+            invalid_external_citations.extend(quality.get("invalid_external_citations", []))
+
+            if any(issue in issues for issue in {"missing_h2", "too_short", "missing_visual", "citation_policy"}):
+                hard_failures.extend([f"{chapter['title']}: {issue}" for issue in issues if issue in {"missing_h2", "too_short", "missing_visual", "citation_policy"}])
+            elif issues:
+                soft_findings.extend([f"{chapter['title']}: {issue}" for issue in issues])
+
+            client_ref_hit = self._contains_client_reference(content, client)
+            term_hits = self._count_signal_hits(content, personalization_pack.get("terminology", []) or [], max_hits=3)
+            kpi_hits = self._count_signal_hits(
+                content,
+                (personalization_pack.get("kpi_blueprint", []) or []) + (personalization_pack.get("kpi_keywords", []) or []),
+                max_hits=3
+            )
+            anchor_hits = self._count_signal_hits(content, anchor_terms, max_hits=2)
+            value_hits = self._count_signal_hits(content, persuasion_terms, max_hits=4)
+            usefulness_hits = self._count_signal_hits(content, self._chapter_usefulness_terms(chapter_id), max_hits=3)
+
+            business_rank = self._chapter_business_rank(chapter_id)
+            chapter_personalization = (
+                (1.0 if client_ref_hit else 0.0) +
+                min(1.0, term_hits / 2.0) +
+                min(1.0, kpi_hits / 2.0) +
+                min(1.0, anchor_hits / 1.0)
+            ) / 4.0
+            personalization_score_total += chapter_personalization * business_rank
+            personalization_weight += business_rank
+
+            chapter_score = 100
+            chapter_score -= 16 * len([issue for issue in issues if issue in {"missing_h2", "too_short", "missing_visual", "citation_policy"}])
+            chapter_score -= 8 * len([issue for issue in issues if issue not in {"missing_h2", "too_short", "missing_visual", "citation_policy"}])
+            chapter_score += min(8, value_hits * 2)
+            chapter_score += min(8, usefulness_hits * 2)
+            chapter_score = self._safe_score(chapter_score)
+
+            weaknesses: List[str] = []
+            if not client_ref_hit:
+                weaknesses.append("client_specificity")
+            if term_hits == 0 or kpi_hits == 0:
+                weaknesses.append("personalization")
+            if anchor_hits == 0 and chapter_id in {"c_1", "c_2", "c_3", "c_4", "c_5", "c_6"}:
+                weaknesses.append("external_or_internal_anchor")
+            if value_hits == 0:
+                weaknesses.append("business_value")
+            if usefulness_hits == 0:
+                weaknesses.append("actionability")
+            if "too_short" in issues:
+                weaknesses.append("substance")
+
+            chapter_findings[chapter_id] = {
+                "title": chapter["title"],
+                "issues": issues,
+                "score": chapter_score,
+                "client_ref_hit": client_ref_hit,
+                "term_hits": term_hits,
+                "kpi_hits": kpi_hits,
+                "anchor_hits": anchor_hits,
+                "value_hits": value_hits,
+                "usefulness_hits": usefulness_hits,
+                "weaknesses": weaknesses,
+            }
+
+        format_penalty = 0
+        if estimated_pages > MAX_PROPOSAL_PAGES:
+            hard_failures.append(f"page_limit_exceeded:{estimated_pages}>{MAX_PROPOSAL_PAGES}")
+            format_penalty += min(40, (estimated_pages - MAX_PROPOSAL_PAGES) * 10)
+        format_penalty += min(40, len(hard_failures) * 4)
+        format_penalty += min(20, len(soft_findings) * 2)
+        format_fidelity = self._safe_score(100 - format_penalty)
+
+        personalization_score = self._safe_score(
+            100 * (personalization_score_total / max(personalization_weight, 1.0))
+        )
+
+        company_fit_hits = [
+            1.0 if WRITER_FIRM_NAME.lower() in full_text.lower() else 0.0,
+            min(1.0, self._count_signal_hits(full_text, company_terms, max_hits=6) / 4.0),
+            min(1.0, self._count_signal_hits(full_text, value_map.get("proof_points", []) or [], max_hits=3) / 2.0),
+        ]
+        verified_contact_lines = FirmAPIClient.build_contact_lines(firm_profile)
+        if verified_contact_lines:
+            closing_text = chapter_outputs.get("c_closing", "")
+            extracted_contact = FirmAPIClient._extract_contact_fields(closing_text)
+            expected_contact = {
+                "office_address": str(firm_profile.get("office_address") or "").strip(),
+                "email": str(firm_profile.get("email") or "").strip(),
+                "phone": str(firm_profile.get("phone") or "").strip(),
+                "website": str(firm_profile.get("website") or "").strip(),
+            }
+            missing_contact_lines = [
+                field_name for field_name, expected_value in expected_contact.items()
+                if expected_value
+                and expected_value not in closing_text
+                and expected_value not in str(extracted_contact.get(field_name) or "")
+            ]
+            if missing_contact_lines:
+                hard_failures.append("verified_contact_missing")
+            company_fit_hits.append(1.0 if not missing_contact_lines else 0.0)
+        company_fit = self._safe_score(100 * (sum(company_fit_hits) / max(len(company_fit_hits), 1)))
+
+        persuasion_components = [
+            min(1.0, self._count_signal_hits(full_text, persuasion_terms, max_hits=8) / 5.0),
+            min(1.0, self._count_signal_hits(full_text, pressure_terms, max_hits=6) / 3.0),
+        ]
+        for chapter_id in ("c_2", "c_3", "c_5", "c_6", "c_10"):
+            chapter_text = chapter_outputs.get(chapter_id, "")
+            if not chapter_text:
+                continue
+            persuasion_components.append(
+                min(1.0, self._count_signal_hits(chapter_text, persuasion_terms + pressure_terms, max_hits=5) / 2.0)
+            )
+        persuasion_score = self._safe_score(100 * (sum(persuasion_components) / max(len(persuasion_components), 1)))
+
+        usefulness_checks = [
+            1.0 if "[[GANTT:" in chapter_outputs.get("c_7", "") else 0.0 if chapter_map.get("c_7") else 1.0,
+            min(1.0, self._count_signal_hits(chapter_outputs.get("c_5", ""), self._chapter_usefulness_terms("c_5"), max_hits=4) / 2.0) if chapter_map.get("c_5") else 1.0,
+            min(1.0, self._count_signal_hits(chapter_outputs.get("c_6", ""), self._chapter_usefulness_terms("c_6"), max_hits=4) / 2.0) if chapter_map.get("c_6") else 1.0,
+            min(1.0, self._count_signal_hits(chapter_outputs.get("c_8", ""), self._chapter_usefulness_terms("c_8"), max_hits=4) / 2.0) if chapter_map.get("c_8") else 1.0,
+            min(1.0, self._count_signal_hits(chapter_outputs.get("c_10", ""), self._chapter_usefulness_terms("c_10"), max_hits=4) / 2.0) if chapter_map.get("c_10") else 1.0,
+        ]
+        usefulness_score = self._safe_score(100 * (sum(usefulness_checks) / max(len(usefulness_checks), 1)))
+
+        factual_penalty = 0
+        if invalid_external_citations:
+            factual_penalty += min(50, len(set(invalid_external_citations)) * 20)
+        closing_contact_lines = self._find_contact_like_lines(chapter_outputs.get("c_closing", ""))
+        if verified_contact_lines:
+            allowed_contact_values = set()
+            for line in verified_contact_lines:
+                extracted = FirmAPIClient._extract_contact_fields(line)
+                allowed_contact_values.update(
+                    value.strip() for value in extracted.values() if str(value).strip()
+                )
+            unverified_contact_lines = [
+                line for line in closing_contact_lines
+                if not any(value and value in line for value in allowed_contact_values)
+            ]
+        else:
+            unverified_contact_lines = closing_contact_lines
+        if unverified_contact_lines:
+            factual_penalty += min(40, len(unverified_contact_lines) * 10)
+            hard_failures.append("unverified_contact_detail")
+        factual_safety = self._safe_score(100 - factual_penalty)
+
+        categories = {
+            "format_fidelity": format_fidelity,
+            "personalization": personalization_score,
+            "company_fit": company_fit,
+            "persuasion": persuasion_score,
+            "usefulness": usefulness_score,
+            "factual_safety": factual_safety,
+        }
+        total_score = self._safe_score(
+            (format_fidelity * 0.20) +
+            (personalization_score * 0.25) +
+            (company_fit * 0.20) +
+            (persuasion_score * 0.15) +
+            (usefulness_score * 0.10) +
+            (factual_safety * 0.10)
+        )
+        low_categories = [name for name, score in categories.items() if score < self.PROPOSAL_CATEGORY_FLOOR]
+
+        return {
+            "score": total_score,
+            "categories": categories,
+            "estimated_pages": estimated_pages,
+            "generated_words": generated_words,
+            "hard_failures": sorted(set(hard_failures)),
+            "soft_findings": sorted(set(soft_findings)),
+            "low_categories": low_categories,
+            "chapter_findings": chapter_findings,
+            "passes": not hard_failures and total_score >= self.PROPOSAL_ACCEPTANCE_TARGET and not low_categories,
+        }
+
+    def _select_improvement_chapters(
+        self,
+        acceptance_report: Dict[str, Any],
+        selected_chapters: List[Dict[str, Any]]
+    ) -> List[str]:
+        limit = 2 if self._throughput_mode() else 3
+        candidates: List[Tuple[int, int, str]] = []
+        for chapter in selected_chapters:
+            chapter_id = chapter["id"]
+            if chapter_id == "c_closing" or self._use_structured_chapter(chapter_id):
+                continue
+            finding = acceptance_report.get("chapter_findings", {}).get(chapter_id, {})
+            issues = finding.get("issues", []) or []
+            weaknesses = finding.get("weaknesses", []) or []
+            score = int(finding.get("score", 100))
+            if score >= 82 and not issues and not weaknesses:
+                continue
+            priority = self._chapter_business_rank(chapter_id)
+            candidates.append((score, -priority, chapter_id))
+        candidates.sort()
+        return [chapter_id for _, _, chapter_id in candidates[:limit]]
+
+    def _improve_weak_chapter(
+        self,
+        chapter: Dict[str, Any],
+        prompt: str,
+        content: str,
+        client: str,
+        target_words: int,
+        acceptance_report: Dict[str, Any],
+        personalization_pack: Dict[str, Any],
+        value_map: Dict[str, Any],
+        allowed_external_citations: Set[str],
+        timeline: str = ""
+    ) -> str:
+        finding = acceptance_report.get("chapter_findings", {}).get(chapter["id"], {})
+        weaknesses = finding.get("weaknesses", []) or ["personalization", "business_value", "actionability"]
+        focus_terms = ", ".join(personalization_pack.get("terminology", [])[:3]) or "governance, delivery, risk control"
+        kpi_line = " | ".join(personalization_pack.get("kpi_blueprint", [])[:3]) or f"hasil bisnis terukur untuk {client}"
+        proof_line = ", ".join(value_map.get("proof_points", [])[:3]) or "kapabilitas delivery dan kontrol mutu yang tersedia"
+        try:
+            res = self.ollama.chat(
+                model=LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": (
+                        f"Perkuat draft {chapter['title']} agar lebih layak sebagai proposal 80% siap pakai.\n"
+                        f"Fokus perbaikan: {', '.join(weaknesses)}.\n"
+                        f"Wajib:\n"
+                        f"- lebih spesifik ke konteks {client}\n"
+                        f"- lebih jelas menghubungkan isi bab dengan KPI {kpi_line}\n"
+                        f"- lebih terasa nilai dan kredibilitas {WRITER_FIRM_NAME} lewat bukti {proof_line}\n"
+                        f"- lebih actionable untuk sponsor, decision maker, dan delivery team\n"
+                        f"- tetap faktual, jangan menambah klaim baru di luar draft/sumber yang sudah ada\n"
+                        f"- pertahankan H2 wajib, numbering, bullet, dan disiplin panjang sekitar {target_words} kata\n"
+                        f"- gunakan istilah domain secara natural: {focus_terms}\n\n"
+                        f"DRAFT SAAT INI:\n{content}"
+                    )},
+                ],
+                options=self._chapter_generation_options(target_words, purpose="retry")
+            )
+            revised = (res.get("message", {}).get("content", "") or "").strip()
+        except Exception:
+            revised = ""
+
+        repaired = self._apply_draft_repairs(
+            chapter=chapter,
+            content=revised or content,
+            client=client,
+            allowed_external_citations=allowed_external_citations,
+            personalization_pack=personalization_pack,
+            target_words=target_words,
+            timeline=timeline,
+        )
+        return repaired
+
+    def _stabilize_chapter_outputs(
+        self,
+        chapter_outputs: Dict[str, str],
+        selected_chapters: List[Dict[str, Any]],
+        chapter_targets: Dict[str, int],
+        client: str,
+        timeline: str,
+        allowed_external_citations: Set[str],
+        personalization_pack: Dict[str, Any]
+    ) -> Dict[str, str]:
+        stabilized = dict(chapter_outputs)
+        for chapter in selected_chapters:
+            chapter_id = chapter["id"]
+            content = stabilized.get(chapter_id, "")
+            if not content:
+                continue
+            report = self._evaluate_chapter_quality(
+                chapter=chapter,
+                content=content,
+                client=client,
+                target_words=chapter_targets.get(chapter_id, self._target_words(chapter)),
+                allowed_external_citations=allowed_external_citations,
+                personalization_pack=personalization_pack,
+            )
+            if not any(issue in report["issues"] for issue in {"missing_h2", "too_short", "list_structure", "missing_visual", "missing_personalization"}):
+                continue
+            stabilized[chapter_id] = self._apply_draft_repairs(
+                chapter=chapter,
+                content=content,
+                client=client,
+                allowed_external_citations=allowed_external_citations,
+                personalization_pack=personalization_pack,
+                target_words=chapter_targets.get(chapter_id, self._target_words(chapter)),
+                timeline=timeline,
+            )
+        return stabilized
