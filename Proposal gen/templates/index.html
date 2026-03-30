@@ -8,10 +8,13 @@
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; color: #334155; }
         .card { background: white; padding: 35px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 680px; max-height: 90vh; overflow-y: auto; border: 1px solid #e2e8f0; }
         .hidden { display: none !important; }
+        .header-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+        .header-actions, .modal-actions, .history-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         h2 { color: #0f172a; margin: 0 0 5px 0; font-size: 1.6rem; }
         p.sub { color: #64748b; margin: 0 0 20px 0; font-size: 0.95rem; }
         label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; color: #475569;}
         select, input[type="text"], textarea, button { width: 100%; padding: 10px; margin-bottom: 12px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.95rem; box-sizing: border-box; }
+        .header-actions button, .modal-actions button, .history-actions button { width: auto; margin-bottom: 0; margin-top: 0; }
         select:focus, input[type="text"]:focus, textarea:focus { border-color: #3b82f6; outline: none; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1); }
         button { background: #2563eb; color: white; border: none; font-weight: 600; cursor: pointer; transition: 0.2s; margin-top: 5px; }
         button:hover { background: #1d4ed8; }
@@ -39,6 +42,16 @@
         .preview-item h4 { margin: 0 0 4px 0; font-size: 0.95rem; color: #0f172a; }
         .preview-item p { margin: 0; font-size: 0.85rem; color: #475569; }
         .preview-item ul { margin: 6px 0 0 16px; padding: 0; font-size: 0.82rem; color: #64748b; }
+        .modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.34); display: none; align-items: center; justify-content: center; padding: 24px; z-index: 1000; }
+        .modal-backdrop.active { display: flex; }
+        .modal { background: #ffffff; width: min(760px, 100%); max-height: 86vh; overflow-y: auto; border-radius: 14px; padding: 24px; border: 1px solid #e2e8f0; box-shadow: 0 18px 45px rgba(15, 23, 42, 0.18); }
+        .modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+        .modal-header h3 { margin: 0; color: #0f172a; }
+        .history-item { border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; margin-bottom: 12px; background: #f8fafc; }
+        .history-item h4 { margin: 0 0 6px 0; color: #0f172a; font-size: 0.98rem; }
+        .history-meta { font-size: 0.84rem; color: #64748b; margin-bottom: 10px; line-height: 1.5; }
+        .small-note { font-size: 0.82rem; color: #64748b; margin: 0 0 10px 0; }
+        .template-status { background: #f8fafc; border: 1px dashed #cbd5e1; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 0.86rem; color: #475569; }
         
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
@@ -51,16 +64,29 @@
         </div>
 
         <div id="step-config" class="hidden">
-            <h2>Proposal Generator</h2>
-            <p class="sub">Engine Requirement & Discovery</p>
+            <div class="header-bar">
+                <div>
+                    <h2>Proposal Generator</h2>
+                    <p class="sub">Engine Requirement & Discovery</p>
+                </div>
+                <div class="header-actions">
+                    <button type="button" id="btn-history" class="secondary">Riwayat</button>
+                    <button type="button" id="btn-settings" class="secondary">Pengaturan</button>
+                </div>
+            </div>
             
             <label for="select-perusahaan">Nama Perusahaan Klien</label>
             <select id="select-perusahaan"></select>
             
             <div id="container-dynamic" class="hidden">
+                <label for="select-mode-proposal">Jenis Dokumen Proposal</label>
+                <select id="select-mode-proposal">
+                    <option value="" disabled selected>Pilih jenis dokumen proposal...</option>
+                </select>
+
                 <div class="grid-2">
                     <div>
-                        <label for="select-proposal">Jenis Proposal</label>
+                        <label for="select-proposal">Jenis Layanan</label>
                         <select id="select-proposal">
                             <option value="" disabled selected>Pilih...</option>
                             <option value="Training">Training</option>
@@ -143,6 +169,47 @@
         </div>
     </div>
 
+    <div id="history-modal" class="modal-backdrop">
+        <div class="modal">
+            <div class="modal-header">
+                <div>
+                    <h3>Riwayat Proposal</h3>
+                    <p class="small-note">Gunakan proposal yang pernah digenerate sebagai referensi cepat saat menyusun proposal baru.</p>
+                </div>
+                <button type="button" id="btn-close-history" class="secondary">Tutup</button>
+            </div>
+            <div id="history-list"></div>
+        </div>
+    </div>
+
+    <div id="settings-modal" class="modal-backdrop">
+        <div class="modal">
+            <div class="modal-header">
+                <div>
+                    <h3>Pengaturan Proposal</h3>
+                    <p class="small-note">Simpan portofolio internal dan blanko template agar proposal berikutnya terasa lebih konkret dan tetap mengikuti styling perusahaan.</p>
+                </div>
+                <button type="button" id="btn-close-settings" class="secondary">Tutup</button>
+            </div>
+
+            <label for="settings-portfolio">Portofolio Internal / Pengalaman Serupa</label>
+            <textarea id="settings-portfolio" placeholder="Gunakan satu baris per pengalaman. Format yang disarankan: Area | Relevansi | Bukti | Nilai tambah"></textarea>
+
+            <label for="settings-credentials">Kapabilitas & Sertifikasi Internal</label>
+            <textarea id="settings-credentials" placeholder="Contoh: ISO 27001 | COBIT | IT Governance | Change Management | Enterprise Architecture"></textarea>
+
+            <label for="settings-template-file">Blanko / Template Proposal (.docx)</label>
+            <input type="file" id="settings-template-file" accept=".docx" />
+            <div id="template-status" class="template-status">Belum ada template blanko aktif.</div>
+
+            <div class="modal-actions">
+                <button type="button" id="btn-save-settings">Simpan Pengaturan</button>
+                <button type="button" id="btn-upload-template" class="secondary">Upload Blanko</button>
+                <button type="button" id="btn-clear-template" class="secondary">Hapus Blanko</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const ui = {
             loader: document.getElementById('loader'),
@@ -150,6 +217,7 @@
             successStep: document.getElementById('step-success'),
             successMessage: document.getElementById('success-message'),
             selPerusahaan: document.getElementById('select-perusahaan'),
+            selModeProposal: document.getElementById('select-mode-proposal'),
             selProposal: document.getElementById('select-proposal'),
             selProyek: document.getElementById('select-proyek'),
             inpKonteks: document.getElementById('input-konteks'),
@@ -170,7 +238,21 @@
             financeResult: document.getElementById('finance-result'),
             financeSummary: document.getElementById('finance-summary'),
             financeOptions: document.getElementById('finance-options'),
-            spinner: document.getElementById('spinner')
+            spinner: document.getElementById('spinner'),
+            btnHistory: document.getElementById('btn-history'),
+            btnSettings: document.getElementById('btn-settings'),
+            historyModal: document.getElementById('history-modal'),
+            settingsModal: document.getElementById('settings-modal'),
+            btnCloseHistory: document.getElementById('btn-close-history'),
+            btnCloseSettings: document.getElementById('btn-close-settings'),
+            historyList: document.getElementById('history-list'),
+            settingsPortfolio: document.getElementById('settings-portfolio'),
+            settingsCredentials: document.getElementById('settings-credentials'),
+            settingsTemplateFile: document.getElementById('settings-template-file'),
+            templateStatus: document.getElementById('template-status'),
+            btnSaveSettings: document.getElementById('btn-save-settings'),
+            btnUploadTemplate: document.getElementById('btn-upload-template'),
+            btnClearTemplate: document.getElementById('btn-clear-template')
         };
         let budgetAnalyzeInFlight = false;
         let proposalJobInFlight = false;
@@ -214,6 +296,7 @@
             const hasFramework = getFinalFrameworks().length > 0;
             return Boolean(
                 ui.selPerusahaan.value &&
+                ui.selModeProposal.value &&
                 ui.selProposal.value &&
                 ui.selProyek.value &&
                 ui.inpKonteks.value.trim() &&
@@ -246,6 +329,11 @@
                 if (configRes.ok) {
                     const config = await configRes.json();
                     jobPollIntervalMs = Number(config.job_poll_interval_ms) || jobPollIntervalMs;
+                    const proposalModes = Array.isArray(config.proposal_modes) ? config.proposal_modes : [];
+                    ui.selModeProposal.innerHTML = `<option value="" disabled selected>Pilih jenis dokumen proposal...</option>`;
+                    proposalModes.forEach(item => {
+                        ui.selModeProposal.add(new Option(item.label, item.value));
+                    });
                 }
                 ui.selPerusahaan.innerHTML = `<option value="" disabled selected>Pilih Klien...</option>`;
                 data.forEach(d => ui.selPerusahaan.add(new Option(d, d)));
@@ -258,6 +346,117 @@
         }
         init();
 
+        const openModal = (el) => el.classList.add('active');
+        const closeModal = (el) => el.classList.remove('active');
+
+        function setCheckedValues(container, rawValue) {
+            const selected = String(rawValue || '')
+                .split(',')
+                .map(item => item.trim().toLowerCase())
+                .filter(Boolean);
+            container.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.checked = selected.includes(String(cb.value || '').trim().toLowerCase());
+            });
+        }
+
+        function applyFrameworkValue(rawValue) {
+            const values = String(rawValue || '')
+                .split(',')
+                .map(item => item.trim())
+                .filter(Boolean);
+            const known = Array.from(ui.groupFramework.querySelectorAll('input:not(#cb-lainnya)')).map(cb => cb.value.toLowerCase());
+            const custom = [];
+            ui.groupFramework.querySelectorAll('input:not(#cb-lainnya)').forEach(cb => {
+                cb.checked = values.some(value => value.toLowerCase() === cb.value.toLowerCase());
+            });
+            values.forEach(value => {
+                if (!known.includes(value.toLowerCase())) custom.push(value);
+            });
+            ui.cbLainnya.checked = custom.length > 0;
+            ui.inpFrameworkLainnya.classList.toggle('hidden', custom.length === 0);
+            ui.inpFrameworkLainnya.value = custom.join(', ');
+        }
+
+        function applyPayload(payload = {}) {
+            ui.selPerusahaan.value = payload.nama_perusahaan || '';
+            ui.selModeProposal.value = payload.mode_proposal || '';
+            ui.selProposal.value = payload.jenis_proposal || '';
+            ui.selProyek.value = payload.jenis_proyek || '';
+            ui.inpKonteks.value = payload.konteks_organisasi || '';
+            ui.inpPermasalahan.value = payload.permasalahan || '';
+            ui.inpWaktu.value = payload.estimasi_waktu || '';
+            ui.inpBiaya.value = payload.estimasi_biaya || '';
+            ui.containerDynamic.classList.remove('hidden');
+            setCheckedValues(ui.groupKebutuhan, payload.klasifikasi_kebutuhan || '');
+            applyFrameworkValue(payload.potensi_framework || '');
+            ui.financeResult.classList.add('hidden');
+            ui.previewPanel.classList.add('hidden');
+            updateActionState();
+            schedulePrefetch(true);
+        }
+
+        async function loadHistory() {
+            ui.historyList.innerHTML = '<p class="small-note">Memuat riwayat proposal...</p>';
+            try {
+                const res = await fetch('/api/history');
+                const data = await res.json();
+                const items = Array.isArray(data.items) ? data.items : [];
+                if (!items.length) {
+                    ui.historyList.innerHTML = '<p class="small-note">Belum ada proposal yang tersimpan pada riwayat.</p>';
+                    return;
+                }
+                ui.historyList.innerHTML = items.map(item => `
+                    <div class="history-item">
+                        <h4>${item.client}</h4>
+                        <div class="history-meta">
+                            <div><strong>Waktu:</strong> ${item.finished_at_label}</div>
+                            <div><strong>Mode:</strong> ${item.proposal_mode} | <strong>Layanan:</strong> ${item.service_type} | <strong>Jenis Proyek:</strong> ${item.project_type}</div>
+                            <div><strong>Inisiatif:</strong> ${item.project}</div>
+                        </div>
+                        <div class="history-actions">
+                            ${item.can_reuse ? `<button type="button" class="secondary" onclick="reuseHistory('${item.id}')">Gunakan Lagi</button>` : ''}
+                            <button type="button" class="secondary" onclick="downloadHistory('${item.id}')">Unduh</button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                ui.historyList.innerHTML = '<p class="small-note">Riwayat proposal belum bisa dimuat.</p>';
+            }
+        }
+
+        async function loadSettings() {
+            try {
+                const res = await fetch('/api/settings');
+                const data = await res.json();
+                ui.settingsPortfolio.value = data.internal_portfolio || '';
+                ui.settingsCredentials.value = data.internal_credentials || '';
+                ui.templateStatus.textContent = data.has_active_template
+                    ? `Template aktif: ${data.active_template_name || 'blanko proposal'}`
+                    : 'Belum ada template blanko aktif.';
+            } catch (_) {
+                ui.templateStatus.textContent = 'Pengaturan belum bisa dimuat.';
+            }
+        }
+
+        async function reuseHistory(entryId) {
+            try {
+                const res = await fetch(`/api/history/${encodeURIComponent(entryId)}/reuse`);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Riwayat tidak bisa dipakai ulang.');
+                applyPayload(data.payload || {});
+                closeModal(ui.historyModal);
+            } catch (err) {
+                alert(err.message || 'Riwayat tidak bisa dipakai ulang.');
+            }
+        }
+
+        function downloadHistory(entryId) {
+            window.location.href = `/api/history/${encodeURIComponent(entryId)}/download`;
+        }
+
+        window.reuseHistory = reuseHistory;
+        window.downloadHistory = downloadHistory;
+
         ui.selPerusahaan.addEventListener('change', () => {
             ui.containerDynamic.classList.remove('hidden');
             ui.financeResult.classList.add('hidden'); 
@@ -265,9 +464,81 @@
             schedulePrefetch(true);
         });
 
+        ui.btnHistory.addEventListener('click', async () => {
+            await loadHistory();
+            openModal(ui.historyModal);
+        });
+
+        ui.btnSettings.addEventListener('click', async () => {
+            await loadSettings();
+            openModal(ui.settingsModal);
+        });
+
+        ui.btnCloseHistory.addEventListener('click', () => closeModal(ui.historyModal));
+        ui.btnCloseSettings.addEventListener('click', () => closeModal(ui.settingsModal));
+        ui.historyModal.addEventListener('click', (e) => { if (e.target === ui.historyModal) closeModal(ui.historyModal); });
+        ui.settingsModal.addEventListener('click', (e) => { if (e.target === ui.settingsModal) closeModal(ui.settingsModal); });
+
+        ui.btnSaveSettings.addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        internal_portfolio: ui.settingsPortfolio.value,
+                        internal_credentials: ui.settingsCredentials.value
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Pengaturan belum berhasil disimpan.');
+                ui.templateStatus.textContent = data.has_active_template
+                    ? `Template aktif: ${data.active_template_name || 'blanko proposal'}`
+                    : 'Belum ada template blanko aktif.';
+                alert('Pengaturan berhasil disimpan.');
+            } catch (err) {
+                alert(err.message || 'Pengaturan belum berhasil disimpan.');
+            }
+        });
+
+        ui.btnUploadTemplate.addEventListener('click', async () => {
+            const file = ui.settingsTemplateFile.files[0];
+            if (!file) return alert('Pilih file blanko .docx terlebih dahulu.');
+            const formData = new FormData();
+            formData.append('template', file);
+            try {
+                const res = await fetch('/api/settings/template', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Template belum berhasil diunggah.');
+                ui.templateStatus.textContent = data.has_active_template
+                    ? `Template aktif: ${data.active_template_name || 'blanko proposal'}`
+                    : 'Belum ada template blanko aktif.';
+                ui.settingsTemplateFile.value = '';
+                alert('Blanko proposal berhasil diunggah.');
+            } catch (err) {
+                alert(err.message || 'Template belum berhasil diunggah.');
+            }
+        });
+
+        ui.btnClearTemplate.addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/settings/template', { method: 'DELETE' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Blanko belum berhasil dihapus.');
+                ui.templateStatus.textContent = data.has_active_template
+                    ? `Template aktif: ${data.active_template_name || 'blanko proposal'}`
+                    : 'Belum ada template blanko aktif.';
+                alert('Blanko proposal berhasil dihapus.');
+            } catch (err) {
+                alert(err.message || 'Blanko belum berhasil dihapus.');
+            }
+        });
+
         // Re-check form completeness on relevant input changes.
         ['change', 'input'].forEach(evt => {
-            [ui.selProposal, ui.selProyek, ui.inpKonteks, ui.inpPermasalahan, ui.inpWaktu, ui.inpBiaya, ui.groupKebutuhan, ui.groupFramework, ui.inpFrameworkLainnya].forEach(el => {
+            [ui.selModeProposal, ui.selProposal, ui.selProyek, ui.inpKonteks, ui.inpPermasalahan, ui.inpWaktu, ui.inpBiaya, ui.groupKebutuhan, ui.groupFramework, ui.inpFrameworkLainnya].forEach(el => {
                 if(el) el.addEventListener(evt, () => {
                     updateActionState();
                     schedulePrefetch();
@@ -320,6 +591,7 @@
 
         const getPayload = () => ({
             nama_perusahaan: ui.selPerusahaan.value,
+            mode_proposal: ui.selModeProposal.value,
             jenis_proposal: ui.selProposal.value,
             jenis_proyek: ui.selProyek.value,
             konteks_organisasi: ui.inpKonteks.value,
@@ -332,7 +604,7 @@
 
         async function prefetchContext(force = false) {
             const payload = getPayload();
-            const key = `${payload.nama_perusahaan}||${payload.potensi_framework}`;
+            const key = `${payload.nama_perusahaan}||${payload.mode_proposal}||${payload.potensi_framework}`;
             if (!payload.nama_perusahaan || !payload.potensi_framework) return;
             if (!force && key === lastPrefetchKey) return;
             lastPrefetchKey = key;

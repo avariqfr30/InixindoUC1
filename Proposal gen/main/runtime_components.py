@@ -1565,6 +1565,353 @@ class FinancialAnalyzer:
             logger.error(f"Financial Analyzer Error: {e}")
             return dynamic_estimate
 
+
+class AppStateStore:
+    def __init__(self, db_path: Optional[Path] = None, asset_root: Optional[Path] = None) -> None:
+        self.db_path = Path(db_path or (PROJECT_ROOT / "app_state.db"))
+        self.asset_root = Path(asset_root or (PROJECT_ROOT / "app_assets"))
+        self.templates_dir = self.asset_root / "templates"
+        self.generated_dir = PROJECT_ROOT / "generated"
+        self.templates_dir.mkdir(parents=True, exist_ok=True)
+        self.generated_dir.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+        self._bootstrap_generated_history()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.db_path))
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS proposal_history (
+                    id TEXT PRIMARY KEY,
+                    created_at REAL NOT NULL,
+                    finished_at REAL NOT NULL,
+                    client TEXT NOT NULL,
+                    project TEXT NOT NULL,
+                    proposal_mode TEXT NOT NULL,
+                    service_type TEXT NOT NULL,
+                    project_type TEXT NOT NULL,
+                    timeline TEXT NOT NULL,
+                    budget TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    filepath TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                )
+                """
+            )
+            conn.commit()
+
+    def _bootstrap_generated_history(self) -> None:
+        existing_files = [
+            path for path in sorted(self.generated_dir.glob("*.docx"))
+            if not path.name.startswith("~$")
+        ]
+        if not existing_files:
+            return
+
+        with self._connect() as conn:
+            conn.execute("DELETE FROM proposal_history WHERE filename LIKE '~$%' OR filepath LIKE '%/~$%'")
+            known_paths = {
+                str(row["filepath"])
+                for row in conn.execute("SELECT filepath FROM proposal_history").fetchall()
+            }
+            for path in existing_files:
+                if str(path) in known_paths:
+                    continue
+                stat = path.stat()
+                inferred_client = path.stem.replace("Proposal_", "").replace("_", " ").strip()
+                conn.execute(
+                    """
+                    INSERT INTO proposal_history(
+                        id, created_at, finished_at, client, project, proposal_mode,
+                        service_type, project_type, timeline, budget, filename, filepath, payload_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        uuid.uuid4().hex,
+                        float(stat.st_mtime),
+                        float(stat.st_mtime),
+                        inferred_client or "Dokumen historis",
+                        "Dokumen historis dari folder generated",
+                        "historis",
+                        "",
+                        "",
+                        "",
+                        "",
+                        path.name,
+                        str(path),
+                        "{}",
+                    ),
+                )
+            conn.commit()
+
+    @staticmethod
+    def _sanitize_filename(value: str, fallback: str = "proposal", max_length: int = 140) -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "")).strip("._")
+        cleaned = re.sub(r"_+", "_", cleaned)
+        if not cleaned:
+            cleaned = fallback
+        if len(cleaned) > max_length:
+            stem, dot, suffix = cleaned.rpartition(".")
+            if dot:
+                head = stem[: max_length - len(suffix) - 1]
+                cleaned = f"{head}.{suffix}"
+            else:
+                cleaned = cleaned[:max_length]
+        return cleaned
+
+    def _get_setting(self, key: str, default: str = "") -> str:
+        with self._connect() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        return str(row["value"]) if row else default
+
+    def _set_setting(self, key: str, value: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_settings(key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, str(value or "")),
+            )
+            conn.commit()
+
+    def get_settings(self) -> Dict[str, Any]:
+        template_path = self.get_template_path()
+        return {
+            "internal_portfolio": self._get_setting("internal_portfolio"),
+            "internal_credentials": self._get_setting("internal_credentials"),
+            "active_template_name": self._get_setting("active_template_name"),
+            "has_active_template": bool(template_path and Path(template_path).exists()),
+        }
+
+    def save_settings(self, internal_portfolio: str = "", internal_credentials: str = "") -> Dict[str, Any]:
+        self._set_setting("internal_portfolio", internal_portfolio or "")
+        self._set_setting("internal_credentials", internal_credentials or "")
+        return self.get_settings()
+
+    def save_template(self, filename: str, raw_bytes: bytes) -> Dict[str, Any]:
+        safe_name = self._sanitize_filename(filename or "template_blanko.docx", fallback="template_blanko.docx")
+        if not safe_name.lower().endswith(".docx"):
+            safe_name = f"{safe_name}.docx"
+        target_path = self.templates_dir / f"active_{safe_name}"
+        for existing in self.templates_dir.glob("active_*"):
+            try:
+                existing.unlink()
+            except OSError:
+                continue
+        target_path.write_bytes(raw_bytes)
+        self._set_setting("active_template_path", str(target_path))
+        self._set_setting("active_template_name", safe_name)
+        return self.get_settings()
+
+    def clear_template(self) -> Dict[str, Any]:
+        template_path = self.get_template_path()
+        if template_path and Path(template_path).exists():
+            try:
+                Path(template_path).unlink()
+            except OSError:
+                pass
+        self._set_setting("active_template_path", "")
+        self._set_setting("active_template_name", "")
+        return self.get_settings()
+
+    def get_template_path(self) -> str:
+        return self._get_setting("active_template_path", "")
+
+    @staticmethod
+    def _parse_structured_portfolio_rows(text: str) -> List[Dict[str, str]]:
+        rows: List[Dict[str, str]] = []
+        for raw_line in str(text or "").splitlines():
+            line = re.sub(r"^\s*[-*•\d.]+\s*", "", raw_line).strip()
+            if not line:
+                continue
+            parts = [part.strip() for part in line.split("|")]
+            if len(parts) >= 4:
+                rows.append(
+                    {
+                        "area": parts[0],
+                        "relevansi": parts[1],
+                        "bukti": parts[2],
+                        "nilai_tambah": parts[3],
+                    }
+                )
+            elif len(parts) == 3:
+                rows.append(
+                    {
+                        "area": parts[0],
+                        "relevansi": parts[1],
+                        "bukti": parts[2],
+                        "nilai_tambah": "menambah keyakinan klien terhadap kesiapan delivery dan kualitas hasil kerja",
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "area": line,
+                        "relevansi": "relevan untuk inisiatif yang membutuhkan pengalaman delivery dan advisory yang serupa",
+                        "bukti": line,
+                        "nilai_tambah": "membantu proposal terasa lebih konkret dan kredibel",
+                    }
+                )
+        return rows[:6]
+
+    def enrich_firm_profile(self, firm_profile: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        profile = dict(firm_profile or {})
+        internal_portfolio = self._get_setting("internal_portfolio", "")
+        internal_credentials = self._get_setting("internal_credentials", "")
+        portfolio_bits = [str(profile.get("portfolio_highlights") or "").strip(), internal_portfolio.strip()]
+        portfolio_text = " ; ".join([item for item in portfolio_bits if item])
+        if portfolio_text:
+            profile["portfolio_highlights"] = portfolio_text
+        if internal_credentials.strip():
+            profile["credential_highlights"] = internal_credentials.strip()
+        profile["internal_portfolio_rows"] = self._parse_structured_portfolio_rows(internal_portfolio)
+        return profile
+
+    def persist_generated_file(self, suggested_name: str, content: bytes) -> Path:
+        safe_name = self._sanitize_filename(suggested_name or "proposal.docx", fallback="proposal.docx")
+        if not safe_name.lower().endswith(".docx"):
+            safe_name = f"{safe_name}.docx"
+        target = self.generated_dir / safe_name
+        counter = 2
+        while target.exists():
+            stem = target.stem
+            stem = re.sub(r"_\d+$", "", stem)
+            target = self.generated_dir / f"{stem}_{counter}{target.suffix}"
+            counter += 1
+        target.write_bytes(content)
+        return target
+
+    def add_history_entry(
+        self,
+        payload: Dict[str, Any],
+        filename: str,
+        filepath: str,
+        created_at: float,
+        finished_at: float,
+    ) -> str:
+        entry_id = uuid.uuid4().hex
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO proposal_history(
+                    id, created_at, finished_at, client, project, proposal_mode,
+                    service_type, project_type, timeline, budget, filename, filepath, payload_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry_id,
+                    float(created_at or time.time()),
+                    float(finished_at or time.time()),
+                    str(payload.get("nama_perusahaan") or ""),
+                    str(payload.get("konteks_organisasi") or ""),
+                    str(payload.get("mode_proposal") or "canvassing"),
+                    str(payload.get("jenis_proposal") or ""),
+                    str(payload.get("jenis_proyek") or ""),
+                    str(payload.get("estimasi_waktu") or ""),
+                    str(payload.get("estimasi_biaya") or ""),
+                    str(filename or ""),
+                    str(filepath or ""),
+                    json.dumps(payload or {}, ensure_ascii=False),
+                ),
+            )
+            conn.commit()
+        return entry_id
+
+    @staticmethod
+    def _format_timestamp(epoch_value: float) -> str:
+        try:
+            return datetime.fromtimestamp(float(epoch_value)).strftime("%d %b %Y %H:%M")
+        except Exception:
+            return "-"
+
+    def list_history(self, limit: int = 20) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, created_at, finished_at, client, project, proposal_mode,
+                       service_type, project_type, timeline, budget, filename, filepath, payload_json
+                FROM proposal_history
+                ORDER BY finished_at DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            filepath = str(row["filepath"] or "")
+            items.append(
+                {
+                    "id": row["id"],
+                    "client": row["client"],
+                    "project": row["project"],
+                    "proposal_mode": row["proposal_mode"],
+                    "service_type": row["service_type"],
+                    "project_type": row["project_type"],
+                    "timeline": row["timeline"],
+                    "budget": row["budget"],
+                    "filename": row["filename"],
+                    "filepath": filepath,
+                    "exists": bool(filepath and Path(filepath).exists()),
+                    "can_reuse": bool(str(row["payload_json"] or "").strip() not in {"", "{}"}),
+                    "finished_at": float(row["finished_at"]),
+                    "finished_at_label": self._format_timestamp(float(row["finished_at"])),
+                }
+            )
+        return items
+
+    def get_history_entry(self, entry_id: str) -> Optional[Dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM proposal_history
+                WHERE id = ?
+                """,
+                (entry_id,),
+            ).fetchone()
+        if not row:
+            return None
+        payload = {}
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except Exception:
+            payload = {}
+        filepath = str(row["filepath"] or "")
+        return {
+            "id": row["id"],
+            "client": row["client"],
+            "project": row["project"],
+            "proposal_mode": row["proposal_mode"],
+            "service_type": row["service_type"],
+            "project_type": row["project_type"],
+            "timeline": row["timeline"],
+            "budget": row["budget"],
+            "filename": row["filename"],
+            "filepath": filepath,
+            "exists": bool(filepath and Path(filepath).exists()),
+            "created_at": float(row["created_at"]),
+            "finished_at": float(row["finished_at"]),
+            "payload": payload,
+            "can_reuse": bool(payload),
+        }
+
+
 class LogoManager:
     @staticmethod
     def _create_fallback_logo(client_name: str) -> io.BytesIO:
@@ -1637,16 +1984,19 @@ class LogoManager:
 # Document rendering utilities.
 class StyleEngine:
     @staticmethod
-    def apply_document_styles(doc: Document) -> None:
+    def apply_document_styles(doc: Document, preserve_existing: bool = False) -> None:
         style = doc.styles['Normal']
-        style.font.name = 'Calibri'
-        style.font.size = Pt(11)
-        pf = style.paragraph_format
-        pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-        pf.line_spacing = 1.15
-        pf.space_after = Pt(8) 
-        pf.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        if not preserve_existing:
+            style.font.name = 'Calibri'
+            style.font.size = Pt(11)
+            pf = style.paragraph_format
+            pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+            pf.line_spacing = 1.15
+            pf.space_after = Pt(8)
+            pf.alignment = WD_ALIGN_PARAGRAPH.LEFT
         for section in doc.sections:
+            if preserve_existing:
+                continue
             section.top_margin = Cm(2.54)
             section.bottom_margin = Cm(2.54)
             section.left_margin = Cm(2.54)
@@ -1700,6 +2050,21 @@ class ChartEngine:
             return None
 
 class DocumentBuilder:
+    @staticmethod
+    def create_base_document(template_path: str = "") -> Tuple[Document, bool]:
+        active_template = str(template_path or "").strip()
+        if not active_template or not Path(active_template).exists():
+            return Document(), False
+
+        doc = Document(active_template)
+        body = doc._element.body
+        sect_pr = body.sectPr
+        for child in list(body):
+            if child is sect_pr:
+                continue
+            body.remove(child)
+        return doc, True
+
     @staticmethod
     def _append_text_run(paragraph, text: str, bold: bool = False, italic: bool = False) -> None:
         cleaned = re.sub(r'\s+', ' ', text or '').strip()

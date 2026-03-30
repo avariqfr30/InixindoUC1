@@ -28,9 +28,11 @@ from .config import (
     JOB_RETENTION_SECONDS,
     MAX_ACTIVE_GENERATIONS,
     MAX_GENERATION_BACKLOG,
+    PROPOSAL_MODES,
     SMART_SUGGESTIONS,
 )
 from .core import FinancialAnalyzer, KnowledgeBase, ProposalGenerator
+from .runtime_components import AppStateStore
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -42,6 +44,8 @@ CORS(app)
 
 knowledge_base = KnowledgeBase(DB_URI)
 proposal_generator = ProposalGenerator(knowledge_base)
+app_state_store = AppStateStore()
+proposal_generator.app_state_store = app_state_store
 
 
 class GenerationQueue:
@@ -50,11 +54,13 @@ class GenerationQueue:
     def __init__(
         self,
         generator: ProposalGenerator,
+        state_store: AppStateStore,
         max_active: int,
         max_backlog: int,
         retention_seconds: int,
     ) -> None:
         self.generator = generator
+        self.state_store = state_store
         self.max_active = max_active
         self.max_backlog = max_backlog
         self.retention_seconds = retention_seconds
@@ -115,6 +121,7 @@ class GenerationQueue:
             processing_seconds = round((finished_at or time.time()) - float(started_at), 1)
         snapshot = {
             "job_id": job["job_id"],
+            "history_id": job.get("history_id"),
             "status": job["status"],
             "message": self._build_message_locked(job),
             "queue_position": self._queue_position_locked(int(job["sequence"])) if job["status"] == "queued" else None,
@@ -181,7 +188,8 @@ class GenerationQueue:
                 timeline=payload["estimasi_waktu"],
                 notes=payload["permasalahan"],
                 regulations=payload["potensi_framework"],
-                chapter_id=payload.get("chapter_id")
+                chapter_id=payload.get("chapter_id"),
+                proposal_mode=payload.get("mode_proposal", "canvassing"),
             )
             output = io.BytesIO()
             doc.save(output)
@@ -191,10 +199,19 @@ class GenerationQueue:
                 job = self._jobs.get(job_id)
                 if not job:
                     return
+                stored_path = self.state_store.persist_generated_file(f"{filename}.docx", result_bytes)
+                history_id = self.state_store.add_history_entry(
+                    payload=payload,
+                    filename=stored_path.name,
+                    filepath=str(stored_path),
+                    created_at=job.get("created_at") or time.time(),
+                    finished_at=time.time(),
+                )
                 job["status"] = "done"
                 job["finished_at"] = time.time()
-                job["filename"] = f"{filename}.docx"
+                job["filename"] = stored_path.name
                 job["result_bytes"] = result_bytes
+                job["history_id"] = history_id
                 job["payload"] = None
         except Exception as exc:  # keep the queue resilient during shared testing
             logger.exception("Generation job %s failed", job_id)
@@ -231,6 +248,7 @@ class GenerationQueue:
 
 generation_queue = GenerationQueue(
     generator=proposal_generator,
+    state_store=app_state_store,
     max_active=MAX_ACTIVE_GENERATIONS,
     max_backlog=MAX_GENERATION_BACKLOG,
     retention_seconds=JOB_RETENTION_SECONDS,
@@ -250,6 +268,7 @@ def _warm_request_context(data: Dict[str, Any]) -> str:
         str(data.get("klasifikasi_kebutuhan", "")).strip(),
         str(data.get("jenis_proyek", "")).strip(),
         str(data.get("jenis_proposal", "")).strip(),
+        str(data.get("mode_proposal", "")).strip(),
     ]).strip()
     if not client_name:
         return "skipped"
@@ -276,6 +295,7 @@ def get_base_config():
         "job_poll_interval_ms": JOB_POLL_INTERVAL_MS,
         "max_active_generations": MAX_ACTIVE_GENERATIONS,
         "max_generation_backlog": MAX_GENERATION_BACKLOG,
+        "proposal_modes": PROPOSAL_MODES,
     })
 
 
@@ -294,6 +314,7 @@ def suggest_budget():
     data = request.json or {}
     required_fields = [
         'nama_perusahaan',
+        'mode_proposal',
         'jenis_proposal',
         'jenis_proyek',
         'konteks_organisasi',
@@ -353,6 +374,7 @@ def generate_proposal():
         'nama_perusahaan',
         'konteks_organisasi',
         'estimasi_biaya',
+        'mode_proposal',
         'jenis_proposal',
         'klasifikasi_kebutuhan',
         'jenis_proyek',
@@ -398,6 +420,72 @@ def download_job(job_id: str):
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
+
+
+@app.route('/api/history')
+def list_history():
+    return jsonify({"items": app_state_store.list_history(limit=30)})
+
+
+@app.route('/api/history/<entry_id>')
+def get_history_entry(entry_id: str):
+    entry = app_state_store.get_history_entry(entry_id)
+    if not entry:
+        return jsonify({"error": "Riwayat proposal tidak ditemukan."}), 404
+    return jsonify(entry)
+
+
+@app.route('/api/history/<entry_id>/reuse')
+def reuse_history(entry_id: str):
+    entry = app_state_store.get_history_entry(entry_id)
+    if not entry:
+        return jsonify({"error": "Riwayat proposal tidak ditemukan."}), 404
+    if not entry.get("can_reuse"):
+        return jsonify({"error": "Proposal historis ini hanya tersedia sebagai referensi unduhan, belum memiliki payload yang bisa dipakai ulang."}), 409
+    return jsonify({"payload": entry.get("payload", {})})
+
+
+@app.route('/api/history/<entry_id>/download')
+def download_history(entry_id: str):
+    entry = app_state_store.get_history_entry(entry_id)
+    if not entry:
+        return jsonify({"error": "Riwayat proposal tidak ditemukan."}), 404
+    filepath = Path(str(entry.get("filepath") or ""))
+    if not filepath.exists():
+        return jsonify({"error": "File proposal pada riwayat ini sudah tidak tersedia."}), 410
+    return send_file(
+        str(filepath),
+        as_attachment=True,
+        download_name=str(entry.get("filename") or filepath.name),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+
+@app.route('/api/settings', methods=['GET', 'POST'])
+def proposal_settings():
+    if request.method == 'GET':
+        return jsonify(app_state_store.get_settings())
+
+    data = request.json or {}
+    settings = app_state_store.save_settings(
+        internal_portfolio=str(data.get("internal_portfolio") or ""),
+        internal_credentials=str(data.get("internal_credentials") or ""),
+    )
+    return jsonify(settings)
+
+
+@app.route('/api/settings/template', methods=['POST', 'DELETE'])
+def proposal_template_settings():
+    if request.method == 'DELETE':
+        return jsonify(app_state_store.clear_template())
+
+    uploaded = request.files.get('template')
+    if not uploaded or not uploaded.filename:
+        return jsonify({"error": "File template .docx belum dipilih."}), 400
+    if not uploaded.filename.lower().endswith('.docx'):
+        return jsonify({"error": "Template harus berformat .docx."}), 400
+    settings = app_state_store.save_template(uploaded.filename, uploaded.read())
+    return jsonify(settings)
 
 
 @app.route('/refresh-knowledge', methods=['POST'])

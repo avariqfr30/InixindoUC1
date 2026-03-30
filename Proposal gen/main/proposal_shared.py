@@ -6,8 +6,11 @@ import io
 import re
 import json
 import logging
+import sqlite3
+import shutil
 import threading
 import time
+import uuid
 import requests
 import pandas as pd
 import chromadb
@@ -39,6 +42,7 @@ from ollama import Client
 from chromadb.utils import embedding_functions
 
 from .config import (
+    PROJECT_ROOT,
     SERPER_API_KEY, OLLAMA_HOST, LLM_MODEL, EMBED_MODEL,
     WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE,
     PERSONAS, PROPOSAL_SYSTEM_PROMPT,

@@ -403,17 +403,21 @@ class ProposalEngineMixin:
         timeline: str,
         notes: str,
         regulations: str,
-        chapter_id: Optional[str] = None
+        chapter_id: Optional[str] = None,
+        proposal_mode: str = "canvassing"
     ) -> Tuple[Document, str]:
-        selected_chapters = self._resolve_chapters(chapter_id)
+        selected_chapters = self._resolve_chapters(chapter_id, proposal_mode=proposal_mode)
         chapter_targets = self._chapter_word_targets(selected_chapters)
         content_word_budget = self._content_word_budget()
 
         use_demo_logic = self.firm_api.uses_demo_logic()
+        app_state_store = getattr(self, "app_state_store", None)
         firm_data = self.firm_api.get_project_standards(project_type)
         firm_profile = self.firm_api.get_firm_profile()
+        if app_state_store:
+            firm_profile = app_state_store.enrich_firm_profile(firm_profile)
         base_client = re.sub(r'\b(Cabang|Branch|Tbk)\b.*$|^(PT\.|CV\.)', '', client, flags=re.IGNORECASE).strip()
-        ai_context = " ".join([project, project_goal, project_type, service_type, notes]).strip()
+        ai_context = " ".join([project, project_goal, project_type, service_type, proposal_mode, notes]).strip()
         relationship_context = self.firm_api.get_client_relationship(base_client)
         research_bundle = self._get_research_bundle(
             base_client,
@@ -464,6 +468,7 @@ class ProposalEngineMixin:
             firm_data=firm_data,
             personalization_pack=personalization_pack,
             value_map=value_map,
+            proposal_mode=proposal_mode,
         )
         logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client)
 
@@ -475,7 +480,7 @@ class ProposalEngineMixin:
             chapter['id']: self.io_pool.submit(
                 self._build_chapter_prompt,
                 chapter, client, project, budget, service_type, project_goal, project_type, timeline,
-                notes, regulations, firm_data, firm_profile, research_bundle, personalization_pack, value_map, proposal_contract,
+                notes, regulations, firm_data, firm_profile, research_bundle, personalization_pack, value_map, proposal_contract, proposal_mode,
                 chapter_targets.get(chapter['id'], self._target_words(chapter))
             )
             for chapter in selected_chapters
@@ -503,6 +508,7 @@ class ProposalEngineMixin:
                         firm_profile=firm_profile,
                         personalization_pack=personalization_pack,
                         value_map=value_map,
+                        proposal_mode=proposal_mode,
                     ),
                     allowed_external_citations
                 )
@@ -687,8 +693,9 @@ class ProposalEngineMixin:
         except Exception:
             logo_stream, theme_color = None, DEFAULT_COLOR
 
-        doc = Document()
-        StyleEngine.apply_document_styles(doc)
+        template_path = app_state_store.get_template_path() if app_state_store else ""
+        doc, using_template = DocumentBuilder.create_base_document(template_path)
+        StyleEngine.apply_document_styles(doc, preserve_existing=using_template)
         
         # Cover page.
         for _ in range(2):
@@ -782,7 +789,8 @@ class ProposalEngineMixin:
         timeline: str,
         notes: str,
         regulations: str,
-        chapter_id: Optional[str] = None
+        chapter_id: Optional[str] = None,
+        proposal_mode: str = "canvassing"
     ) -> Tuple[Document, str]:
         return self.generate_document(
             client=client,
@@ -795,4 +803,5 @@ class ProposalEngineMixin:
             notes=notes,
             regulations=regulations,
             chapter_id=chapter_id,
+            proposal_mode=proposal_mode,
         )

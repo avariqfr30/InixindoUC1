@@ -211,10 +211,12 @@ SPIRIT_OF_AI_RULES = {
         "c_4": ["governance", "infrastructure_architecture"],
         "c_5": ["data_model_foundation", "governance", "culture_change"],
         "c_6": ["infrastructure_architecture", "people_capability", "governance"],
-        "c_7": ["business_use_case", "culture_change", "governance"],
-        "c_8": ["governance", "people_capability"],
-        "c_9": ["people_capability", "culture_change"],
-        "c_10": ["business_use_case", "governance", "culture_change"],
+        "c_7": ["business_use_case", "governance"],
+        "c_8": ["business_use_case", "culture_change", "governance"],
+        "c_9": ["governance", "people_capability"],
+        "c_10": ["business_use_case", "governance"],
+        "c_11": ["people_capability", "culture_change"],
+        "c_12": ["business_use_case", "governance", "culture_change"],
     },
     "quality_signals": {
         "business_value": [
@@ -346,6 +348,19 @@ SMART_SUGGESTIONS = {
     }
 }
 
+PROPOSAL_MODES = [
+    {
+        "value": "canvassing",
+        "label": "Proposal Penawaran Pekerjaan Canvasing",
+        "description": "Mode penawaran yang lebih persuasif, ringkas, dan kuat pada konteks kebutuhan klien."
+    },
+    {
+        "value": "kak_response",
+        "label": "Proposal Penawaran Tanggapan Kerangka Acuan Kerja (KAK)",
+        "description": "Mode tanggapan yang lebih formal, menekankan kesesuaian pendekatan, ruang lingkup, dan komitmen kerja."
+    },
+]
+
 # Fallback firm data used in demo mode.
 MOCK_FIRM_PROFILE = {
     "office_address": WRITER_FIRM_OFFICE_ADDRESS,
@@ -402,9 +417,9 @@ UNIVERSAL_STRUCTURE = [
     },
     {
         "id": "c_3", "title": "BAB III – KLASIFIKASI KEBUTUHAN",
-        "subs": ["3.1 Klasifikasi Problem/Opportunity/Directive", "3.2 Tujuan Utama dan Jenis Proyek"],
+        "subs": ["3.1 Penajaman Kebutuhan Utama yang Dipilih", "3.2 Tujuan Utama dan Jenis Proyek"],
         "keywords": "needs classification problem opportunity directive project objective",
-        "length_intent": "Klasifikasikan kebutuhan klien ke dalam problem/opportunity/directive lalu tetapkan tujuan proyek dan jenis proyek yang paling tepat. (Target: 700 words)."
+        "length_intent": "Klasifikasikan kebutuhan klien ke dalam problem/opportunity/directive, kerucutkan kebutuhan utama yang benar-benar diselesaikan, lalu tetapkan tujuan proyek dan jenis proyek yang paling tepat. (Target: 700 words)."
     },
     {
         "id": "c_4", "title": "BAB IV – PENDEKATAN",
@@ -421,32 +436,44 @@ UNIVERSAL_STRUCTURE = [
     },
     {
         "id": "c_6", "title": "BAB VI – SOLUTION DESIGN",
-        "subs": ["6.1 Solusi/Output Metodologi yang Dibangun", "6.2 Kesesuaian Solusi terhadap Kebutuhan Klien"],
+        "subs": ["6.1 Solusi/Output Metodologi yang Dibangun", "6.2 Bentuk Keluaran dan Kesesuaian Solusi"],
         "keywords": "solution design output deliverables target state",
-        "length_intent": "Jelaskan desain solusi (output metodologi) yang akan dibangun atau diterapkan agar kebutuhan klien dapat tercapai. (Target: 800 words)."
+        "length_intent": "Jelaskan desain solusi (output metodologi) yang akan dibangun atau diterapkan, termasuk bentuk keluaran seperti dokumen, pendampingan, kegiatan, atau implementation support agar kebutuhan klien dapat tercapai. (Target: 800 words)."
     },
     {
-        "id": "c_7", "title": "BAB VII – TIMELINE PEKERJAAN",
-        "subs": ["7.1 Aktivitas per Fase", "7.2 Waktu Pelaksanaan dan Deliverable Tiap Fase"],
+        "id": "c_7", "title": "BAB VII – RUANG LINGKUP PEKERJAAN",
+        "subs": ["7.1 Lingkup Pekerjaan Utama", "7.2 Batasan Pekerjaan dan Asumsi"],
+        "keywords": "scope work deliverables boundaries assumptions",
+        "length_intent": "Jelaskan ruang lingkup pekerjaan yang dikerjakan, bentuk keluaran tiap area kerja, serta batasan dan asumsi utama agar ekspektasi klien tetap jelas. (Target: 650 words)."
+    },
+    {
+        "id": "c_8", "title": "BAB VIII – TIMELINE PEKERJAAN",
+        "subs": ["8.1 Aktivitas per Fase", "8.2 Waktu Pelaksanaan dan Deliverable Tiap Fase"],
         "keywords": "timeline phase schedule milestone deliverable",
         "length_intent": "Jelaskan aktivitas yang dilakukan, kapan dilakukan, pada fase apa, serta deliverable pada setiap fase pekerjaan. (Target: 700 words).",
         "visual_intent": "gantt"
     },
     {
-        "id": "c_8", "title": "BAB VIII – TATA KELOLA PROYEK",
-        "subs": ["8.1 Mekanisme Pengambilan Keputusan", "8.2 Mekanisme Pengendalian Proyek"],
+        "id": "c_9", "title": "BAB IX – TATA KELOLA PROYEK",
+        "subs": ["9.1 Mekanisme Pengambilan Keputusan", "9.2 Mekanisme Pengendalian Proyek"],
         "keywords": "project governance decision making controls monitoring",
         "length_intent": "Jelaskan tata kelola proyek, termasuk mekanisme pengambilan keputusan dan pengendalian agar proyek berjalan efektif. (Target: 700 words)."
     },
     {
-        "id": "c_9", "title": "BAB IX – STRUKTUR & TEAM PROYEK",
-        "subs": ["9.1 Struktur Tim Proyek", "9.2 Kapabilitas, Pengalaman, dan Sertifikasi"],
-        "keywords": "project team structure capability experience certification",
-        "length_intent": "Tunjukkan struktur dan komposisi tim proyek beserta kapabilitas, pengalaman, dan sertifikasi untuk membangun kepercayaan klien. (Target: 700 words)."
+        "id": "c_10", "title": "BAB X – PROFIL PERUSAHAAN",
+        "subs": ["10.1 Relevansi Profil dan Kapabilitas Perusahaan", "10.2 Pengalaman Serupa dan Nilai Tambah"],
+        "keywords": "company profile relevant experience capability credentials",
+        "length_intent": "Tunjukkan profil perusahaan penyusun, relevansi kapabilitas, dan pengalaman serupa yang memperkuat keyakinan klien terhadap inisiatif yang diusulkan. (Target: 650 words)."
     },
     {
-        "id": "c_10", "title": "BAB X – MODEL PEMBIAYAAN",
-        "subs": ["10.1 Biaya dan Tahapan Pembayaran", "10.2 Model Pekerjaan dan Batasan Pekerjaan"],
+        "id": "c_11", "title": "BAB XI – STRUKTUR & TENAGA AHLI PROYEK",
+        "subs": ["11.1 Struktur Tim Proyek", "11.2 Tabel Tenaga Ahli dan Kualifikasi"],
+        "keywords": "project team structure experts capability experience certification",
+        "length_intent": "Tunjukkan struktur dan komposisi tim proyek beserta detail tenaga ahli, kapabilitas, pengalaman, dan sertifikasi untuk membangun kepercayaan klien. (Target: 700 words)."
+    },
+    {
+        "id": "c_12", "title": "BAB XII – MODEL PEMBIAYAAN",
+        "subs": ["12.1 Biaya dan Tahapan Pembayaran", "12.2 Model Pekerjaan dan Batasan Pekerjaan"],
         "keywords": "commercial pricing payment terms scope boundaries",
         "length_intent": "Jelaskan model bisnis proyek yang mencakup biaya, tahapan pembayaran, model pekerjaan, dan batasan pekerjaan secara jelas dan tegas. (Target: 700 words)."
     },
@@ -465,10 +492,12 @@ PERSONAS = {
     "c_4": "Lead Compliance & Governance Auditor",
     "c_5": "Senior Delivery Director",
     "c_6": "Chief Solution Architect",
-    "c_7": "Master Project Manager",
-    "c_8": "Program Governance Lead",
-    "c_9": "Partner/Managing Director",
-    "c_10": "Commercial Lead",
+    "c_7": "Senior Engagement Manager",
+    "c_8": "Master Project Manager",
+    "c_9": "Program Governance Lead",
+    "c_10": "Partner/Managing Director",
+    "c_11": "People & Delivery Lead",
+    "c_12": "Commercial Lead",
     "c_closing": "Client Engagement Partner",
     "default": "Principal Management Consultant"
 }
@@ -484,7 +513,7 @@ Writing rules:
    - Under each H2, create 2-3 H3 subsections (###) that are relevant and non-redundant.
    - Use numbered lists for steps/sequences (1., 2., 3.) and bullet lists for supporting detail points (-).
    - Keep prose dense: avoid excessive blank lines and avoid one-line bullets without explanation.
-   - Include at least 1 markdown table only for chapters with operational, governance, timeline, or commercial content.
+   - Include at least 1 markdown table only for chapters with operational, governance, timeline, ruang lingkup, profil perusahaan, tenaga ahli, or commercial content.
 3. Depth: Explain rationale, assumptions, risks, dependencies, metrics, and expected deliverables in actionable detail.
 4. Tone: Professional, objective, direct, and persuasive in Indonesian. Avoid academic filler.
 5. Synthesis: Integrate OSINT data naturally as facts, and do not mention "berdasarkan sumber online".
