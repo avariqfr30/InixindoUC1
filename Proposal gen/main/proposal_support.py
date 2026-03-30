@@ -724,7 +724,7 @@ class ProposalSupportMixin:
 
     @staticmethod
     def _structured_chapter_ids() -> Set[str]:
-        return {"c_3", "c_6", "c_7", "c_8", "c_9", "c_10", "c_11", "c_12", "c_closing"}
+        return {"c_1", "c_2", "c_3", "c_4", "c_5", "c_6", "c_7", "c_8", "c_9", "c_10", "c_11", "c_12", "c_closing"}
 
     def _use_structured_chapter(self, chapter_id: str) -> bool:
         return chapter_id in self._structured_chapter_ids()
@@ -934,6 +934,83 @@ class ProposalSupportMixin:
                     "aktivitas": "memberi quality review dan support pada fase paling kritis dari eksekusi",
                     "keluaran": deliverables[3]["bentuk"],
                     "batasan": "bukan pelaksanaan implementasi penuh kecuali disepakati secara eksplisit",
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _framework_reference_rows(regulations: str, project_type: str, ai_mode: bool = False) -> List[Dict[str, str]]:
+        raw_items = [re.sub(r"\s+", " ", item).strip(" -.;:") for item in re.split(r"[,;/\n]+", str(regulations or ""))]
+        selected = [item for item in raw_items if item]
+        if not selected:
+            if ai_mode:
+                selected = [
+                    "Responsible AI",
+                    "Tata kelola keamanan informasi",
+                    "Arsitektur integrasi dan data",
+                    "Kontrol mutu dan validasi",
+                ]
+            else:
+                normalized = (project_type or "").strip().lower()
+                if normalized == "strategic":
+                    selected = ["TOGAF", "COBIT", "Tata kelola keputusan", "Kontrol mutu delivery"]
+                elif normalized == "diagnostic":
+                    selected = ["ITIL", "COBIT", "Standar asesmen", "Kontrol mutu temuan"]
+                elif normalized == "transformation":
+                    selected = ["TOGAF", "ITIL", "COBIT", "Kontrol perubahan dan quality gate"]
+                else:
+                    selected = ["Standar delivery internal", "Kontrol mutu", "Tata kelola proyek", "Acuan implementasi"]
+
+        rows: List[Dict[str, str]] = []
+        for item in selected[:4]:
+            lowered = item.lower()
+            if any(token in lowered for token in ["iso", "pojk", "ojk", "nist", "regulasi", "kepatuhan"]):
+                peran = "memberi batas kepatuhan, kontrol minimum, dan ekspektasi kualitas yang wajib dijaga"
+            elif any(token in lowered for token in ["cobit", "itil", "togaf", "tm forum", "dama", "framework", "standar"]):
+                peran = "memberi struktur kerja agar desain, governance, dan prioritas implementasi tidak berjalan sporadis"
+            elif "ai" in lowered or "model" in lowered or "data" in lowered:
+                peran = "menjaga kesiapan data, akuntabilitas keputusan, dan kelayakan solusi sebelum diperluas"
+            else:
+                peran = "menjadi acuan praktis untuk menjaga kualitas keputusan, konsistensi langkah kerja, dan kontrol hasil"
+
+            if ai_mode:
+                relevansi = "relevan untuk memastikan adopsi tetap feasible, terkontrol, dan dapat dipertanggungjawabkan"
+            else:
+                relevansi = f"relevan untuk proyek {project_type.lower()} agar arah kerja tetap konsisten dari keputusan sampai eksekusi"
+
+            rows.append(
+                {
+                    "acuan": item,
+                    "peran": peran,
+                    "relevansi": relevansi,
+                }
+            )
+        return rows
+
+    @classmethod
+    def _methodology_rows(
+        cls,
+        project_type: str,
+        service_type: str,
+        timeline: str,
+        ai_mode: bool = False,
+    ) -> List[Dict[str, str]]:
+        phase_plan = cls._build_ai_phase_plan(timeline) if ai_mode else cls._build_phase_plan(project_type, timeline)
+        rows: List[Dict[str, str]] = []
+        for idx, item in enumerate(phase_plan, start=1):
+            if idx == 1:
+                gate = "baseline kebutuhan dan agenda kerja disetujui sponsor"
+            elif idx == len(phase_plan):
+                gate = "keluaran akhir diterima dan langkah lanjutan disepakati"
+            else:
+                gate = "hasil fase tervalidasi sebelum masuk ke fase berikutnya"
+            rows.append(
+                {
+                    "fase": item["phase"],
+                    "periode": item["period"],
+                    "tujuan": item["activity"],
+                    "keluaran": item["deliverable"],
+                    "quality_gate": gate,
                 }
             )
         return rows
@@ -1245,8 +1322,8 @@ class ProposalSupportMixin:
         normalized_mode = self._normalize_proposal_mode(proposal_mode)
         terminology = personalization_pack.get("terminology", []) or []
         kpi_blueprint = personalization_pack.get("kpi_blueprint", []) or []
-        term_line = ", ".join(terminology[:3]) if terminology else "governance, delivery, risk control"
-        kpi_line = " | ".join(kpi_blueprint[:3]) if kpi_blueprint else f"Outcome bisnis utama {client}"
+        term_line = ", ".join(terminology[:3]) if terminology else "tata kelola, pelaksanaan, pengendalian risiko"
+        kpi_line = " | ".join(kpi_blueprint[:3]) if kpi_blueprint else f"hasil bisnis utama {client}"
         short_notes = self._summarize_phrase(notes, "risiko delivery dan kesiapan stakeholder")
         short_project = self._summarize_phrase(project, "inisiatif prioritas klien")
         short_goal = self._summarize_phrase(project_goal, "kebutuhan inti klien")
@@ -1266,14 +1343,14 @@ class ProposalSupportMixin:
             max_words=24
         )
         proof_points = value_map.get("proof_points", []) or []
-        proof_line = ", ".join(proof_points[:3]) if proof_points else "kapabilitas internal, metodologi delivery, dan kontrol mutu"
+        proof_line = ", ".join(proof_points[:3]) if proof_points else "kapabilitas internal, metodologi pelaksanaan, dan kontrol mutu"
         client_gains = value_map.get("client_gains", []) or []
         gains_line = ", ".join(client_gains[:3]) if client_gains else "kejelasan keputusan, kontrol risiko, dan hasil bisnis yang lebih terukur"
         differentiators = value_map.get("differentiators", []) or []
-        differentiator_line = ", ".join(differentiators[:2]) if differentiators else "pendekatan delivery yang rapi dan tetap relevan dengan kebutuhan sponsor"
-        standard_method = self._summarize_phrase(firm_data.get("methodology", ""), "metodologi delivery internal")
+        differentiator_line = ", ".join(differentiators[:2]) if differentiators else "pendekatan pelaksanaan yang rapi dan tetap relevan dengan kebutuhan sponsor"
+        standard_method = self._summarize_phrase(firm_data.get("methodology", ""), "metodologi pelaksanaan internal")
         team_points = self._split_plain_points(firm_data.get("team", ""), max_items=5)
-        team_summary = ", ".join(team_points) if team_points else "tim delivery inti, quality reviewer, dan subject-matter support"
+        team_summary = ", ".join(team_points) if team_points else "tim pelaksana inti, peninjau mutu, dan pendukung substansi"
         commercial_summary = self._summarize_phrase(firm_data.get("commercial", ""), "mekanisme komersial mengikuti baseline internal")
         payment_plan = self._build_ai_payment_plan() if ai_mode else self._build_payment_plan(project_type, budget)
         phase_plan = self._build_ai_phase_plan(timeline) if ai_mode else self._build_phase_plan(project_type, timeline)
@@ -1293,7 +1370,7 @@ class ProposalSupportMixin:
         )
         ai_governance = self._summarize_phrase(
             ai_profile.get("governance_posture", ""),
-            "kontrol penggunaan, quality gate, dan mekanisme evaluasi yang bertanggung jawab",
+            "kontrol penggunaan, gerbang mutu, dan mekanisme evaluasi yang bertanggung jawab",
             max_words=24,
         )
         ai_people = self._summarize_phrase(
@@ -1306,6 +1383,106 @@ class ProposalSupportMixin:
             "adopsi bertahap yang tetap mengubah cara kerja secara realistis",
             max_words=22,
         )
+        relationship_mode = str(personalization_pack.get("relationship_mode", "new")).strip().lower()
+        partnership_line = (
+            f"{client} sudah memiliki konteks interaksi yang cukup untuk langsung masuk ke pembahasan kebutuhan prioritas dan keputusan kerja."
+            if relationship_mode == "existing"
+            else f"Proposal ini menjadi momen pembentukan kemitraan kerja yang perlu dimulai dengan pembacaan konteks yang rapi dan tidak berlebihan."
+        )
+        framework_rows = "\n".join(
+            f"| {item['acuan']} | {item['peran']} | {item['relevansi']} |"
+            for item in self._framework_reference_rows(regulations, project_type, ai_mode=ai_mode)
+        )
+        methodology_rows = "\n".join(
+            f"| {item['fase']} | {item['periode']} | {item['tujuan']} | {item['keluaran']} | {item['quality_gate']} |"
+            for item in self._methodology_rows(project_type, service_type, timeline, ai_mode=ai_mode)
+        )
+
+        if chapter["id"] == "c_1":
+            anchor_line = self._chapter_anchor_line(
+                "c_1",
+                personalization_pack,
+                prefix="Sebagai konteks eksternal yang sudah tervalidasi"
+            )
+            request_mode_line = (
+                "Dalam mode tanggapan KAK, konteks ini dipakai untuk menegaskan bahwa solusi yang diajukan memang berangkat dari kebutuhan kerja yang hendak dijawab secara formal."
+                if normalized_mode == "kak_response"
+                else "Dalam mode penawaran, konteks ini dipakai untuk menunjukkan bahwa proposal sejak awal dibangun dari kebutuhan bisnis yang nyata dan bukan dari asumsi generik."
+            )
+            ai_context_line = (
+                f" Pada konteks AI/adopsi, pengantar proposal juga harus menunjukkan bahwa {client} membutuhkan jalur adopsi yang menjaga {ai_bridge.lower()}."
+                if ai_mode else ""
+            )
+            return (
+                f"Bab pembuka untuk {client} perlu langsung memberi pegangan yang jelas mengenai konteks organisasi, tekanan bisnis, dan alasan mengapa jasa konsultasi dibutuhkan saat ini. "
+                f"Tujuannya bukan sekadar memperkenalkan klien, melainkan membantu sponsor membaca bahwa inisiatif {short_project.lower()} memang memiliki kaitan langsung dengan hasil seperti {kpi_line}. "
+                f"{partnership_line} {request_mode_line}{ai_context_line} {anchor_line}".strip() + f" (Data Internal, {year}).\n\n"
+                "## 1.1 Latar Belakang Organisasi Klien\n"
+                f"{client} saat ini berada pada fase yang menuntut keputusan kerja lebih tajam terhadap {short_project.lower()}. "
+                f"Tekanan yang paling menonjol dapat dibaca dari {self._summarize_phrase(notes, 'kebutuhan menjaga hasil bisnis, kontrol pelaksanaan, dan koordinasi eksekusi', max_words=24).lower()}. "
+                f"Karena itu, konteks organisasi perlu dibaca bukan hanya dari profil umum klien, tetapi dari tuntutan agar target seperti {kpi_line} tetap bergerak dalam horizon {timeline or 'proyek'}.\n"
+                f"1. Prioritas pertama adalah memastikan keputusan sponsor tetap terhubung ke kebutuhan inti {short_goal.lower()}.\n"
+                f"2. Prioritas kedua adalah menjaga bahasa kerja {term_line} agar forum bisnis, pelaksanaan, dan tata kelola membaca arah yang sama.\n"
+                f"3. Prioritas ketiga adalah menyiapkan pola kerja yang memungkinkan {client} bergerak lebih terukur tanpa kehilangan kontrol terhadap risiko dan ketergantungan lintas fungsi.\n"
+                f"- Konteks ini menunjukkan bahwa tantangan klien bukan hanya pada aktivitas operasional, tetapi pada bagaimana keputusan, kontrol, dan pelaksanaan dipertemukan dalam satu ritme kerja.\n"
+                f"- Nilai yang ingin dijaga sejak awal adalah {gains_line}, sehingga proposal harus berbicara langsung ke hasil yang ingin dirasakan sponsor.\n"
+                f"- Bagi {client}, pembacaan konteks seperti ini penting agar seluruh bab sesudahnya tetap tertaut pada kebutuhan yang sama dan tidak melebar ke narasi yang tidak relevan.\n\n"
+                "## 1.2 Alasan Permintaan Jasa Konsultasi\n"
+                f"Permintaan jasa konsultasi muncul karena {client} membutuhkan mitra yang mampu menerjemahkan tekanan bisnis menjadi arah kerja, metode, dan keluaran yang lebih siap dijalankan. "
+                f"Dalam konteks ini, {WRITER_FIRM_NAME} diposisikan untuk membantu {client} mencapai {short_value.lower()} melalui kombinasi {proof_line}. "
+                f"Artinya, konsultasi dibutuhkan bukan untuk menambah lapisan presentasi, tetapi untuk membantu sponsor mengubah kebutuhan yang masih tersebar menjadi program kerja yang lebih rapi, dapat dipertanggungjawabkan, dan dapat diawasi.\n"
+                f"- Dukungan konsultasi diperlukan agar keputusan tentang ruang lingkup, prioritas, dan kontrol kerja tidak berubah-ubah ketika program mulai berjalan.\n"
+                f"- Perusahaan penyusun juga diharapkan membantu menjaga kualitas terjemahan dari kebutuhan bisnis ke langkah pelaksanaan, terutama pada tema {win_theme.lower()}.\n"
+                f"- Dengan keterlibatan yang tepat, {client} memperoleh mitra yang membantu menjaga konsistensi dari konteks awal, rumusan masalah, pendekatan, sampai bentuk keluaran yang benar-benar dapat dipakai.\n"
+                f"Pada akhirnya, alasan permintaan jasa konsultasi adalah kebutuhan untuk memastikan bahwa inisiatif {short_project.lower()} tidak hanya terlihat baik di atas kertas, "
+                f"tetapi sungguh mempunyai jalur kerja yang rapi untuk diwujudkan. Bagi sponsor {client}, itulah fungsi utama proposal ini: memberi dasar keputusan yang lebih kuat sebelum organisasi bergerak lebih jauh."
+            )
+
+        if chapter["id"] == "c_2":
+            anchor_line = self._chapter_anchor_line(
+                "c_2",
+                personalization_pack,
+                prefix="Sebagai acuan konteks yang sudah tervalidasi"
+            )
+            ai_problem_line = (
+                f" Untuk konteks AI/adopsi, permasalahan juga perlu dibaca dari sisi kesiapan data, kontrol, dan kemampuan organisasi menyerap perubahan."
+                if ai_mode else ""
+            )
+            return (
+                f"Bab permasalahan untuk {client} harus membantu sponsor melihat hubungan langsung antara kebutuhan yang terasa di lapangan, akar gap yang mendasarinya, "
+                f"dan konsekuensi bisnis bila gap tersebut tidak segera ditangani. Karena itu, rumusan masalah dalam proposal ini sengaja dibuat runtut: dimulai dari kebutuhan klien, "
+                f"lalu diperdalam ke konteks bisnis, tantangan utama, akar kesenjangan, implikasi risiko, dan akhirnya kebutuhan solusi.{ai_problem_line} {anchor_line}".strip() + f" (Data Internal, {year}).\n\n"
+                "## 2.1 Kebutuhan atau Keinginan Klien\n"
+                f"Kebutuhan utama {client} pada proposal ini berputar pada upaya untuk {short_goal.lower()}. "
+                f"Di balik kebutuhan tersebut, sponsor sebenarnya sedang mencari cara agar keputusan, pelaksanaan, dan kontrol program tidak berjalan sendiri-sendiri. "
+                f"Itulah sebabnya bab ini tidak cukup berhenti pada daftar titik sakit, tetapi harus memperlihatkan apa yang sesungguhnya perlu diperbaiki agar hasil seperti {kpi_line} dapat dikejar dengan lebih stabil.\n"
+                f"- Kebutuhan klien harus dibaca sebagai kebutuhan akan arah kerja yang lebih jelas, lebih terukur, dan lebih mudah diawasi.\n"
+                f"- Kebutuhan tersebut juga menuntut hubungan yang lebih rapi antara prioritas bisnis, ritme pelaksanaan, dan kualitas keputusan lintas fungsi.\n\n"
+                "## 2.2 Konteks Bisnis\n"
+                f"Dari sisi konteks bisnis, {client} sedang berada pada situasi yang menuntut kejelasan prioritas atas {short_project.lower()}. "
+                f"Tekanan yang muncul tidak berdiri sendiri, melainkan terkait dengan harapan sponsor terhadap {gains_line}, kebutuhan menjaga ritme kerja {term_line}, dan tuntutan agar investasi atau upaya yang dikeluarkan benar-benar menghasilkan perbaikan yang bisa dirasakan. "
+                f"Konteks ini menjelaskan mengapa proposal perlu berbicara dalam bahasa keputusan bisnis, bukan hanya bahasa aktivitas proyek.\n\n"
+                "## 2.3 Tantangan Utama\n"
+                f"Tantangan utama yang dihadapi {client} dapat diringkas ke dalam tiga hal yang saling terkait:\n"
+                f"1. Menyatukan arah sponsor, tim inti, dan pelaksana kerja agar membaca tujuan yang sama terhadap {short_project.lower()}.\n"
+                f"2. Menjaga agar keputusan kerja tetap cepat tanpa mengorbankan gerbang mutu, tata kelola, dan disiplin prioritas.\n"
+                f"3. Mengubah kebutuhan yang masih tersebar menjadi model kerja yang cukup konkret untuk diterjemahkan menjadi keluaran dan pengendalian proyek.\n"
+                f"Tantangan ini penting dicatat karena sering kali gejala di lapangan terlihat teknis atau operasional, padahal akar masalahnya justru berada pada sinkronisasi keputusan, kontrol, dan kesiapan eksekusi.\n\n"
+                "## 2.4 Akar Kesenjangan\n"
+                f"Akar kesenjangan pada proposal ini terletak pada jarak antara kondisi saat ini yang masih belum cukup terkendali dengan kondisi yang dituju, yang menuntut keputusan lebih tegas, ritme kerja lebih konsisten, dan hasil yang lebih terukur. "
+                f"Gap tersebut biasanya muncul ketika organisasi sudah mengetahui arah yang diinginkan, tetapi belum memiliki mekanisme yang cukup disiplin untuk menjaga prioritas, tanggung jawab, dan acceptance hasil secara berurutan.\n"
+                f"- Gap pertama berada pada penerjemahan kebutuhan bisnis ke langkah kerja yang benar-benar dapat dijalankan.\n"
+                f"- Gap kedua berada pada pengendalian keputusan, terutama ketika ketergantungan kerja dan kepentingan lintas fungsi mulai bertemu.\n"
+                f"- Gap ketiga berada pada kesiapan pelaksanaan untuk menjaga kualitas hasil sambil tetap bergerak dalam horizon {timeline or 'proyek'}.\n\n"
+                "## 2.5 Implikasi / Risiko\n"
+                f"Bila kesenjangan tersebut dibiarkan, {client} berisiko menghadapi deviasi terhadap KPI, penurunan kualitas koordinasi, serta bertambahnya tekanan pada sponsor ketika keputusan harus diambil cepat. "
+                f"Dalam praktiknya, risiko yang timbul bukan hanya keterlambatan aktivitas, tetapi juga keputusan yang kurang presisi, ruang lingkup yang melebar, dan hasil kerja yang sulit diuji secara objektif. "
+                f"Karena itu, pembacaan risiko pada bab ini perlu diposisikan sebagai dasar mengapa intervensi harus dilakukan secara lebih terstruktur.\n\n"
+                "## 2.6 Kebutuhan Solusi\n"
+                f"Dengan pola masalah seperti di atas, {client} membutuhkan solusi yang tidak hanya menjanjikan perbaikan, tetapi juga mampu menutup gap secara terukur. "
+                f"Kebutuhan solusi pada proposal ini berarti kebutuhan akan pendekatan, metodologi, dan desain keluaran yang menjaga hubungan antara target bisnis, kontrol kerja, dan kelayakan implementasi. "
+                f"Bab-bab setelah ini sengaja dibangun untuk menjawab kebutuhan tersebut secara bertahap: mulai dari pendekatan, metodologi, desain solusi, sampai model pelaksanaan dan tata kelola yang bisa dijalankan."
+            )
 
         if chapter["id"] == "c_3":
             primary_need, secondary_needs = self._resolve_primary_need(project_goal, notes, regulations)
@@ -1336,6 +1513,65 @@ class ProposalSupportMixin:
                 f"- Tujuan utama proposal adalah mengubah kebutuhan {primary_need.lower()} menjadi program kerja yang lebih terstruktur, terukur, dan mudah dikendalikan.\n"
                 f"- Jenis proyek **{project_type}** dipilih karena paling sesuai untuk menjaga outcome {gains_line} tetap realistis dicapai oleh {client}.\n"
                 f"- Dengan penajaman ini, bab berikutnya dapat langsung berbicara tentang pendekatan, metodologi, dan solution design yang fokus pada kebutuhan yang benar-benar diputuskan untuk ditangani."
+            )
+
+        if chapter["id"] == "c_4":
+            ai_framework_note = (
+                f" Pada konteks AI/adopsi, acuan ini juga dipakai untuk menjaga {ai_governance.lower()} dan mencegah proposal terjebak pada narasi yang terlalu solution-first."
+                if ai_mode else ""
+            )
+            return (
+                f"Pendekatan untuk {client} harus dibangun di atas acuan yang dapat menjelaskan mengapa langkah yang diusulkan layak, aman, dan relevan dengan kebutuhan kerja. "
+                f"Oleh karena itu, bab ini tidak dimaksudkan sebagai daftar kerangka acuan semata, melainkan sebagai penjelasan mengenai prinsip dan standar yang dipakai untuk menjaga keputusan tetap konsisten dari awal sampai pelaksanaan. "
+                f"Dengan cara ini, sponsor dapat melihat bahwa arah penyelesaian masalah berdiri di atas fondasi yang bisa dipertanggungjawabkan.{ai_framework_note} (Data Internal, {year}).\n\n"
+                "## 4.1 Acuan Prinsip/Kerangka/Teori/Regulasi\n"
+                f"Pemilihan acuan untuk {client} diarahkan agar kebutuhan {short_goal.lower()} dapat ditangani dengan bahasa kerja yang tetap konsisten terhadap {term_line}. "
+                f"Artinya, acuan dipilih bukan karena popularitasnya, tetapi karena benar-benar membantu menyusun urutan keputusan, menjaga kualitas keluaran, dan menempatkan kontrol yang proporsional sejak awal.\n\n"
+                "| Acuan | Peran dalam Proposal | Relevansi bagi Klien |\n"
+                "| --- | --- | --- |\n"
+                f"{framework_rows}\n\n"
+                f"Dengan acuan seperti di atas, {client} memperoleh pegangan yang jelas mengenai standar apa yang dipakai untuk menguji apakah solusi yang diusulkan memang selaras dengan konteks, risiko, dan ekspektasi hasil bisnis.\n\n"
+                "## 4.2 Standar Penyelesaian Masalah\n"
+                f"Standar penyelesaian masalah pada proposal ini dijaga melalui alur kerja yang tertib, bukan lewat lompatan solusi. Bagi {client}, alur tersebut setidaknya harus mengikuti urutan berikut:\n"
+                f"1. Memastikan definisi masalah, scope awal, dan target hasil benar-benar disepakati sponsor.\n"
+                f"2. Memilih acuan yang paling relevan untuk menjaga kualitas keputusan, kontrol risiko, dan konsistensi pelaksanaan.\n"
+                f"3. Menerjemahkan acuan tersebut ke langkah kerja, keluaran, dan gerbang mutu yang mudah diuji pada setiap fase.\n"
+                f"4. Menjaga agar seluruh keputusan tetap kembali pada hasil seperti {kpi_line}, bukan melebar ke aktivitas yang tidak memberi dampak nyata.\n"
+                f"- Standar ini membantu proposal tetap dapat dipertanggungjawabkan karena setiap langkah punya alasan, batas, dan ukuran hasil yang jelas.\n"
+                f"- Standar ini juga menjaga agar diskusi dengan {client} tetap fokus pada apa yang perlu diputuskan, bukan hanya apa yang terdengar canggih.\n"
+                f"- Dengan disiplin seperti ini, bab metodologi sesudahnya dapat langsung berbicara tentang cara kerja yang konkret tanpa kehilangan dasar logikanya."
+            )
+
+        if chapter["id"] == "c_5":
+            ai_method_note = (
+                f" Pada konteks AI/adopsi, metodologi juga harus secara eksplisit menjaga readiness, validasi, pilot terkontrol, dan kesiapan adopsi pengguna."
+                if ai_mode else ""
+            )
+            return (
+                f"Metodologi untuk {client} perlu menjawab dua hal sekaligus: mengapa cara kerja tertentu dipilih, dan bagaimana cara kerja itu menjaga hasil tetap dapat diuji dari fase ke fase. "
+                f"Itulah sebabnya bab ini tidak ditulis sebagai uraian langkah yang generik, tetapi sebagai jalur pelaksanaan yang menghubungkan konteks masalah, pendekatan, dan bentuk keluaran secara utuh. "
+                f"Metodologi yang baik harus cukup rinci untuk dijalankan, namun tetap cukup ringkas agar sponsor dapat memahami logika pelaksanaan tanpa tenggelam pada detail yang tidak perlu.{ai_method_note} (Data Internal, {year}).\n\n"
+                "## 5.1 Alasan Pemilihan Metodologi\n"
+                f"Metodologi dipilih dengan mempertimbangkan tipe proyek **{project_type}**, jenis layanan **{service_type}**, horizon **{timeline}**, serta kebutuhan {client} untuk menjaga {gains_line}. "
+                f"Baseline internal yang digunakan adalah {standard_method.lower()}, namun penerapannya disesuaikan agar tetap relevan dengan konteks {short_project.lower()} dan tekanan seperti {short_notes.lower()}. "
+                f"Bagi {client}, metodologi ini dipilih karena memberi keseimbangan antara kecepatan mobilisasi, kualitas hasil, dan kontrol keputusan.\n"
+                f"1. Metodologi ini menjaga agar tiap fase punya tujuan yang jelas, bukan sekadar daftar aktivitas.\n"
+                f"2. Metodologi ini memudahkan sponsor membaca hubungan antara ruang lingkup, keluaran, dan gerbang mutu sebelum program bergerak terlalu jauh.\n"
+                f"3. Metodologi ini cukup fleksibel untuk merespons perubahan prioritas, tetapi tetap disiplin terhadap akuntabilitas hasil.\n"
+                f"4. Metodologi ini paling sesuai untuk menjaga agar nilai proposal {short_value.lower()} tidak berhenti sebagai janji, melainkan turun menjadi jalur kerja yang dapat dioperasionalkan.\n"
+                f"- Dengan metodologi seperti ini, forum kerja {client} bisa fokus pada keputusan penting, bukan menghabiskan energi untuk merapikan ulang arah kerja setiap saat.\n"
+                f"- Bagi perusahaan penyusun, metodologi ini juga memudahkan penempatan peninjau mutu, penerimaan keluaran, dan kontrol perubahan sejak awal.\n\n"
+                "## 5.2 Langkah Kerja dengan Kerangka Acuan Terpilih\n"
+                f"Langkah kerja berikut dipakai untuk menerjemahkan pendekatan ke ritme pelaksanaan yang lebih konkret:\n\n"
+                "| Fase | Periode | Tujuan Kerja | Keluaran Utama | Gerbang Mutu |\n"
+                "| --- | --- | --- | --- | --- |\n"
+                f"{methodology_rows}\n\n"
+                f"Struktur fase di atas memastikan bahwa {client} selalu memiliki titik evaluasi yang jelas sebelum bergerak ke tahap berikutnya. "
+                f"Artinya, setiap keluaran bukan hanya artefak administratif, melainkan bahan keputusan yang dipakai untuk menguji apakah program masih berada pada jalur yang mendukung KPI seperti {kpi_line}. "
+                f"Dengan demikian, metodologi tidak sekadar menjelaskan urutan kerja, tetapi juga menjaga disiplin transisi dari satu fase ke fase berikutnya.\n"
+                f"- Setiap fase diikat oleh gerbang mutu agar keputusan tentang lanjut, koreksi arah, atau penyesuaian ruang lingkup tidak dilakukan secara informal.\n"
+                f"- Ritme kerja ini membantu {client} menjaga kesinambungan antara forum sponsor, tim inti, dan pelaksana kerja.\n"
+                f"- Dengan pola ini, bab desain solusi setelahnya dapat langsung menjelaskan bentuk keluaran dan manfaat praktis tanpa harus mengulang dasar cara kerjanya."
             )
 
         if chapter["id"] == "c_6":
@@ -2359,7 +2595,7 @@ class ProposalSupportMixin:
 
         data = personalization_pack or {}
         kpi_line = " | ".join((data.get("kpi_blueprint", []) or [])[:2]) or f"outcome utama {client}"
-        term_line = ", ".join((data.get("terminology", []) or [])[:2]) or "governance, risk control"
+        term_line = ", ".join((data.get("terminology", []) or [])[:2]) or "tata kelola, pengendalian risiko"
         anchor_line = ""
         if chapter.get("id", "") in self._anchor_required_chapters():
             fact, citation = self._extract_first_external_anchor(data)
@@ -2367,29 +2603,29 @@ class ProposalSupportMixin:
                 anchor_line = f" Acuan konteks yang tetap dipakai adalah {fact} {citation}."
 
         section_templates = {
-            "2.2 Business Context": (
+            "2.2 Konteks Bisnis": (
                 f"{client} sedang menjaga outcome seperti {kpi_line} dan membutuhkan arah kerja yang tetap terkoneksi dengan kebutuhan bisnis inti.{anchor_line}\n"
                 f"1. Konteks bisnis harus dibaca dari target hasil, tekanan sponsor, dan arah transformasi yang sedang berjalan pada {client}.\n"
-                f"- Pada tahap ini, proposal perlu menegaskan current state yang masih belum cukup stabil dibanding target state yang diharapkan."
+                f"- Pada tahap ini, proposal perlu menegaskan kondisi saat ini yang masih belum cukup stabil dibanding kondisi yang dituju."
             ),
-            "2.3 Key Challenge": (
-                f"Tantangan utama berada pada kemampuan menyelaraskan keputusan sponsor, ritme delivery, dan disiplin kerja {term_line} dalam satu alur yang konsisten.\n"
-                f"1. Key challenge tidak boleh berhenti sebagai gejala permukaan, tetapi harus menunjukkan bottleneck yang benar-benar menahan {client} untuk bergerak lebih cepat.\n"
+            "2.3 Tantangan Utama": (
+                f"Tantangan utama berada pada kemampuan menyelaraskan keputusan sponsor, ritme pelaksanaan, dan disiplin kerja {term_line} dalam satu alur yang konsisten.\n"
+                f"1. Tantangan utama tidak boleh berhenti sebagai gejala permukaan, tetapi harus menunjukkan titik hambat yang benar-benar menahan {client} untuk bergerak lebih cepat.\n"
                 f"- Hambatan koordinasi, kualitas keputusan, dan kesiapan eksekusi perlu dibaca sebagai satu masalah manajemen yang saling terkait."
             ),
-            "2.4 Underlying Gap": (
-                f"Terdapat gap antara current state yang masih belum cukup terkontrol dengan target state yang menuntut keputusan lebih cepat, kontrol risiko lebih rapi, dan kualitas eksekusi yang lebih stabil.\n"
-                f"1. Underlying gap inilah yang menjadi inti definisi masalah untuk {client}, karena ia menjelaskan akar kesenjangan yang perlu ditutup.\n"
-                f"- Dengan mengartikulasikan gap secara eksplisit, proposal dapat bergerak dari keluhan operasional menjadi dasar intervensi yang lebih defensible."
+            "2.4 Akar Kesenjangan": (
+                f"Terdapat gap antara kondisi saat ini yang masih belum cukup terkontrol dengan kondisi yang dituju, yang menuntut keputusan lebih cepat, kontrol risiko lebih rapi, dan kualitas eksekusi yang lebih stabil.\n"
+                f"1. Akar kesenjangan inilah yang menjadi inti definisi masalah untuk {client}, karena ia menjelaskan hal mendasar yang perlu ditutup.\n"
+                f"- Dengan mengartikulasikan gap secara eksplisit, proposal dapat bergerak dari keluhan operasional menjadi dasar intervensi yang lebih dapat dipertanggungjawabkan."
             ),
-            "2.5 Implication / Risk": (
+            "2.5 Implikasi / Risiko": (
                 f"Jika gap ini tidak ditutup, {client} berisiko mengalami deviasi KPI, penurunan kualitas layanan, dan bertambahnya tekanan pada governance maupun operasi.\n"
                 f"1. Implikasi masalah harus diterjemahkan ke dampak bisnis, risiko eksekusi, dan konsekuensi keputusan yang mungkin muncul di level sponsor.\n"
                 f"- Risiko ini juga menjadi alasan mengapa perbaikan tidak bisa ditunda atau diperlakukan sebagai isu administratif semata."
             ),
-            "2.6 Need for Solution": (
+            "2.6 Kebutuhan Solusi": (
                 f"Karena itu, rumusan masalah pada bab ini harus mengarah pada kebutuhan solusi yang mampu menutup gap tersebut secara terukur, defensible, dan siap diturunkan ke tahap pendekatan serta desain solusi.\n"
-                f"1. Need for solution perlu menjadi jembatan langsung ke bab pendekatan, metodologi, dan solution design.\n"
+                f"1. Kebutuhan solusi perlu menjadi jembatan langsung ke bab pendekatan, metodologi, dan solution design.\n"
                 f"- Dengan struktur ini, {client} dapat melihat bahwa solusi yang diusulkan memang lahir dari definisi masalah yang runtut, bukan dari asumsi generik."
             ),
         }
@@ -2724,7 +2960,7 @@ class ProposalSupportMixin:
     def _chapter_usefulness_terms(chapter_id: str) -> List[str]:
         mapping = {
             "c_1": ["latar belakang", "konteks", "prioritas", "permintaan"],
-            "c_2": ["masalah", "hambatan", "gap", "risiko", "business context", "key challenge", "underlying gap", "need for solution"],
+            "c_2": ["masalah", "hambatan", "gap", "risiko", "konteks bisnis", "tantangan utama", "akar kesenjangan", "kebutuhan solusi"],
             "c_3": ["problem", "opportunity", "directive", "fokus utama", "tujuan", "jenis proyek"],
             "c_4": ["framework", "regulasi", "standar", "acuan"],
             "c_5": ["metodologi", "langkah kerja", "fase", "output"],

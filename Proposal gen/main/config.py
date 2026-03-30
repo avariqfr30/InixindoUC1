@@ -153,15 +153,15 @@ CHAPTER_STANDARD_RULES = {
     "c_2": {
         "problem_definition_pattern": {
             "subsections": [
-                "2.2 Business Context",
-                "2.3 Key Challenge",
-                "2.4 Underlying Gap",
-                "2.5 Implication / Risk",
-                "2.6 Need for Solution",
+                "2.2 Konteks Bisnis",
+                "2.3 Tantangan Utama",
+                "2.4 Akar Kesenjangan",
+                "2.5 Implikasi / Risiko",
+                "2.6 Kebutuhan Solusi",
             ],
             "focus_note": (
                 "Setelah 2.1 Kebutuhan atau Keinginan Klien, wajib gunakan sub-bab standar perusahaan dalam urutan: "
-                "2.2 Business Context -> 2.3 Key Challenge -> 2.4 Underlying Gap -> 2.5 Implication / Risk -> 2.6 Need for Solution. "
+                "2.2 Konteks Bisnis -> 2.3 Tantangan Utama -> 2.4 Akar Kesenjangan -> 2.5 Implikasi / Risiko -> 2.6 Kebutuhan Solusi. "
                 "Tegaskan gap antara current state dan target state, lalu turunkan menjadi kebutuhan solusi yang jelas."
             ),
         }
@@ -409,11 +409,11 @@ UNIVERSAL_STRUCTURE = [
         "id": "c_2", "title": "BAB II – PERMASALAHAN",
         "subs": [
             "2.1 Kebutuhan atau Keinginan Klien",
-            "2.2 Business Context",
-            "2.3 Key Challenge",
-            "2.4 Underlying Gap",
-            "2.5 Implication / Risk",
-            "2.6 Need for Solution",
+            "2.2 Konteks Bisnis",
+            "2.3 Tantangan Utama",
+            "2.4 Akar Kesenjangan",
+            "2.5 Implikasi / Risiko",
+            "2.6 Kebutuhan Solusi",
         ],
         "keywords": "problem statement pain points client needs",
         "length_intent": "Tangkap dengan jelas apa yang benar-benar dibutuhkan atau diinginkan klien, lalu turunkan pola definisi masalah standar perusahaan dari business context hingga need for solution. (Target: 750 words)."
@@ -426,13 +426,13 @@ UNIVERSAL_STRUCTURE = [
     },
     {
         "id": "c_4", "title": "BAB IV – PENDEKATAN",
-        "subs": ["4.1 Acuan Prinsip/Framework/Teori/Regulasi", "4.2 Standar Penyelesaian Masalah"],
+        "subs": ["4.1 Acuan Prinsip/Kerangka/Teori/Regulasi", "4.2 Standar Penyelesaian Masalah"],
         "keywords": "approach framework principle theory regulation standard",
         "length_intent": "Uraikan acuan dan prinsip yang digunakan (framework/teori/regulasi/standar) sebagai landasan menyelesaikan masalah klien. (Target: 700 words)."
     },
     {
         "id": "c_5", "title": "BAB V – METODOLOGI",
-        "subs": ["5.1 Alasan Pemilihan Metodologi", "5.2 Langkah Kerja dengan Framework Terpilih"],
+        "subs": ["5.1 Alasan Pemilihan Metodologi", "5.2 Langkah Kerja dengan Kerangka Acuan Terpilih"],
         "keywords": "methodology rationale implementation steps framework",
         "length_intent": "Jelaskan mengapa metodologi tersebut dipilih dan bagaimana langkah kerja detail menggunakan framework tersebut. (Target: 800 words).",
         "visual_intent": "flowchart"

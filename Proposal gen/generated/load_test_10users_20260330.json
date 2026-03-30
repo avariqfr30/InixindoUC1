@@ -1,0 +1,809 @@
+{
+  "run_started_at": 1774874389.330496,
+  "run_finished_at": 1774874998.784328,
+  "wall_clock_seconds": 609.45,
+  "users": 10,
+  "succeeded": 10,
+  "failed": 0,
+  "active_generation_limit": 2,
+  "results": [
+    {
+      "user": "user_01",
+      "client": "Bank Mandiri",
+      "project_type": "Transformation",
+      "timeline": "4 Bulan",
+      "steps": {
+        "config": {
+          "status": 200,
+          "seconds": 0.01
+        },
+        "prefetch": {
+          "status": 200,
+          "seconds": 0.01,
+          "body": {
+            "status": "cached"
+          }
+        },
+        "budget": {
+          "status": 200,
+          "seconds": 13.49
+        },
+        "preview": {
+          "status": 200,
+          "seconds": 0.0
+        },
+        "generate_submit": {
+          "status": 202,
+          "seconds": 0.0,
+          "body": {
+            "acceptance_passes": null,
+            "acceptance_score": null,
+            "created_at": 1774874402.840428,
+            "download_ready": false,
+            "filename": null,
+            "finished_at": null,
+            "history_id": null,
+            "job_id": "9940388b1d6f454ab6f3f1e6e29eb729",
+            "message": "Permintaan tersimpan. Menunggu antrean, posisi 8.",
+            "processing_seconds": null,
+            "queue_position": 8,
+            "started_at": null,
+            "status": "queued"
+          }
+        },
+        "download": {
+          "status": 200,
+          "seconds": 0.0,
+          "bytes": 87542
+        }
+      },
+      "status": "done",
+      "job_id": "9940388b1d6f454ab6f3f1e6e29eb729",
+      "initial_queue_position": 8,
+      "final_job_status": {
+        "acceptance_passes": true,
+        "acceptance_score": 99,
+        "created_at": 1774874402.840428,
+        "download_ready": true,
+        "filename": "Proposal_Bank_Mandiri_Gelombang_uji_beban_1_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_ekse_2.docx",
+        "finished_at": 1774874994.158232,
+        "history_id": "ad7170611ad7406e9241a83f9042fc5f",
+        "job_id": "9940388b1d6f454ab6f3f1e6e29eb729",
+        "message": "Proposal selesai dibuat dan siap diunduh.",
+        "processing_seconds": 138.2,
+        "queue_position": null,
+        "started_at": 1774874855.9203022,
+        "status": "done"
+      },
+      "filename": "Proposal_Bank_Mandiri_Gelombang_uji_beban_1_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_ekse_2.docx",
+      "history_id": "ad7170611ad7406e9241a83f9042fc5f",
+      "processing_seconds": 138.2,
+      "acceptance_score": 99,
+      "acceptance_passes": true,
+      "poll_count": 119,
+      "ended_at": 1774874998.783913,
+      "end_to_end_seconds": 609.45,
+      "last_seen_status": "done"
+    },
+    {
+      "user": "user_02",
+      "client": "Pertamina",
+      "project_type": "Strategic",
+      "timeline": "5 Bulan",
+      "steps": {
+        "config": {
+          "status": 200,
+          "seconds": 0.01
+        },
+        "prefetch": {
+          "status": 200,
+          "seconds": 0.01,
+          "body": {
+            "status": "cached"
+          }
+        },
+        "budget": {
+          "status": 200,
+          "seconds": 9.39
+        },
+        "preview": {
+          "status": 200,
+          "seconds": 0.0
+        },
+        "generate_submit": {
+          "status": 202,
+          "seconds": 0.0,
+          "body": {
+            "acceptance_passes": null,
+            "acceptance_score": null,
+            "created_at": 1774874233.544488,
+            "deduplicated": true,
+            "download_ready": false,
+            "filename": null,
+            "finished_at": null,
+            "history_id": null,
+            "job_id": "507073f79b3648cfbe81cecae78c2dcd",
+            "message": "Permintaan yang sama sudah sedang diproses. Sistem melanjutkan job yang sudah ada.",
+            "processing_seconds": 29.4,
+            "queue_position": null,
+            "started_at": 1774874369.2967901,
+            "status": "running"
+          }
+        },
+        "download": {
+          "status": 200,
+          "seconds": 0.0,
+          "bytes": 87054
+        }
+      },
+      "status": "done",
+      "job_id": "507073f79b3648cfbe81cecae78c2dcd",
+      "initial_queue_position": null,
+      "final_job_status": {
+        "acceptance_passes": true,
+        "acceptance_score": 100,
+        "created_at": 1774874233.544488,
+        "download_ready": true,
+        "filename": "Proposal_Pertamina_Gelombang_uji_beban_2_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_eksekus.docx",
+        "finished_at": 1774874518.497983,
+        "history_id": "5bde61f5dab14c9e9d00033ab12063b5",
+        "job_id": "507073f79b3648cfbe81cecae78c2dcd",
+        "message": "Proposal selesai dibuat dan siap diunduh.",
+        "processing_seconds": 149.2,
+        "queue_position": null,
+        "started_at": 1774874369.2967901,
+        "status": "done"
+      },
+      "filename": "Proposal_Pertamina_Gelombang_uji_beban_2_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_eksekus.docx",
+      "history_id": "5bde61f5dab14c9e9d00033ab12063b5",
+      "processing_seconds": 149.2,
+      "acceptance_score": 100,
+      "acceptance_passes": true,
+      "poll_count": 24,
+      "ended_at": 1774874518.947828,
+      "end_to_end_seconds": 129.62,
+      "last_seen_status": "done"
+    },
+    {
+      "user": "user_03",
+      "client": "Indosat Ooredoo Hutchison",
+      "project_type": "Implementation",
+      "timeline": "6 Bulan",
+      "steps": {
+        "config": {
+          "status": 200,
+          "seconds": 0.01
+        },
+        "prefetch": {
+          "status": 200,
+          "seconds": 0.01,
+          "body": {
+            "status": "cached"
+          }
+        },
+        "budget": {
+          "status": 200,
+          "seconds": 0.33
+        },
+        "preview": {
+          "status": 200,
+          "seconds": 0.0
+        },
+        "generate_submit": {
+          "status": 202,
+          "seconds": 0.0,
+          "body": {
+            "acceptance_passes": null,
+            "acceptance_score": null,
+            "created_at": 1774874242.582783,
+            "deduplicated": true,
+            "download_ready": false,
+            "filename": null,
+            "finished_at": null,
+            "history_id": null,
+            "job_id": "5cabe3b26a9d4bbe8cab48391466bf32",
+            "message": "Permintaan yang sama sudah sedang diproses. Sistem melanjutkan job yang sudah ada.",
+            "processing_seconds": null,
+            "queue_position": 5,
+            "started_at": null,
+            "status": "queued"
+          }
+        },
+        "download": {
+          "status": 200,
+          "seconds": 0.0,
+          "bytes": 85923
+        }
+      },
+      "status": "done",
+      "job_id": "5cabe3b26a9d4bbe8cab48391466bf32",
+      "initial_queue_position": 5,
+      "final_job_status": {
+        "acceptance_passes": true,
+        "acceptance_score": 97,
+        "created_at": 1774874242.582783,
+        "download_ready": true,
+        "filename": "Proposal_Indosat_Ooredoo_Hutchison_Gelombang_uji_beban_3_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan.docx",
+        "finished_at": 1774874855.917865,
+        "history_id": "018d6c27882d401cb86304f9c866ac5a",
+        "job_id": "5cabe3b26a9d4bbe8cab48391466bf32",
+        "message": "Proposal selesai dibuat dan siap diunduh.",
+        "processing_seconds": 111.5,
+        "queue_position": null,
+        "started_at": 1774874744.403968,
+        "status": "done"
+      },
+      "filename": "Proposal_Indosat_Ooredoo_Hutchison_Gelombang_uji_beban_3_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan.docx",
+      "history_id": "018d6c27882d401cb86304f9c866ac5a",
+      "processing_seconds": 111.5,
+      "acceptance_score": 97,
+      "acceptance_passes": true,
+      "poll_count": 94,
+      "ended_at": 1774874860.445801,
+      "end_to_end_seconds": 471.11,
+      "last_seen_status": "done"
+    },
+    {
+      "user": "user_04",
+      "client": "Telkomsel",
+      "project_type": "Diagnostic",
+      "timeline": "7 Bulan",
+      "steps": {
+        "config": {
+          "status": 200,
+          "seconds": 0.01
+        },
+        "prefetch": {
+          "status": 200,
+          "seconds": 0.01,
+          "body": {
+            "status": "cached"
+          }
+        },
+        "budget": {
+          "status": 200,
+          "seconds": 12.86
+        },
+        "preview": {
+          "status": 200,
+          "seconds": 0.0
+        },
+        "generate_submit": {
+          "status": 202,
+          "seconds": 0.0,
+          "body": {
+            "acceptance_passes": null,
+            "acceptance_score": null,
+            "created_at": 1774874239.4034681,
+            "deduplicated": true,
+            "download_ready": false,
+            "filename": null,
+            "finished_at": null,
+            "history_id": null,
+            "job_id": "892d03cd93c2425c8414a969a5ff0953",
+            "message": "Permintaan yang sama sudah sedang diproses. Sistem melanjutkan job yang sudah ada.",
+            "processing_seconds": null,
+            "queue_position": 4,
+            "started_at": null,
+            "status": "queued"
+          }
+        },
+        "download": {
+          "status": 200,
+          "seconds": 0.0,
+          "bytes": 85601
+        }
+      },
+      "status": "done",
+      "job_id": "892d03cd93c2425c8414a969a5ff0953",
+      "initial_queue_position": 4,
+      "final_job_status": {
+        "acceptance_passes": true,
+        "acceptance_score": 99,
+        "created_at": 1774874239.4034681,
+        "download_ready": true,
+        "filename": "Proposal_Telkomsel_Gelombang_uji_beban_4_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_eksekus.docx",
+        "finished_at": 1774874761.695818,
+        "history_id": "bbfacc24fc84439cbe0e9f32e088d208",
+        "job_id": "892d03cd93c2425c8414a969a5ff0953",
+        "message": "Proposal selesai dibuat dan siap diunduh.",
+        "processing_seconds": 131.9,
+        "queue_position": null,
+        "started_at": 1774874629.80729,
+        "status": "done"
+      },
+      "filename": "Proposal_Telkomsel_Gelombang_uji_beban_4_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_eksekus.docx",
+      "history_id": "bbfacc24fc84439cbe0e9f32e088d208",
+      "processing_seconds": 131.9,
+      "acceptance_score": 99,
+      "acceptance_passes": true,
+      "poll_count": 72,
+      "ended_at": 1774874762.759794,
+      "end_to_end_seconds": 373.43,
+      "last_seen_status": "done"
+    },
+    {
+      "user": "user_05",
+      "client": "XL Axiata",
+      "project_type": "Transformation",
+      "timeline": "8 Bulan",
+      "steps": {
+        "config": {
+          "status": 200,
+          "seconds": 0.01
+        },
+        "prefetch": {
+          "status": 200,
+          "seconds": 0.01,
+          "body": {
+            "status": "cached"
+          }
+        },
+        "budget": {
+          "status": 200,
+          "seconds": 16.28
+        },
+        "preview": {
+          "status": 200,
+          "seconds": 0.0
+        },
+        "generate_submit": {
+          "status": 202,
+          "seconds": 0.0,
+          "body": {
+            "acceptance_passes": null,
+            "acceptance_score": null,
+            "created_at": 1774874237.969822,
+            "deduplicated": true,
+            "download_ready": false,
+            "filename": null,
+            "finished_at": null,
+            "history_id": null,
+            "job_id": "297778c0ccef49c1b2f874922ab33fd3",
+            "message": "Permintaan yang sama sudah sedang diproses. Sistem melanjutkan job yang sudah ada.",
+            "processing_seconds": null,
+            "queue_position": 3,
+            "started_at": null,
+            "status": "queued"
+          }
+        },
+        "download": {
+          "status": 200,
+          "seconds": 0.0,
+          "bytes": 87005
+        }
+      },
+      "status": "done",
+      "job_id": "297778c0ccef49c1b2f874922ab33fd3",
+      "initial_queue_position": 3,
+      "final_job_status": {
+        "acceptance_passes": true,
+        "acceptance_score": 99,
+        "created_at": 1774874237.969822,
+        "download_ready": true,
+        "filename": "Proposal_XL_Axiata_Gelombang_uji_beban_5_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_eksekus.docx",
+        "finished_at": 1774874744.4006138,
+        "history_id": "aa0fba329a224174954d0ccd5d46f5c4",
+        "job_id": "297778c0ccef49c1b2f874922ab33fd3",
+        "message": "Proposal selesai dibuat dan siap diunduh.",
+        "processing_seconds": 123.2,
+        "queue_position": null,
+        "started_at": 1774874621.1880598,
+        "status": "done"
+      },
+      "filename": "Proposal_XL_Axiata_Gelombang_uji_beban_5_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_eksekus.docx",
+      "history_id": "aa0fba329a224174954d0ccd5d46f5c4",
+      "processing_seconds": 123.2,
+      "acceptance_score": 99,
+      "acceptance_passes": true,
+      "poll_count": 68,
+      "ended_at": 1774874746.160843,
+      "end_to_end_seconds": 356.83,
+      "last_seen_status": "done"
+    },
+    {
+      "user": "user_06",
+      "client": "Adaro Energy",
+      "project_type": "Strategic",
+      "timeline": "4 Bulan",
+      "steps": {
+        "config": {
+          "status": 200,
+          "seconds": 0.01
+        },
+        "prefetch": {
+          "status": 200,
+          "seconds": 0.01,
+          "body": {
+            "status": "cached"
+          }
+        },
+        "budget": {
+          "status": 200,
+          "seconds": 0.29
+        },
+        "preview": {
+          "status": 200,
+          "seconds": 0.04
+        },
+        "generate_submit": {
+          "status": 202,
+          "seconds": 0.0,
+          "body": {
+            "acceptance_passes": null,
+            "acceptance_score": null,
+            "created_at": 1774874236.530943,
+            "deduplicated": true,
+            "download_ready": false,
+            "filename": null,
+            "finished_at": null,
+            "history_id": null,
+            "job_id": "d5fb4f569f4a47708fd47db15f204705",
+            "message": "Permintaan yang sama sudah sedang diproses. Sistem melanjutkan job yang sudah ada.",
+            "processing_seconds": null,
+            "queue_position": 2,
+            "started_at": null,
+            "status": "queued"
+          }
+        },
+        "download": {
+          "status": 200,
+          "seconds": 0.0,
+          "bytes": 95532
+        }
+      },
+      "status": "done",
+      "job_id": "d5fb4f569f4a47708fd47db15f204705",
+      "initial_queue_position": 2,
+      "final_job_status": {
+        "acceptance_passes": true,
+        "acceptance_score": 98,
+        "created_at": 1774874236.530943,
+        "download_ready": true,
+        "filename": "Proposal_Adaro_Energy_Gelombang_uji_beban_6_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_ekse.docx",
+        "finished_at": 1774874621.185594,
+        "history_id": "b93a7143383a4183ba283957791a5f05",
+        "job_id": "d5fb4f569f4a47708fd47db15f204705",
+        "message": "Proposal selesai dibuat dan siap diunduh.",
+        "processing_seconds": 102.7,
+        "queue_position": null,
+        "started_at": 1774874518.500608,
+        "status": "done"
+      },
+      "filename": "Proposal_Adaro_Energy_Gelombang_uji_beban_6_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_ekse.docx",
+      "history_id": "b93a7143383a4183ba283957791a5f05",
+      "processing_seconds": 102.7,
+      "acceptance_score": 98,
+      "acceptance_passes": true,
+      "poll_count": 47,
+      "ended_at": 1774874625.0682821,
+      "end_to_end_seconds": 235.73,
+      "last_seen_status": "done"
+    },
+    {
+      "user": "user_07",
+      "client": "Alfamart",
+      "project_type": "Implementation",
+      "timeline": "5 Bulan",
+      "steps": {
+        "config": {
+          "status": 200,
+          "seconds": 0.01
+        },
+        "prefetch": {
+          "status": 200,
+          "seconds": 0.01,
+          "body": {
+            "status": "cached"
+          }
+        },
+        "budget": {
+          "status": 200,
+          "seconds": 0.59
+        },
+        "preview": {
+          "status": 200,
+          "seconds": 0.0
+        },
+        "generate_submit": {
+          "status": 202,
+          "seconds": 0.0,
+          "body": {
+            "acceptance_passes": null,
+            "acceptance_score": null,
+            "created_at": 1774874234.965442,
+            "deduplicated": true,
+            "download_ready": false,
+            "filename": null,
+            "finished_at": null,
+            "history_id": null,
+            "job_id": "e68630211e15437d88d76a6543bd78a0",
+            "message": "Permintaan yang sama sudah sedang diproses. Sistem melanjutkan job yang sudah ada.",
+            "processing_seconds": null,
+            "queue_position": 1,
+            "started_at": null,
+            "status": "queued"
+          }
+        },
+        "download": {
+          "status": 200,
+          "seconds": 0.0,
+          "bytes": 84736
+        }
+      },
+      "status": "done",
+      "job_id": "e68630211e15437d88d76a6543bd78a0",
+      "initial_queue_position": 1,
+      "final_job_status": {
+        "acceptance_passes": true,
+        "acceptance_score": 99,
+        "created_at": 1774874234.965442,
+        "download_ready": true,
+        "filename": "Proposal_Alfamart_Gelombang_uji_beban_7_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_eksekusi.docx",
+        "finished_at": 1774874629.80445,
+        "history_id": "fee83169ebd744d1ae520b4365ec9e7d",
+        "job_id": "e68630211e15437d88d76a6543bd78a0",
+        "message": "Proposal selesai dibuat dan siap diunduh.",
+        "processing_seconds": 122.0,
+        "queue_position": null,
+        "started_at": 1774874507.768834,
+        "status": "done"
+      },
+      "filename": "Proposal_Alfamart_Gelombang_uji_beban_7_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_eksekusi.docx",
+      "history_id": "fee83169ebd744d1ae520b4365ec9e7d",
+      "processing_seconds": 122.0,
+      "acceptance_score": 99,
+      "acceptance_passes": true,
+      "poll_count": 48,
+      "ended_at": 1774874630.3141298,
+      "end_to_end_seconds": 240.98,
+      "last_seen_status": "done"
+    },
+    {
+      "user": "user_08",
+      "client": "Aneka Tambang (ANTAM)",
+      "project_type": "Diagnostic",
+      "timeline": "6 Bulan",
+      "steps": {
+        "config": {
+          "status": 200,
+          "seconds": 0.01
+        },
+        "prefetch": {
+          "status": 200,
+          "seconds": 0.01,
+          "body": {
+            "status": "cached"
+          }
+        },
+        "budget": {
+          "status": 200,
+          "seconds": 0.64
+        },
+        "preview": {
+          "status": 200,
+          "seconds": 0.0
+        },
+        "generate_submit": {
+          "status": 202,
+          "seconds": 0.0,
+          "body": {
+            "acceptance_passes": null,
+            "acceptance_score": null,
+            "created_at": 1774874389.999542,
+            "download_ready": false,
+            "filename": null,
+            "finished_at": null,
+            "history_id": null,
+            "job_id": "6125c7e60a2740aba17593c995ea3eab",
+            "message": "Permintaan tersimpan. Menunggu antrean, posisi 7.",
+            "processing_seconds": null,
+            "queue_position": 7,
+            "started_at": null,
+            "status": "queued"
+          }
+        },
+        "download": {
+          "status": 200,
+          "seconds": 0.0,
+          "bytes": 85738
+        }
+      },
+      "status": "done",
+      "job_id": "6125c7e60a2740aba17593c995ea3eab",
+      "initial_queue_position": 7,
+      "final_job_status": {
+        "acceptance_passes": true,
+        "acceptance_score": 99,
+        "created_at": 1774874389.999542,
+        "download_ready": true,
+        "filename": "Proposal_Aneka_Tambang_ANTAM_Gelombang_uji_beban_8_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadm_2.docx",
+        "finished_at": 1774874969.059241,
+        "history_id": "618cf779a58e4e448957223d895970bb",
+        "job_id": "6125c7e60a2740aba17593c995ea3eab",
+        "message": "Proposal selesai dibuat dan siap diunduh.",
+        "processing_seconds": 119.2,
+        "queue_position": null,
+        "started_at": 1774874849.8542778,
+        "status": "done"
+      },
+      "filename": "Proposal_Aneka_Tambang_ANTAM_Gelombang_uji_beban_8_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadm_2.docx",
+      "history_id": "618cf779a58e4e448957223d895970bb",
+      "processing_seconds": 119.2,
+      "acceptance_score": 99,
+      "acceptance_passes": true,
+      "poll_count": 116,
+      "ended_at": 1774874970.882415,
+      "end_to_end_seconds": 581.55,
+      "last_seen_status": "done"
+    },
+    {
+      "user": "user_09",
+      "client": "Angkasa Pura II",
+      "project_type": "Transformation",
+      "timeline": "7 Bulan",
+      "steps": {
+        "config": {
+          "status": 200,
+          "seconds": 0.01
+        },
+        "prefetch": {
+          "status": 200,
+          "seconds": 0.01,
+          "body": {
+            "status": "cached"
+          }
+        },
+        "budget": {
+          "status": 200,
+          "seconds": 0.32
+        },
+        "preview": {
+          "status": 200,
+          "seconds": 0.01
+        },
+        "generate_submit": {
+          "status": 202,
+          "seconds": 0.0,
+          "body": {
+            "acceptance_passes": null,
+            "acceptance_score": null,
+            "created_at": 1774874233.912317,
+            "deduplicated": true,
+            "download_ready": false,
+            "filename": null,
+            "finished_at": null,
+            "history_id": null,
+            "job_id": "074b1fdbb5d3442491fd8361a611f5f9",
+            "message": "Permintaan yang sama sudah sedang diproses. Sistem melanjutkan job yang sudah ada.",
+            "processing_seconds": 0.5,
+            "queue_position": null,
+            "started_at": 1774874389.14677,
+            "status": "running"
+          }
+        },
+        "download": {
+          "status": 200,
+          "seconds": 0.0,
+          "bytes": 86930
+        }
+      },
+      "status": "done",
+      "job_id": "074b1fdbb5d3442491fd8361a611f5f9",
+      "initial_queue_position": null,
+      "final_job_status": {
+        "acceptance_passes": true,
+        "acceptance_score": 99,
+        "created_at": 1774874233.912317,
+        "download_ready": true,
+        "filename": "Proposal_Angkasa_Pura_II_Gelombang_uji_beban_9_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_e.docx",
+        "finished_at": 1774874507.765986,
+        "history_id": "7a863d57d5c8426f880ad8b4ded33dc9",
+        "job_id": "074b1fdbb5d3442491fd8361a611f5f9",
+        "message": "Proposal selesai dibuat dan siap diunduh.",
+        "processing_seconds": 118.6,
+        "queue_position": null,
+        "started_at": 1774874389.14677,
+        "status": "done"
+      },
+      "filename": "Proposal_Angkasa_Pura_II_Gelombang_uji_beban_9_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_roadmap_e.docx",
+      "history_id": "7a863d57d5c8426f880ad8b4ded33dc9",
+      "processing_seconds": 118.6,
+      "acceptance_score": 99,
+      "acceptance_passes": true,
+      "poll_count": 24,
+      "ended_at": 1774874509.8970869,
+      "end_to_end_seconds": 120.56,
+      "last_seen_status": "done"
+    },
+    {
+      "user": "user_10",
+      "client": "Astra International",
+      "project_type": "Strategic",
+      "timeline": "8 Bulan",
+      "steps": {
+        "config": {
+          "status": 200,
+          "seconds": 0.01
+        },
+        "prefetch": {
+          "status": 200,
+          "seconds": 0.01,
+          "body": {
+            "status": "cached"
+          }
+        },
+        "budget": {
+          "status": 200,
+          "seconds": 17.7
+        },
+        "preview": {
+          "status": 200,
+          "seconds": 0.0
+        },
+        "generate_submit": {
+          "status": 202,
+          "seconds": 0.0,
+          "body": {
+            "acceptance_passes": null,
+            "acceptance_score": null,
+            "created_at": 1774874242.886236,
+            "deduplicated": true,
+            "download_ready": false,
+            "filename": null,
+            "finished_at": null,
+            "history_id": null,
+            "job_id": "d636106fcab948b28297c2e179cf481f",
+            "message": "Permintaan yang sama sudah sedang diproses. Sistem melanjutkan job yang sudah ada.",
+            "processing_seconds": null,
+            "queue_position": 6,
+            "started_at": null,
+            "status": "queued"
+          }
+        },
+        "download": {
+          "status": 200,
+          "seconds": 0.0,
+          "bytes": 87609
+        }
+      },
+      "status": "done",
+      "job_id": "d636106fcab948b28297c2e179cf481f",
+      "initial_queue_position": 6,
+      "final_job_status": {
+        "acceptance_passes": true,
+        "acceptance_score": 99,
+        "created_at": 1774874242.886236,
+        "download_ready": true,
+        "filename": "Proposal_Astra_International_Gelombang_uji_beban_10_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_road.docx",
+        "finished_at": 1774874849.8520598,
+        "history_id": "3add9489fb684a38a1604c9c147cdde7",
+        "job_id": "d636106fcab948b28297c2e179cf481f",
+        "message": "Proposal selesai dibuat dan siap diunduh.",
+        "processing_seconds": 88.2,
+        "queue_position": null,
+        "started_at": 1774874761.6983738,
+        "status": "done"
+      },
+      "filename": "Proposal_Astra_International_Gelombang_uji_beban_10_penguatan_tata_kelola_delivery_percepatan_keputusan_lintas_unit_dan_penyusunan_road.docx",
+      "history_id": "3add9489fb684a38a1604c9c147cdde7",
+      "processing_seconds": 88.2,
+      "acceptance_score": 99,
+      "acceptance_passes": true,
+      "poll_count": 89,
+      "ended_at": 1774874852.788595,
+      "end_to_end_seconds": 463.45,
+      "last_seen_status": "done"
+    }
+  ],
+  "metrics": {
+    "end_to_end_min": 120.56,
+    "end_to_end_avg": 358.27,
+    "end_to_end_max": 609.45,
+    "processing_avg": 120.47,
+    "processing_max": 149.2,
+    "acceptance_avg": 98.8,
+    "within_4_minutes_count": 3,
+    "within_4_minutes_ratio": 0.3
+  }
+}
