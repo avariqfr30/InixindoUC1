@@ -405,7 +405,7 @@ class ProposalEngineMixin:
         regulations: str,
         chapter_id: Optional[str] = None,
         proposal_mode: str = "canvassing"
-    ) -> Tuple[Document, str]:
+    ) -> Tuple[Document, str, Dict[str, Any]]:
         selected_chapters = self._resolve_chapters(chapter_id, proposal_mode=proposal_mode)
         chapter_targets = self._chapter_word_targets(selected_chapters)
         content_word_budget = self._content_word_budget()
@@ -775,7 +775,14 @@ class ProposalEngineMixin:
             chapter_slug = re.sub(r'[^A-Za-z0-9]+', '_', selected_chapters[0]['title']).strip('_')
             base_name = f"{base_name}_{chapter_slug}"
 
-        return doc, base_name.replace(" ", "_")
+        metadata = {
+            "acceptance_report": acceptance_report,
+            "estimated_pages": acceptance_report.get("estimated_pages"),
+            "generated_words": generated_words,
+            "using_template": using_template,
+            "proposal_mode": proposal_mode,
+        }
+        return doc, base_name.replace(" ", "_"), metadata
 
 
     def run(
@@ -791,7 +798,7 @@ class ProposalEngineMixin:
         regulations: str,
         chapter_id: Optional[str] = None,
         proposal_mode: str = "canvassing"
-    ) -> Tuple[Document, str]:
+    ) -> Tuple[Document, str, Dict[str, Any]]:
         return self.generate_document(
             client=client,
             project=project,

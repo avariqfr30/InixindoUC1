@@ -443,7 +443,15 @@ class KnowledgeBase:
             name="projects_db", embedding_function=self.embed_fn
         )
         self.df: Optional[pd.DataFrame] = None
-        self.refresh_data()
+        self.last_refresh_error = ""
+        try:
+            self.refresh_data()
+        except Exception as exc:
+            self.last_refresh_error = str(exc)
+            logger.warning(
+                "Knowledge base startup refresh skipped because dependencies are not ready yet: %s",
+                exc,
+            )
 
     @staticmethod
     def _required_project_fields() -> Tuple[str, ...]:
@@ -479,25 +487,35 @@ class KnowledgeBase:
                 ", ".join(self._required_project_fields()),
                 ", ".join(self.df.columns.astype(str).tolist()) if self.df is not None else "-",
             )
+            self.last_refresh_error = "Project data schema is missing required fields."
             return False
-            
-        existing_ids = set(self.collection.get()['ids'])
-        new_ids_map = {str(idx): row for idx, row in self.df.iterrows()}
-        new_ids_set = set(new_ids_map.keys())
-        
-        ids_to_delete = list(existing_ids - new_ids_set)
-        
-        if ids_to_delete: 
-            self.collection.delete(ids_to_delete)
 
-        all_ids = list(new_ids_set)
-        if all_ids:
-            for i in range(0, len(all_ids), 500):
-                batch_ids = all_ids[i:i + 500]
-                docs = [" | ".join([f"{col}: {val}" for col, val in new_ids_map[b].items()]) for b in batch_ids]
-                metas = [new_ids_map[b].astype(str).to_dict() for b in batch_ids]
-                self.collection.upsert(documents=docs, metadatas=metas, ids=batch_ids)
-                
+        try:
+            existing_ids = set(self.collection.get()['ids'])
+            new_ids_map = {str(idx): row for idx, row in self.df.iterrows()}
+            new_ids_set = set(new_ids_map.keys())
+
+            ids_to_delete = list(existing_ids - new_ids_set)
+
+            if ids_to_delete:
+                self.collection.delete(ids_to_delete)
+
+            all_ids = list(new_ids_set)
+            if all_ids:
+                for i in range(0, len(all_ids), 500):
+                    batch_ids = all_ids[i:i + 500]
+                    docs = [" | ".join([f"{col}: {val}" for col, val in new_ids_map[b].items()]) for b in batch_ids]
+                    metas = [new_ids_map[b].astype(str).to_dict() for b in batch_ids]
+                    self.collection.upsert(documents=docs, metadatas=metas, ids=batch_ids)
+        except Exception as exc:
+            self.last_refresh_error = str(exc)
+            logger.warning(
+                "Knowledge base vector sync is not ready yet. App will continue to boot, but semantic retrieval is degraded: %s",
+                exc,
+            )
+            return False
+
+        self.last_refresh_error = ""
         return True
 
     def get_exact_context(self, entity: str, topic: str, budget: Optional[str] = None) -> str:
@@ -1568,10 +1586,11 @@ class FinancialAnalyzer:
 
 class AppStateStore:
     def __init__(self, db_path: Optional[Path] = None, asset_root: Optional[Path] = None) -> None:
-        self.db_path = Path(db_path or (PROJECT_ROOT / "app_state.db"))
-        self.asset_root = Path(asset_root or (PROJECT_ROOT / "app_assets"))
+        self.db_path = Path(db_path or APP_STATE_DB_PATH)
+        self.asset_root = Path(asset_root or APP_ASSET_ROOT)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.templates_dir = self.asset_root / "templates"
-        self.generated_dir = PROJECT_ROOT / "generated"
+        self.generated_dir = Path(GENERATED_OUTPUT_DIR)
         self.templates_dir.mkdir(parents=True, exist_ok=True)
         self.generated_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -1605,12 +1624,29 @@ class AppStateStore:
                     project_type TEXT NOT NULL,
                     timeline TEXT NOT NULL,
                     budget TEXT NOT NULL,
+                    acceptance_score INTEGER NOT NULL DEFAULT 0,
+                    acceptance_passes INTEGER NOT NULL DEFAULT 0,
+                    processing_seconds REAL NOT NULL DEFAULT 0,
+                    acceptance_json TEXT NOT NULL DEFAULT '{}',
                     filename TEXT NOT NULL,
                     filepath TEXT NOT NULL,
                     payload_json TEXT NOT NULL
                 )
                 """
             )
+            existing_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(proposal_history)").fetchall()
+            }
+            column_backfills = {
+                "acceptance_score": "INTEGER NOT NULL DEFAULT 0",
+                "acceptance_passes": "INTEGER NOT NULL DEFAULT 0",
+                "processing_seconds": "REAL NOT NULL DEFAULT 0",
+                "acceptance_json": "TEXT NOT NULL DEFAULT '{}'",
+            }
+            for column_name, ddl in column_backfills.items():
+                if column_name not in existing_columns:
+                    conn.execute(f"ALTER TABLE proposal_history ADD COLUMN {column_name} {ddl}")
             conn.commit()
 
     def _bootstrap_generated_history(self) -> None:
@@ -1636,9 +1672,10 @@ class AppStateStore:
                     """
                     INSERT INTO proposal_history(
                         id, created_at, finished_at, client, project, proposal_mode,
-                        service_type, project_type, timeline, budget, filename, filepath, payload_json
+                        service_type, project_type, timeline, budget, acceptance_score,
+                        acceptance_passes, processing_seconds, acceptance_json, filename, filepath, payload_json
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         uuid.uuid4().hex,
@@ -1651,6 +1688,10 @@ class AppStateStore:
                         "",
                         "",
                         "",
+                        0,
+                        0,
+                        0.0,
+                        "{}",
                         path.name,
                         str(path),
                         "{}",
@@ -1803,16 +1844,22 @@ class AppStateStore:
         filepath: str,
         created_at: float,
         finished_at: float,
+        acceptance_report: Optional[Dict[str, Any]] = None,
+        processing_seconds: float = 0.0,
     ) -> str:
         entry_id = uuid.uuid4().hex
+        acceptance = dict(acceptance_report or {})
+        acceptance_score = int(acceptance.get("score") or 0)
+        acceptance_passes = 1 if acceptance.get("passes") else 0
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO proposal_history(
                     id, created_at, finished_at, client, project, proposal_mode,
-                    service_type, project_type, timeline, budget, filename, filepath, payload_json
+                    service_type, project_type, timeline, budget, acceptance_score,
+                    acceptance_passes, processing_seconds, acceptance_json, filename, filepath, payload_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     entry_id,
@@ -1825,6 +1872,10 @@ class AppStateStore:
                     str(payload.get("jenis_proyek") or ""),
                     str(payload.get("estimasi_waktu") or ""),
                     str(payload.get("estimasi_biaya") or ""),
+                    acceptance_score,
+                    acceptance_passes,
+                    float(processing_seconds or 0.0),
+                    json.dumps(acceptance, ensure_ascii=False),
                     str(filename or ""),
                     str(filepath or ""),
                     json.dumps(payload or {}, ensure_ascii=False),
@@ -1845,7 +1896,8 @@ class AppStateStore:
             rows = conn.execute(
                 """
                 SELECT id, created_at, finished_at, client, project, proposal_mode,
-                       service_type, project_type, timeline, budget, filename, filepath, payload_json
+                       service_type, project_type, timeline, budget, acceptance_score,
+                       acceptance_passes, processing_seconds, acceptance_json, filename, filepath, payload_json
                 FROM proposal_history
                 ORDER BY finished_at DESC
                 LIMIT ?
@@ -1865,6 +1917,9 @@ class AppStateStore:
                     "project_type": row["project_type"],
                     "timeline": row["timeline"],
                     "budget": row["budget"],
+                    "acceptance_score": int(row["acceptance_score"] or 0),
+                    "acceptance_passes": bool(row["acceptance_passes"]),
+                    "processing_seconds": float(row["processing_seconds"] or 0.0),
                     "filename": row["filename"],
                     "filepath": filepath,
                     "exists": bool(filepath and Path(filepath).exists()),
@@ -1892,6 +1947,11 @@ class AppStateStore:
             payload = json.loads(row["payload_json"] or "{}")
         except Exception:
             payload = {}
+        acceptance_report = {}
+        try:
+            acceptance_report = json.loads(row["acceptance_json"] or "{}")
+        except Exception:
+            acceptance_report = {}
         filepath = str(row["filepath"] or "")
         return {
             "id": row["id"],
@@ -1902,6 +1962,10 @@ class AppStateStore:
             "project_type": row["project_type"],
             "timeline": row["timeline"],
             "budget": row["budget"],
+            "acceptance_score": int(row["acceptance_score"] or 0),
+            "acceptance_passes": bool(row["acceptance_passes"]),
+            "processing_seconds": float(row["processing_seconds"] or 0.0),
+            "acceptance_report": acceptance_report,
             "filename": row["filename"],
             "filepath": filepath,
             "exists": bool(filepath and Path(filepath).exists()),

@@ -1,0 +1,26 @@
+services:
+  app:
+    build: .
+    container_name: proposal-generator-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: 5500
+      PROJECT_DB_PATH: /app/projects.db
+      PROJECT_CSV_PATH: /app/db.csv
+      APP_STATE_DB_PATH: /app/state/app_state.db
+      APP_ASSET_ROOT: /app/state/app_assets
+      GENERATED_OUTPUT_DIR: /app/state/generated
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+    ports:
+      - "5500:5500"
+    volumes:
+      - ./projects.db:/app/projects.db
+      - ./db.csv:/app/db.csv:ro
+      - ./app_state.db:/app/state/app_state.db
+      - ./app_assets:/app/state/app_assets
+      - ./generated:/app/state/generated
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

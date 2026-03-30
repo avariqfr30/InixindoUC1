@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from flask import Flask, jsonify, render_template, request, send_file
 from flask_cors import CORS
+import requests
 
 try:
     from waitress import serve as waitress_serve
@@ -28,6 +29,9 @@ from .config import (
     JOB_RETENTION_SECONDS,
     MAX_ACTIVE_GENERATIONS,
     MAX_GENERATION_BACKLOG,
+    OLLAMA_HOST,
+    PROJECT_CSV_PATH,
+    PROJECT_DB_PATH,
     PROPOSAL_MODES,
     SMART_SUGGESTIONS,
 )
@@ -131,6 +135,8 @@ class GenerationQueue:
             "finished_at": finished_at,
             "processing_seconds": processing_seconds,
             "download_ready": job["status"] == "done",
+            "acceptance_score": job.get("acceptance_score"),
+            "acceptance_passes": job.get("acceptance_passes"),
         }
         if job["status"] == "failed":
             snapshot["error"] = job.get("error") or "Proses generate proposal gagal."
@@ -178,7 +184,7 @@ class GenerationQueue:
             payload = dict(job.get("payload") or {})
 
         try:
-            doc, filename = self.generator.generate_document(
+            doc, filename, generation_meta = self.generator.generate_document(
                 client=payload["nama_perusahaan"],
                 project=payload["konteks_organisasi"],
                 budget=payload["estimasi_biaya"],
@@ -194,6 +200,9 @@ class GenerationQueue:
             output = io.BytesIO()
             doc.save(output)
             result_bytes = output.getvalue()
+            finished_at = time.time()
+            acceptance_report = dict((generation_meta or {}).get("acceptance_report") or {})
+            processing_seconds = max(0.0, finished_at - float(job.get("started_at") or finished_at))
 
             with self._lock:
                 job = self._jobs.get(job_id)
@@ -205,13 +214,17 @@ class GenerationQueue:
                     filename=stored_path.name,
                     filepath=str(stored_path),
                     created_at=job.get("created_at") or time.time(),
-                    finished_at=time.time(),
+                    finished_at=finished_at,
+                    acceptance_report=acceptance_report,
+                    processing_seconds=processing_seconds,
                 )
                 job["status"] = "done"
-                job["finished_at"] = time.time()
+                job["finished_at"] = finished_at
                 job["filename"] = stored_path.name
                 job["result_bytes"] = result_bytes
                 job["history_id"] = history_id
+                job["acceptance_score"] = acceptance_report.get("score")
+                job["acceptance_passes"] = acceptance_report.get("passes")
                 job["payload"] = None
         except Exception as exc:  # keep the queue resilient during shared testing
             logger.exception("Generation job %s failed", job_id)
@@ -283,6 +296,81 @@ def _warm_request_context(data: Dict[str, Any]) -> str:
 @app.route('/')
 def home():
     return render_template('index.html')
+
+
+@app.route('/health')
+def health():
+    return jsonify({
+        "status": "ok",
+        "service": "proposal-generator",
+        "timestamp": time.time(),
+    })
+
+
+@app.route('/ready')
+def ready():
+    checks: Dict[str, Dict[str, Any]] = {}
+
+    checks["project_db"] = {
+        "ok": PROJECT_DB_PATH.exists(),
+        "path": str(PROJECT_DB_PATH),
+    }
+    checks["project_csv"] = {
+        "ok": PROJECT_CSV_PATH.exists(),
+        "path": str(PROJECT_CSV_PATH),
+    }
+    checks["knowledge_base"] = {
+        "ok": bool(
+            knowledge_base.df is not None
+            and not knowledge_base.df.empty
+            and "entity" in knowledge_base.df.columns
+            and "topic" in knowledge_base.df.columns
+            and not getattr(knowledge_base, "last_refresh_error", "")
+        ),
+        "error": getattr(knowledge_base, "last_refresh_error", ""),
+    }
+
+    app_state_ok = False
+    app_state_error = ""
+    try:
+        app_state_store.get_settings()
+        app_state_ok = (
+            app_state_store.db_path.exists()
+            and app_state_store.generated_dir.exists()
+            and app_state_store.templates_dir.exists()
+        )
+    except Exception as exc:
+        app_state_error = str(exc)
+    checks["app_state"] = {
+        "ok": app_state_ok,
+        "db_path": str(app_state_store.db_path),
+        "generated_dir": str(app_state_store.generated_dir),
+        "templates_dir": str(app_state_store.templates_dir),
+        "error": app_state_error,
+    }
+
+    ollama_ok = False
+    ollama_error = ""
+    try:
+        resp = requests.get(f"{OLLAMA_HOST.rstrip('/')}/api/version", timeout=4)
+        ollama_ok = resp.ok
+        if not resp.ok:
+            ollama_error = f"HTTP {resp.status_code}"
+    except Exception as exc:
+        ollama_error = str(exc)
+    checks["ollama"] = {
+        "ok": ollama_ok,
+        "host": OLLAMA_HOST,
+        "error": ollama_error,
+    }
+
+    ready_ok = all(item.get("ok") for item in checks.values())
+    status_code = 200 if ready_ok else 503
+    return jsonify({
+        "status": "ready" if ready_ok else "degraded",
+        "checks": checks,
+        "timestamp": time.time(),
+    }), status_code
 
 
 @app.route('/api/config')

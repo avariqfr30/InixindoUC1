@@ -9,18 +9,21 @@ PROJECT_ROOT = PACKAGE_DIR.parent
 DEMO_MODE = os.getenv("DEMO_MODE", "true").strip().lower() in {"1", "true", "yes", "on"}
 _raw_data_mode = os.getenv("DATA_ACQUISITION_MODE", "demo" if DEMO_MODE else "staged").strip().lower()
 DATA_ACQUISITION_MODE = "demo" if _raw_data_mode in {"demo", "legacy", "current"} else "staged"
-FIRM_API_URL = "https://api.perusahaan-anda.com/v1"
+FIRM_API_URL = os.getenv("FIRM_API_URL", "https://api.perusahaan-anda.com/v1").strip() or "https://api.perusahaan-anda.com/v1"
 API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "isi_token_disini_nanti")
 
 # External service configuration.
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "SERPER_API")
-OLLAMA_HOST = "http://127.0.0.1:11434"
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").strip() or "http://127.0.0.1:11434"
 
 # Model and storage config.
-LLM_MODEL = "gpt-oss:120b-cloud"
-EMBED_MODEL = "bge-m3:latest"
-PROJECT_DB_PATH = PROJECT_ROOT / "projects.db"
-PROJECT_CSV_PATH = PROJECT_ROOT / "db.csv"
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-oss:120b-cloud").strip() or "gpt-oss:120b-cloud"
+EMBED_MODEL = os.getenv("EMBED_MODEL", "bge-m3:latest").strip() or "bge-m3:latest"
+PROJECT_DB_PATH = Path(os.getenv("PROJECT_DB_PATH", str(PROJECT_ROOT / "projects.db"))).expanduser()
+PROJECT_CSV_PATH = Path(os.getenv("PROJECT_CSV_PATH", str(PROJECT_ROOT / "db.csv"))).expanduser()
+APP_STATE_DB_PATH = Path(os.getenv("APP_STATE_DB_PATH", str(PROJECT_ROOT / "app_state.db"))).expanduser()
+APP_ASSET_ROOT = Path(os.getenv("APP_ASSET_ROOT", str(PROJECT_ROOT / "app_assets"))).expanduser()
+GENERATED_OUTPUT_DIR = Path(os.getenv("GENERATED_OUTPUT_DIR", str(PROJECT_ROOT / "generated"))).expanduser()
 DB_URI = f"sqlite:///{PROJECT_DB_PATH}"
 
 # Low-level shared testing runtime.
