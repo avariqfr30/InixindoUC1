@@ -244,12 +244,20 @@ def _normalize_client_name(raw_name: str) -> str:
 def _warm_request_context(data: Dict[str, Any]) -> str:
     client_name = _normalize_client_name(str(data.get("nama_perusahaan", "")).strip())
     regulations = str(data.get("potensi_framework", "")).strip()
+    ai_context = " ".join([
+        str(data.get("konteks_organisasi", "")).strip(),
+        str(data.get("permasalahan", "")).strip(),
+        str(data.get("klasifikasi_kebutuhan", "")).strip(),
+        str(data.get("jenis_proyek", "")).strip(),
+        str(data.get("jenis_proposal", "")).strip(),
+    ]).strip()
     if not client_name:
         return "skipped"
     return proposal_generator.prefetch_research_bundle(
         base_client=client_name,
         regulations=regulations,
-        include_collaboration=proposal_generator.firm_api.uses_demo_logic()
+        include_collaboration=proposal_generator.firm_api.uses_demo_logic(),
+        ai_context=ai_context,
     )
 
 

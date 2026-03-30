@@ -825,6 +825,29 @@ class Researcher:
 
     @staticmethod
     @lru_cache(maxsize=128)
+    def get_client_ai_posture(client_name: str, ai_context: str = "") -> str:
+        current_year = datetime.now().year
+        prev_year = current_year - 1
+        context_terms = " ".join(re.findall(r"[A-Za-z]{4,}", (ai_context or "").lower())[:8])
+        query = (
+            f'"{client_name}" AI OR artificial intelligence OR generative AI OR machine learning OR automation '
+            f'OR data platform OR analytics {context_terms} {current_year} OR {prev_year}'
+        )
+        res = Researcher.search(query, limit=10, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(
+            res,
+            entity_name=client_name,
+            max_age_years=3,
+            strict_entity=False
+        )
+        return Researcher._format_evidence(
+            filtered[:4],
+            label="OSINT_AI",
+            fallback=f"Data publik terkait AI posture {client_name} terbatas; perlakukan kesiapan adopsi sebagai area validasi awal, bukan fakta yang diasumsikan."
+        )
+
+    @staticmethod
+    @lru_cache(maxsize=128)
     def get_client_writer_collaboration(client_name: str, writer_firm_name: str = WRITER_FIRM_NAME) -> str:
         current_year = datetime.now().year
         strict_writer = Researcher._normalize_text(writer_firm_name) == Researcher._normalize_text(WRITER_FIRM_NAME)
@@ -888,6 +911,96 @@ class FinancialAnalyzer:
         "transformation": 85_000_000,
         "implementation": 95_000_000,
     }
+
+    @staticmethod
+    def _has_signal(text: str, candidate: str) -> bool:
+        value = re.sub(r"\s+", " ", str(candidate or "").strip().lower())
+        if not value:
+            return False
+        pattern = re.escape(value)
+        if " " not in value and value.isalpha():
+            pattern = rf"\b{pattern}\b"
+        return bool(re.search(pattern, (text or "").lower()))
+
+    @classmethod
+    def _ai_scope_summary(cls, *values: Any) -> Dict[str, Any]:
+        combined = re.sub(r"\s+", " ", " ".join(str(value or "") for value in values)).strip().lower()
+        strong_hits = [
+            token for token in (SPIRIT_OF_AI_RULES.get("strong_trigger_keywords") or [])
+            if cls._has_signal(combined, token)
+        ]
+        support_hits = [
+            token for token in (SPIRIT_OF_AI_RULES.get("supporting_signals") or [])
+            if token not in strong_hits and cls._has_signal(combined, token)
+        ]
+        enabled = bool(strong_hits) or len(support_hits) >= 2
+        return {
+            "enabled": enabled,
+            "strong_hits": strong_hits[:8],
+            "support_hits": support_hits[:10],
+        }
+
+    @classmethod
+    def _ai_pricing_profile(
+        cls,
+        project_goal: str,
+        objective: str,
+        notes: str,
+        frameworks: str,
+    ) -> Dict[str, Any]:
+        combined = " ".join([project_goal or "", objective or "", notes or "", frameworks or ""]).lower()
+        ai_scope = cls._ai_scope_summary(project_goal, objective, notes, frameworks)
+        if not ai_scope["enabled"]:
+            return {
+                "enabled": False,
+                "level": "terkendali",
+                "multiplier": 1.0,
+                "drivers": [],
+                "driver_labels": [],
+            }
+
+        driver_config = SPIRIT_OF_AI_RULES.get("pricing_driver_terms") or {}
+        driver_labels = {
+            "data_readiness": "kesiapan data/model",
+            "model_uncertainty": "validasi solusi/model",
+            "architecture_constraints": "kendala arsitektur dan keamanan",
+            "governance_overhead": "governance dan compliance",
+            "change_enablement": "enablement dan adopsi organisasi",
+        }
+        driver_weights = {
+            "data_readiness": 0.10,
+            "model_uncertainty": 0.10,
+            "architecture_constraints": 0.08,
+            "governance_overhead": 0.10,
+            "change_enablement": 0.09,
+        }
+
+        multiplier = 1.0
+        active_drivers: List[str] = []
+        for driver, terms in driver_config.items():
+            if any(cls._has_signal(combined, term) for term in (terms or [])):
+                multiplier += driver_weights.get(driver, 0.06)
+                active_drivers.append(driver)
+
+        if not active_drivers:
+            active_drivers = ["data_readiness", "governance_overhead", "change_enablement"]
+            multiplier += 0.16
+
+        multiplier = max(1.0, min(1.8, multiplier))
+        if multiplier >= 1.45:
+            level = "tinggi"
+        elif multiplier >= 1.18:
+            level = "menengah"
+        else:
+            level = "terkendali"
+
+        return {
+            "enabled": True,
+            "level": level,
+            "multiplier": multiplier,
+            "drivers": active_drivers,
+            "driver_labels": [driver_labels.get(driver, driver) for driver in active_drivers],
+        }
 
     @staticmethod
     def _format_idr(amount: int) -> str:
@@ -1052,6 +1165,11 @@ class FinancialAnalyzer:
         if framework_tokens:
             multiplier += min(0.12, max(0, len(framework_tokens) - 1) * 0.03)
 
+        ai_profile = cls._ai_pricing_profile(project_goal, objective, notes, frameworks)
+        if ai_profile["enabled"]:
+            multiplier *= ai_profile["multiplier"]
+            signal_count += len(ai_profile["drivers"])
+
         multiplier = max(0.9, min(1.9, multiplier))
         if multiplier >= 1.45:
             level = "tinggi"
@@ -1116,17 +1234,21 @@ class FinancialAnalyzer:
             "training dan konsultan": 1.12,
         }.get(service_key, 1.0)
         complexity_profile = cls._complexity_profile(project_goal, objective, notes, frameworks)
+        ai_pricing = cls._ai_pricing_profile(project_goal, objective, notes, frameworks)
 
         breadth_inputs = [objective, notes, project_goal, frameworks]
         active_dimensions = sum(1 for item in breadth_inputs if str(item or "").strip())
         breadth_multiplier = 1.0 + min(0.18, max(0, active_dimensions - 2) * 0.04)
 
         effort_base = monthly_rate * months * service_multiplier * complexity_profile["multiplier"] * breadth_multiplier
+        if ai_pricing["enabled"]:
+            effort_base *= max(1.0, ai_pricing["multiplier"] * 0.92)
         effort_base = int(max(120_000_000, min(9_000_000_000, effort_base)))
         return {
             "months": months,
             "monthly_rate": int(monthly_rate),
             "complexity": complexity_profile,
+            "ai_pricing": ai_pricing,
             "breadth_multiplier": breadth_multiplier,
             "effort_base": effort_base,
         }
@@ -1226,7 +1348,32 @@ class FinancialAnalyzer:
         months = effort_profile["months"]
         duration_note = f"{months:.1f} bulan" if months else "durasi belum spesifik"
         complexity_level = effort_profile["complexity"]["level"]
-        if finance_median:
+        ai_pricing = effort_profile.get("ai_pricing", {}) or {}
+        if ai_pricing.get("enabled"):
+            driver_labels = list(ai_pricing.get("driver_labels", []) or [
+                "kesiapan data/model",
+                "governance",
+                "adopsi organisasi",
+            ])
+            aliases = {
+                "governance dan compliance": "governance",
+                "governance": "governance",
+                "kesiapan data/model": "kesiapan data/model",
+                "adopsi organisasi": "adopsi organisasi",
+            }
+            normalized_labels = {aliases.get(label, label) for label in driver_labels}
+            for default_label in ["kesiapan data/model", "governance", "adopsi organisasi"]:
+                if len(driver_labels) >= 3:
+                    break
+                if default_label not in normalized_labels:
+                    driver_labels.append(default_label)
+                    normalized_labels.add(default_label)
+            analysis = (
+                f"Estimasi untuk {client_name} terutama dihitung dari effort delivery proyek "
+                f"({duration_note}, kompleksitas {complexity_level}) dengan penekanan pada "
+                f"{', '.join(driver_labels[:3])}, lalu hanya dikalibrasi ringan menggunakan benchmark dan sinyal publik yang tersedia."
+            )
+        elif finance_median:
             analysis = (
                 f"Estimasi untuk {client_name} terutama dihitung dari effort delivery proyek "
                 f"({duration_note}, kompleksitas {complexity_level}) dan hanya dikalibrasi ringan "
@@ -1303,6 +1450,7 @@ class FinancialAnalyzer:
         pricing_mode: str = "demo",
     ) -> Dict[str, Any]:
         year = datetime.now().year
+        ai_scope = self._ai_scope_summary(project_goal, objective, notes, frameworks, project_type, service_type)
         finance_results = Researcher.search(
             f'"{client_name}" laporan keuangan OR pendapatan OR pendanaan OR aset {year-2} OR {year-1} OR {year}',
             limit=10,
@@ -1317,9 +1465,10 @@ class FinancialAnalyzer:
         keyword_context = self._compact_keywords(
             f"{objective} {notes} {project_goal} {frameworks} {project_type} {service_type}"
         )
+        ai_benchmark_hint = "adopsi AI governance pilot rollout readiness" if ai_scope["enabled"] else ""
         benchmark_query = (
             f'estimasi biaya proyek {project_type or "IT"} {service_type} {timeline} '
-            f'Indonesia {keyword_context}'
+            f'Indonesia {keyword_context} {ai_benchmark_hint}'
         )
         benchmark_results = Researcher.search(benchmark_query, limit=10, recency_bucket="year")
         benchmark_snippets = [
@@ -1372,6 +1521,7 @@ class FinancialAnalyzer:
         PRIORITAS PENENTUAN HARGA:
         1. Durasi/length proyek
         2. Tingkat kesulitan, kompleksitas integrasi, regulasi, dan perubahan
+        2a. Jika konteks proyek terkait AI/adopsi AI, perhitungkan pula kesiapan data/model, governance, arsitektur, dan change enablement
         3. Jenis proyek dan jenis layanan
         4. Benchmark OSINT
         5. Sinyal finansial publik klien hanya sebagai kalibrasi, bukan faktor dominan

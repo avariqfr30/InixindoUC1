@@ -33,7 +33,7 @@ class ProposalSupportMixin:
         return dict(normalized)
 
     @staticmethod
-    def _fallback_research_bundle(base_client: str, include_collaboration: bool) -> Dict[str, str]:
+    def _fallback_research_bundle(base_client: str, include_collaboration: bool, ai_mode: bool = False) -> Dict[str, str]:
         return {
             "profile": f"Data profil terbaru {base_client} terbatas (sumber daring, n.d.).",
             "news": f"Data berita terbaru {base_client} terbatas (sumber daring, n.d.).",
@@ -42,7 +42,11 @@ class ProposalSupportMixin:
                 f"Data histori kolaborasi {WRITER_FIRM_NAME} dengan {base_client} terbatas (sumber daring, n.d.)."
                 if include_collaboration else ""
             ),
-            "regulations": "Data regulasi terbatas (sumber daring, n.d.)."
+            "regulations": "Data regulasi terbatas (sumber daring, n.d.).",
+            "ai_posture": (
+                f"Data publik tentang kesiapan atau inisiatif AI {base_client} terbatas; perlakukan detail kesiapan sebagai kebutuhan validasi awal (sumber daring, n.d.)."
+                if ai_mode else ""
+            ),
         }
 
     def _throughput_mode(self) -> bool:
@@ -149,6 +153,193 @@ class ProposalSupportMixin:
     def _anchor_required_chapters() -> Set[str]:
         return {"c_1", "c_2", "c_3"}
 
+    @staticmethod
+    def _text_has_signal(text: str, candidate: str) -> bool:
+        value = re.sub(r"\s+", " ", str(candidate or "").strip().lower())
+        if not value:
+            return False
+        pattern = re.escape(value)
+        if " " not in value and value.isalpha():
+            pattern = rf"\b{pattern}\b"
+        return bool(re.search(pattern, (text or "").lower()))
+
+    @classmethod
+    def _ai_scope_signal_summary(cls, *values: Any) -> Dict[str, Any]:
+        combined = re.sub(r"\s+", " ", " ".join(str(value or "") for value in values)).strip().lower()
+        strong_hits = [
+            token for token in (SPIRIT_OF_AI_RULES.get("strong_trigger_keywords") or [])
+            if cls._text_has_signal(combined, token)
+        ]
+        supporting_hits = [
+            token for token in (SPIRIT_OF_AI_RULES.get("supporting_signals") or [])
+            if token not in strong_hits and cls._text_has_signal(combined, token)
+        ]
+        enabled = bool(strong_hits) or len(supporting_hits) >= 2
+        return {
+            "enabled": enabled,
+            "strong_hits": strong_hits[:8],
+            "supporting_hits": supporting_hits[:10],
+        }
+
+    @staticmethod
+    def _ai_chapter_dimensions(chapter_id: str) -> List[str]:
+        chapter_map = SPIRIT_OF_AI_RULES.get("chapter_dimension_map") or {}
+        return [str(item).strip() for item in (chapter_map.get(chapter_id) or []) if str(item).strip()]
+
+    @staticmethod
+    def _ai_dimension_terms(dimension_id: str) -> List[str]:
+        dimension_terms = SPIRIT_OF_AI_RULES.get("dimension_terms") or {}
+        return [str(item).strip() for item in (dimension_terms.get(dimension_id) or []) if str(item).strip()]
+
+    @classmethod
+    def _chapter_ai_terms(cls, chapter_id: str) -> List[str]:
+        terms: List[str] = []
+        seen: Set[str] = set()
+        for dimension_id in cls._ai_chapter_dimensions(chapter_id):
+            for term in cls._ai_dimension_terms(dimension_id):
+                key = term.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                terms.append(term)
+        return terms
+
+    @classmethod
+    def _build_ai_adoption_profile(
+        cls,
+        client: str,
+        project: str,
+        project_goal: str,
+        project_type: str,
+        timeline: str,
+        notes: str,
+        regulations: str,
+        research_bundle: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        research_bundle = research_bundle or {}
+        ai_posture = str(research_bundle.get("ai_posture") or "").strip()
+        signals = cls._ai_scope_signal_summary(project, project_goal, notes, regulations, ai_posture, project_type)
+        if not signals["enabled"]:
+            return {
+                "enabled": False,
+                "summary": "",
+                "business_case": "",
+                "data_foundation": "",
+                "architecture_posture": "",
+                "people_capability": "",
+                "governance_posture": "",
+                "culture_change": "",
+                "delivery_guidance": [],
+                "chapter_guidance": {},
+                "quality_terms": [],
+                "debug_terms": [],
+            }
+
+        objective_note = cls._summarize_phrase(
+            project or project_goal,
+            f"use case prioritas {client}",
+            max_words=18
+        )
+        risk_note = cls._summarize_phrase(
+            notes,
+            "risiko implementasi dan adopsi yang masih perlu dikendalikan",
+            max_words=18
+        )
+        regulatory_text = " ".join([regulations or "", ai_posture]).lower()
+        if any(token in regulatory_text for token in ["on-prem", "on prem", "hybrid", "pdp", "pojk", "regulasi", "compliance", "bank", "audit"]):
+            architecture_posture = (
+                "Arsitektur perlu dirancang aman, scalable, dan tetap feasible terhadap integrasi, "
+                "latency, serta kemungkinan kebutuhan hybrid atau kontrol lingkungan yang lebih ketat."
+            )
+        elif any(token in regulatory_text for token in ["cloud", "aws", "azure", "gcp", "saas"]):
+            architecture_posture = (
+                "Arsitektur dapat diarahkan ke pola cloud-based yang aman dan scalable, selama kontrol integrasi, "
+                "akses, dan observability tetap dijaga sejak awal."
+            )
+        else:
+            architecture_posture = (
+                "Arsitektur perlu ditetapkan dari kebutuhan integrasi, keamanan, skala, dan ritme rollout, "
+                "bukan dari pilihan teknologi semata."
+            )
+
+        data_foundation = (
+            "Kesiapan data dan model perlu dibuktikan lebih dulu melalui validasi ketersediaan data, "
+            "kualitas, ownership, dan mekanisme evaluasi model sebelum solusi diperluas."
+        )
+        if any(token in " ".join([project, notes, regulations]).lower() for token in ["rag", "knowledge", "analytics", "data", "model", "prediction", "forecast", "vision"]):
+            data_foundation = (
+                "Kesiapan data, kualitas sumber informasi, ownership, dan mekanisme validasi model harus dipetakan "
+                "agar use case dapat berjalan stabil dan tidak berhenti di tahap proof-of-concept."
+            )
+
+        people_capability = (
+            "Perlu kombinasi business owner, business translator, AI/engineering lead, governance reviewer, "
+            "dan enablement pengguna agar solusi tidak berhenti pada build teknis."
+        )
+        if any(token in " ".join([project, notes, project_goal]).lower() for token in ["training", "adoption", "change", "user", "operational"]):
+            people_capability = (
+                "Kapabilitas tim perlu mencakup peran bisnis, engineering, governance, dan change enablement, "
+                "karena adopsi AI sangat bergantung pada kesiapan cara kerja pengguna akhir."
+            )
+
+        governance_posture = (
+            "Governance harus mencakup SOP penggunaan, approval, risk control, quality gate, "
+            "dan mekanisme evaluasi untuk bias, hallucination, atau keputusan yang perlu human oversight."
+        )
+        culture_change = (
+            "Adopsi AI perlu diperlakukan sebagai perubahan cara kerja: dimulai bertahap, "
+            "punya ruang belajar, dan disertai mekanisme adopsi yang jelas agar organisasi tidak berhenti pada eksperimen."
+        )
+        business_case = (
+            f"Use case ini perlu selalu diikat ke hasil bisnis yang ingin dicapai {client}, yaitu {objective_note.lower()}, "
+            f"sementara tekanan utamanya berada pada {risk_note.lower()}."
+        )
+
+        delivery_guidance = [
+            "Mulai dari validasi use case dan readiness, bukan langsung build solusi penuh.",
+            "Gunakan tahapan pilot, kontrol kualitas, dan keputusan go/no-go yang eksplisit sebelum scale-up.",
+            "Pastikan setiap fase menghubungkan business value, kesiapan data/model, dan kontrol risiko.",
+            "Siapkan enablement pengguna dan perubahan cara kerja sebagai bagian dari delivery, bukan pekerjaan tambahan di akhir.",
+        ]
+
+        chapter_guidance = {
+            "c_1": "Tegaskan mengapa use case AI ini penting secara bisnis dan kenapa sekarang relevan untuk diputuskan.",
+            "c_2": "Jelaskan gap current state vs target state, termasuk gap kesiapan data, kontrol, atau operating model bila relevan.",
+            "c_3": "Tunjukkan apakah kebutuhan ini menuntut intervensi adopsi AI yang lebih bertahap, terkontrol, atau segera.",
+            "c_4": "Arahkan pendekatan ke responsible adoption: feasible, aman, sesuai regulasi, dan tidak solution-first.",
+            "c_5": "Metodologi perlu mencakup readiness, validasi, pilot, rollout, dan learning loop.",
+            "c_6": "Solution design harus terasa feasible untuk dioperasikan, dimonitor, dan diadopsi pengguna.",
+            "c_7": "Timeline harus menunjukkan dependency readiness, pilot, rollout, dan stabilisasi adopsi.",
+            "c_8": "Governance perlu memuat stop/go criteria, approval, monitoring, dan accountability.",
+            "c_9": "Struktur tim harus menutup gap bisnis, engineering, governance, dan change enablement.",
+            "c_10": "Commercial model perlu mencerminkan effort readiness, control, pilot, dan adoption support.",
+        }
+
+        quality_terms = cls._semantic_terms(
+            [business_case, data_foundation, architecture_posture, people_capability, governance_posture, culture_change] +
+            (signals["strong_hits"] or []) + (signals["supporting_hits"] or []),
+            max_terms=24
+        )
+        summary = (
+            "Untuk proposal ini, narasi AI harus terasa dimulai dari use case bisnis, lalu dijaga oleh kesiapan data/model, "
+            "arsitektur yang feasible, kapabilitas tim, governance yang bertanggung jawab, dan adopsi perubahan yang realistis."
+        )
+
+        return {
+            "enabled": True,
+            "summary": summary,
+            "business_case": business_case,
+            "data_foundation": data_foundation,
+            "architecture_posture": architecture_posture,
+            "people_capability": people_capability,
+            "governance_posture": governance_posture,
+            "culture_change": culture_change,
+            "delivery_guidance": delivery_guidance,
+            "chapter_guidance": chapter_guidance,
+            "quality_terms": quality_terms,
+            "debug_terms": signals["strong_hits"] + signals["supporting_hits"],
+        }
+
     @classmethod
     def _build_kpi_blueprint(
         cls,
@@ -202,12 +393,23 @@ class ProposalSupportMixin:
         client: str,
         project: str,
         project_goal: str,
+        project_type: str,
         timeline: str,
         notes: str,
         regulations: str,
         research_bundle: Dict[str, str],
         relationship_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
+        ai_profile = cls._build_ai_adoption_profile(
+            client=client,
+            project=project,
+            project_goal=project_goal,
+            project_type=project_type,
+            timeline=timeline,
+            notes=notes,
+            regulations=regulations,
+            research_bundle=research_bundle,
+        )
         industry = cls._infer_industry(client, project, notes, regulations)
         track_record = research_bundle.get("track_record", "")
         collaboration = research_bundle.get("collaboration", "")
@@ -257,7 +459,8 @@ class ProposalSupportMixin:
         initiative_terms = cls._semantic_terms([project, notes, project_goal], max_terms=8)
         merged_terms: List[str] = []
         seen_terms: Set[str] = set()
-        for term in terminology + initiative_terms:
+        ai_terms = ai_profile.get("quality_terms", []) or []
+        for term in terminology + initiative_terms + ai_terms:
             normalized = str(term or "").strip()
             if not normalized:
                 continue
@@ -272,6 +475,8 @@ class ProposalSupportMixin:
             f"Fokus inisiatif: {project}. "
             f"Model hubungan: {'kelanjutan kolaborasi' if relationship_mode == 'existing' else 'inisiasi kemitraan baru'}."
         )
+        if ai_profile.get("enabled"):
+            profile_summary += f" Konteks proposal juga menuntut pola adopsi AI yang lebih terstruktur: {ai_profile.get('summary', '')}"
 
         return {
             "industry": industry,
@@ -285,6 +490,8 @@ class ProposalSupportMixin:
             "anchor_citations": [item.get("citation", "") for item in initiative_facts if item.get("citation")],
             "anchor_keywords": cls._extract_anchor_keywords(initiative_facts),
             "profile_summary": profile_summary,
+            "ai_mode": bool(ai_profile.get("enabled")),
+            "ai_adoption_profile": ai_profile,
         }
 
     @staticmethod
@@ -317,6 +524,7 @@ class ProposalSupportMixin:
         personalization_pack: Dict[str, Any],
     ) -> Dict[str, Any]:
         industry = personalization_pack.get("industry", "Lintas Industri")
+        ai_profile = personalization_pack.get("ai_adoption_profile", {}) or {}
         playbook = cls._playbook_for_project(project_type)
         kpis = personalization_pack.get("kpi_blueprint", []) or []
         drivers = cls._industry_value_drivers(industry)
@@ -346,6 +554,29 @@ class ProposalSupportMixin:
         capability = str(playbook.get("capability") or "advisory dan delivery management").strip()
         client_gains = playbook.get("client_gains", []) or []
         client_gains = [str(item).strip() for item in client_gains if str(item).strip()]
+        ai_mode = bool(ai_profile.get("enabled"))
+        if ai_mode:
+            capability = (
+                "advisory adopsi AI, delivery governance, readiness validation, dan rollout terkontrol"
+            )
+            value_hook = (
+                "menghubungkan use case AI dengan hasil bisnis yang terukur sambil menjaga kesiapan data, kontrol risiko, dan adopsi organisasi"
+            )
+            ai_gains = [
+                "keputusan use case yang lebih defensible",
+                "rollout AI yang lebih terkontrol",
+                "adopsi pengguna yang lebih siap",
+            ]
+            merged_gains: List[str] = []
+            seen_gains: Set[str] = set()
+            for item in ai_gains + client_gains:
+                normalized = str(item or "").strip()
+                key = normalized.lower()
+                if not normalized or key in seen_gains:
+                    continue
+                seen_gains.add(key)
+                merged_gains.append(normalized)
+            client_gains = merged_gains
         value_statement = (
             f"{WRITER_FIRM_NAME} menempatkan engagement {client} sebagai upaya untuk {value_hook}, "
             f"dengan memanfaatkan kapabilitas {capability} agar inisiatif {project_frame.lower()} "
@@ -356,6 +587,15 @@ class ProposalSupportMixin:
             f"{drivers[1] if len(drivers) > 1 else 'kontrol delivery'}, dan kemampuan "
             f"{WRITER_FIRM_NAME} untuk menjaga keputusan tetap selaras dengan eksekusi."
         )
+        if ai_mode:
+            value_statement = (
+                f"{WRITER_FIRM_NAME} menempatkan engagement {client} sebagai upaya untuk memastikan inisiatif {project_frame.lower()} "
+                f"bergerak dari use case AI yang menjanjikan menjadi program adopsi yang lebih terukur, feasible, dan bertanggung jawab dalam horizon {timeline or 'proyek'}."
+            )
+            win_theme = (
+                f"Nilai utama yang harus terasa bagi {client} adalah kejelasan use case bisnis, kesiapan data dan delivery, "
+                f"kontrol governance yang memadai, serta kemampuan {WRITER_FIRM_NAME} menjaga rollout tetap realistis dan mudah diadopsi organisasi."
+            )
         human_touch_points = COMPANY_DNA.get("human_touch_review_points", []) or []
         return {
             "positioning": COMPANY_DNA.get("positioning", ""),
@@ -376,6 +616,9 @@ class ProposalSupportMixin:
                 "Target draft adalah sekitar 80% siap pakai; sisakan ruang bagi reviewer manusia untuk "
                 "menyempurnakan nuansa relasi, komersial, dan keputusan akhir."
             ),
+            "ai_mode": ai_mode,
+            "ai_summary": ai_profile.get("summary", ""),
+            "ai_governance_posture": ai_profile.get("governance_posture", ""),
             "service_type": service_type,
             "project_type": project_type,
             "project_goal": project_goal,
@@ -398,6 +641,7 @@ class ProposalSupportMixin:
             f"Proof Points: {', '.join(data.get('proof_points', []) or []) or '-'}",
             f"KPI Bridge: {' | '.join(data.get('kpi_bridge', []) or []) or '-'}",
             f"Human Review: {', '.join(data.get('human_touch_points', []) or []) or '-'}",
+            f"AI Summary: {data.get('ai_summary', '-')}",
             f"Review Note: {data.get('review_note', '-')}",
         ]
         return "\n".join(lines)
@@ -482,6 +726,47 @@ class ProposalSupportMixin:
 
     def _use_structured_chapter(self, chapter_id: str) -> bool:
         return chapter_id in self._structured_chapter_ids()
+
+    def _tighten_structured_chapter(
+        self,
+        chapter: Dict[str, Any],
+        content: str,
+        target_words: int
+    ) -> str:
+        text = (content or "").strip()
+        if not text or self._word_count(text) <= target_words:
+            return text
+
+        lines = text.splitlines()
+        protected_contact_tokens = ("Alamat kantor:", "Email:", "Telp:", "Website:")
+
+        def current_text() -> str:
+            return "\n".join(lines).strip()
+
+        for idx in range(len(lines) - 1, -1, -1):
+            line = lines[idx].strip()
+            if not line.startswith("- "):
+                continue
+            if any(token in line for token in protected_contact_tokens):
+                continue
+            lines.pop(idx)
+            if self._word_count(current_text()) <= target_words:
+                return current_text()
+
+        for idx in range(len(lines) - 1, -1, -1):
+            line = lines[idx].strip()
+            if not line or line.startswith("## ") or line.startswith("|") or line.startswith("[[GANTT:"):
+                continue
+            if re.match(r"^\d+\.\s+", line):
+                continue
+            sentences = re.split(r"(?<=[.!?])\s+", line)
+            if len(sentences) < 3:
+                continue
+            lines[idx] = " ".join(sentences[:2]).strip()
+            if self._word_count(current_text()) <= target_words:
+                return current_text()
+
+        return current_text()
 
     @staticmethod
     def _split_plain_points(raw_text: str, max_items: int = 5) -> List[str]:
@@ -596,6 +881,62 @@ class ProposalSupportMixin:
         return plan
 
     @staticmethod
+    def _build_ai_phase_plan(timeline: str) -> List[Dict[str, str]]:
+        months = FinancialAnalyzer._duration_to_months(timeline)
+        total_months = max(3, int(round(months or 6)))
+        blueprint: List[Tuple[str, str, str, int]] = [
+            (
+                "Use Case & Readiness",
+                "Validasi use case bisnis, sponsor, baseline data, dan asumsi awal adopsi.",
+                "use case charter, readiness checklist, dan baseline risiko",
+                1,
+            ),
+            (
+                "Data & Control Preparation",
+                "Siapkan dependensi data, arsitektur, governance, dan kontrol kualitas solusi.",
+                "data/control preparation pack dan decision log",
+                1,
+            ),
+            (
+                "Pilot & Validation",
+                "Uji solusi pada lingkup terkendali, ukur hasil, dan validasi go/no-go.",
+                "pilot result, validation findings, dan rekomendasi rollout",
+                2,
+            ),
+            (
+                "Controlled Rollout & Adoption",
+                "Lakukan rollout bertahap, enablement pengguna, dan stabilisasi hasil di operasi.",
+                "rollout deliverables, adoption pack, dan stabilization report",
+                2,
+            ),
+        ]
+
+        total_weight = sum(item[3] for item in blueprint) or 1
+        remaining = total_months
+        cursor = 0
+        plan: List[Dict[str, str]] = []
+        for idx, (phase, activity, deliverable, weight) in enumerate(blueprint):
+            phases_left = len(blueprint) - idx
+            allocated = max(1, round(total_months * weight / total_weight))
+            allocated = min(allocated, remaining - (phases_left - 1))
+            start = cursor
+            end = min(total_months, start + allocated)
+            if idx == len(blueprint) - 1:
+                end = total_months
+            label = f"Bulan {start + 1}" if end - start <= 1 else f"Bulan {start + 1}-{end}"
+            plan.append({
+                "phase": phase,
+                "activity": activity,
+                "deliverable": deliverable,
+                "start": str(start),
+                "end": str(end),
+                "period": label,
+            })
+            cursor = end
+            remaining = max(0, total_months - cursor)
+        return plan
+
+    @staticmethod
     def _build_payment_plan(project_type: str, budget: str) -> List[Tuple[str, str]]:
         presets: Dict[str, List[Tuple[str, str]]] = {
             "diagnostic": [
@@ -623,6 +964,15 @@ class ProposalSupportMixin:
         }
         return presets.get((project_type or "").strip().lower(), presets["implementation"])
 
+    @staticmethod
+    def _build_ai_payment_plan() -> List[Tuple[str, str]]:
+        return [
+            ("Readiness & scoping sign-off", "20%"),
+            ("Control/data preparation milestone", "25%"),
+            ("Pilot validation milestone", "30%"),
+            ("Controlled rollout & adoption closure", "25%"),
+        ]
+
     def _render_structured_chapter(
         self,
         chapter: Dict[str, Any],
@@ -642,6 +992,8 @@ class ProposalSupportMixin:
     ) -> str:
         year = datetime.now().year
         value_map = value_map or {}
+        ai_profile = personalization_pack.get("ai_adoption_profile", {}) or {}
+        ai_mode = bool(ai_profile.get("enabled"))
         terminology = personalization_pack.get("terminology", []) or []
         kpi_blueprint = personalization_pack.get("kpi_blueprint", []) or []
         term_line = ", ".join(terminology[:3]) if terminology else "governance, delivery, risk control"
@@ -674,11 +1026,31 @@ class ProposalSupportMixin:
         team_points = self._split_plain_points(firm_data.get("team", ""), max_items=5)
         team_summary = ", ".join(team_points) if team_points else "tim delivery inti, quality reviewer, dan subject-matter support"
         commercial_summary = self._summarize_phrase(firm_data.get("commercial", ""), "mekanisme komersial mengikuti baseline internal")
-        payment_plan = self._build_payment_plan(project_type, budget)
-        phase_plan = self._build_phase_plan(project_type, timeline)
+        payment_plan = self._build_ai_payment_plan() if ai_mode else self._build_payment_plan(project_type, budget)
+        phase_plan = self._build_ai_phase_plan(timeline) if ai_mode else self._build_phase_plan(project_type, timeline)
         gantt_points = "; ".join(
             f"{item['phase']},{item['start']},{item['end']}"
             for item in phase_plan
+        )
+        ai_bridge = self._summarize_phrase(
+            ai_profile.get("summary", ""),
+            "inisiatif perlu terasa berangkat dari use case bisnis, lalu dijaga oleh readiness, governance, dan adoption",
+            max_words=28,
+        )
+        ai_governance = self._summarize_phrase(
+            ai_profile.get("governance_posture", ""),
+            "kontrol penggunaan, quality gate, dan mekanisme evaluasi yang bertanggung jawab",
+            max_words=24,
+        )
+        ai_people = self._summarize_phrase(
+            ai_profile.get("people_capability", ""),
+            "kombinasi peran bisnis, engineering, governance, dan change enablement",
+            max_words=22,
+        )
+        ai_change = self._summarize_phrase(
+            ai_profile.get("culture_change", ""),
+            "adopsi bertahap yang tetap mengubah cara kerja secara realistis",
+            max_words=22,
         )
 
         if chapter["id"] == "c_7":
@@ -689,6 +1061,14 @@ class ProposalSupportMixin:
             numbered = "\n".join(
                 f"{idx}. **{item['phase']}** ({item['period']}): {item['activity']} Output utama: {item['deliverable']}."
                 for idx, item in enumerate(phase_plan, start=1)
+            )
+            ai_timeline_note = (
+                f"- Untuk konteks AI/adopsi, fase kerja juga harus menjaga {ai_bridge.lower()}.\n"
+                if ai_mode else ""
+            )
+            ai_timeline_tail = (
+                "\n- Khusus konteks AI, checkpoint fase perlu menegaskan readiness, hasil validasi, dan kesiapan adopsi sebelum solusi diperluas."
+                if ai_mode else ""
             )
             return (
                 f"Untuk {client}, timeline pekerjaan disusun agar inisiatif {short_project} dapat bergerak stabil selama {timeline}. "
@@ -701,6 +1081,7 @@ class ProposalSupportMixin:
                 f"- Risiko yang dipantau sejak awal mencakup {short_notes.lower()}, kesiapan data, dan kecepatan keputusan sponsor.\n"
                 f"- Baseline metode kerja yang dipakai mengacu pada {standard_method}.\n"
                 f"- Ritme eksekusi juga menjaga kesinambungan terhadap istilah kerja {term_line}, sehingga koordinasi antar-tim tidak kehilangan bahasa operasional yang sama.\n"
+                f"{ai_timeline_note}"
                 f"[[GANTT: Jadwal Pelaksanaan | Bulan | {gantt_points}]]\n\n"
                 "## 7.2 Waktu Pelaksanaan dan Deliverable Tiap Fase\n"
                 f"Pengaturan waktu tidak hanya membagi durasi, tetapi memastikan setiap deliverable langsung mendukung kebutuhan {short_goal.lower()} "
@@ -716,9 +1097,14 @@ class ProposalSupportMixin:
                 "- Pergeseran jadwal hanya dilakukan melalui change control formal dan keputusan bersama sponsor proyek.\n"
                 f"- Deliverable pada akhir fase menjadi dasar transisi ke fase berikutnya, sehingga tidak ada aktivitas {client} yang berjalan tanpa acceptance yang terukur.\n"
                 f"- Setiap fase juga memuat checkpoint kesiapan stakeholder, kualitas data, dan keputusan operasional agar implementasi tetap feasible bagi lingkungan kerja {client}."
+                f"{ai_timeline_tail}"
             )
 
         if chapter["id"] == "c_8":
+            ai_governance_note = (
+                f"\n- Untuk konteks AI, mekanisme kontrol juga harus mencakup {ai_governance.lower()}, sehingga keputusan scale-up selalu memiliki dasar yang dapat dipertanggungjawabkan."
+                if ai_mode else ""
+            )
             return (
                 f"Tata kelola proyek untuk {client} dirancang agar keputusan strategis, kontrol eksekusi, dan penanganan risiko berjalan dalam satu sistem kerja yang konsisten. "
                 f"Fokusnya adalah menjaga {short_project.lower()} tetap selaras dengan KPI seperti {kpi_line}, sambil memakai istilah operasional {term_line} "
@@ -746,13 +1132,23 @@ class ProposalSupportMixin:
                 "- Jika ada deviasi, tim proyek melakukan recovery plan yang dibahas terbuka pada forum tata kelola terdekat.\n"
                 f"- Paket kontrol ini menjaga supaya keputusan tentang perubahan, prioritas ulang, atau percepatan kerja tetap transparan bagi sponsor dan tim inti {client}.\n"
                 f"- Dengan disiplin kontrol tersebut, governance berfungsi sebagai alat eksekusi nyata, bukan sekadar formalitas rapat proyek."
+                f"{ai_governance_note}"
             )
 
         if chapter["id"] == "c_9":
-            numbered_lines = [
-                "1. **Engagement Lead / Partner** memastikan arah kemitraan, kualitas narasi eksekutif, dan penyelesaian isu kritis.",
-                "2. **Project or Program Manager** mengendalikan ritme delivery, milestone, dependency, dan komunikasi lintas pihak.",
-            ]
+            if ai_mode:
+                numbered_lines = [
+                    "1. **Engagement Lead / Partner** memastikan arah kemitraan, kualitas narasi eksekutif, dan keputusan sponsor tetap selaras dengan tujuan bisnis.",
+                    "2. **Business Translator / Domain Lead** menjembatani kebutuhan sponsor, use case prioritas, dan kebutuhan operasional pengguna.",
+                    "3. **AI / Solution Engineering Lead** mengawal desain solusi, integrasi, dan kualitas implementasi agar tetap feasible.",
+                    "4. **Governance & Risk Reviewer** menjaga kontrol penggunaan, quality gate, dan kelayakan rollout sebelum solusi diperluas.",
+                    "5. **Change / Enablement Lead** mengawal kesiapan pengguna, perubahan cara kerja, dan adopsi hasil di lapangan.",
+                ]
+            else:
+                numbered_lines = [
+                    "1. **Engagement Lead / Partner** memastikan arah kemitraan, kualitas narasi eksekutif, dan penyelesaian isu kritis.",
+                    "2. **Project or Program Manager** mengendalikan ritme delivery, milestone, dependency, dan komunikasi lintas pihak.",
+                ]
             for offset, item in enumerate(team_points[:3], start=3):
                 numbered_lines.append(
                     f"{offset}. **Workstream Core** memanfaatkan komposisi {item} agar area prioritas dapat dieksekusi dengan coverage yang memadai."
@@ -762,6 +1158,10 @@ class ProposalSupportMixin:
                 firm_profile.get("portfolio_highlights", ""),
                 "kapabilitas delivery, advisory, dan transformasi yang relevan dengan ruang lingkup proyek",
                 max_words=24
+            )
+            ai_team_note = (
+                f"\n- Untuk konteks AI/adopsi, komposisi tim juga harus terasa menutup kebutuhan {ai_people.lower()} dan {ai_change.lower()}."
+                if ai_mode else ""
             )
             return (
                 f"Struktur tim proyek untuk {client} dibentuk agar pengambilan keputusan, pengawasan mutu, dan eksekusi lapangan bergerak seirama. "
@@ -787,12 +1187,17 @@ class ProposalSupportMixin:
                 "- Pendekatan ini menjaga proposal tetap kredibel: kuat pada kapabilitas, tetapi tidak membuat klaim detail yang belum tervalidasi.\n"
                 f"- Bagi {client}, struktur ini memberi kepastian bahwa tim yang ditugaskan bukan hanya cukup dari sisi jumlah, tetapi juga relevan terhadap sasaran outcome dan kompleksitas kerja yang ada.\n"
                 f"- Hasil akhirnya adalah model tim yang lebih mudah diaudit, lebih mudah dikendalikan, dan lebih siap dipertanggungjawabkan pada level sponsor."
+                f"{ai_team_note}"
             )
 
         if chapter["id"] == "c_10":
             payment_lines = "\n".join(
                 f"{idx}. **{label}** sebesar {portion} dari estimasi investasi, ditagihkan setelah milestone terkait diterima."
                 for idx, (label, portion) in enumerate(payment_plan, start=1)
+            )
+            ai_cost_note = (
+                "\n- Untuk konteks AI, komponen biaya juga mencerminkan effort readiness, kontrol, validasi bertahap, dan enablement perubahan agar solusi tidak berhenti pada eksperimen."
+                if ai_mode else ""
             )
             return (
                 f"Model pembiayaan untuk {client} disusun agar komitmen biaya, mekanisme pembayaran, dan batas ruang lingkup tetap jelas sejak awal. "
@@ -825,6 +1230,7 @@ class ProposalSupportMixin:
                 f"- Parameter kontrol utama yang dipakai adalah keterkaitan antara milestone, acceptance deliverable, manfaat bisnis, dan ekspektasi layanan bagi nasabah atau stakeholder akhir.\n"
                 f"- Dengan cara ini, pembahasan komersial tetap berdiri di atas dasar profesional yang jelas dan tidak bergeser menjadi negosiasi yang kabur batasnya.\n"
                 f"- Nilai investasi dijaga tetap proporsional terhadap manfaat yang diharapkan, khususnya {gains_line}."
+                f"{ai_cost_note}"
             )
 
         if chapter["id"] == "c_closing":
@@ -883,6 +1289,17 @@ class ProposalSupportMixin:
         frameworks = (data or {}).get("potensi_framework", "").strip() or "belum dipilih"
         timeline = (data or {}).get("estimasi_waktu", "").strip() or "belum ditentukan"
         budget = (data or {}).get("estimasi_biaya", "").strip() or "belum ditentukan"
+        ai_profile = self._build_ai_adoption_profile(
+            client=client,
+            project=objective,
+            project_goal=need_type,
+            project_type=project_type,
+            timeline=timeline,
+            notes=issues,
+            regulations=frameworks,
+            research_bundle={},
+        )
+        ai_mode = bool(ai_profile.get("enabled"))
 
         preview_map = {
             "c_1": f"Menetapkan konteks organisasi {client} dan objektif inisiatif: {objective}.",
@@ -897,6 +1314,19 @@ class ProposalSupportMixin:
             "c_10": f"Mendefinisikan model pembiayaan, termin pembayaran, dan batasan scope dengan estimasi {budget}.",
             "c_closing": f"Menutup proposal dengan apresiasi kemitraan, kontak resmi {WRITER_FIRM_NAME}, dan langkah tindak lanjut bersama {client}.",
         }
+        if ai_mode:
+            preview_map.update({
+                "c_1": f"Menetapkan konteks bisnis {client}, mengapa use case ini penting sekarang, dan outcome AI yang ingin dikejar: {objective}.",
+                "c_2": f"Mengurai akar masalah, gap current state vs target state, serta hambatan kesiapan/adopsi berdasarkan pain points: {issues}.",
+                "c_3": f"Mengkategorikan kebutuhan ke {need_type} sambil membaca tingkat kesiapan adopsi AI dan bentuk intervensi yang realistis.",
+                "c_4": f"Menautkan kebutuhan klien ke prinsip responsible adoption, kontrol risiko, dan framework/regulasi utama: {frameworks}.",
+                "c_5": "Menjelaskan metodologi bertahap: readiness, validasi, pilot/rollout, dan learning loop yang tetap terkontrol.",
+                "c_6": "Mendetailkan solution design yang feasible untuk dioperasikan, dimonitor, dan diadopsi pengguna.",
+                "c_7": f"Menyusun fase readiness, pilot/rollout, milestone, dan deliverable berdasarkan durasi {timeline}.",
+                "c_8": "Merumuskan governance, approval, stop/go, monitoring, dan accountability yang menjaga adopsi tetap aman.",
+                "c_9": f"Menetapkan struktur tim lintas bisnis, engineering, governance, dan change enablement untuk model {service_type}.",
+                "c_10": f"Mendefinisikan model pembiayaan berdasarkan effort readiness, kontrol, rollout, dan change enablement dengan estimasi {budget}.",
+            })
 
         return [
             {
@@ -912,14 +1342,22 @@ class ProposalSupportMixin:
         self,
         base_client: str,
         regulations: str,
-        include_collaboration: bool = True
+        include_collaboration: bool = True,
+        ai_context: str = "",
     ) -> Dict[str, str]:
+        ai_mode = self._ai_scope_signal_summary(ai_context, regulations).get("enabled", False)
         futures = {
             "profile": self.io_pool.submit(Researcher.get_entity_profile, base_client),
             "news": self.io_pool.submit(Researcher.get_latest_client_news, base_client),
             "track_record": self.io_pool.submit(Researcher.get_client_track_record, base_client),
             "regulations": self.io_pool.submit(Researcher.get_regulatory_data, regulations)
         }
+        if ai_mode:
+            futures["ai_posture"] = self.io_pool.submit(
+                Researcher.get_client_ai_posture,
+                base_client,
+                ai_context,
+            )
         if include_collaboration:
             futures["collaboration"] = self.io_pool.submit(
                 Researcher.get_client_writer_collaboration, base_client, WRITER_FIRM_NAME
@@ -931,17 +1369,19 @@ class ProposalSupportMixin:
                 "track_record": futures["track_record"].result(timeout=8),
                 "collaboration": futures["collaboration"].result(timeout=8) if include_collaboration else "",
                 "regulations": futures["regulations"].result(timeout=8),
+                "ai_posture": futures["ai_posture"].result(timeout=8) if ai_mode else "",
             }
         except Exception:
-            return self._fallback_research_bundle(base_client, include_collaboration)
+            return self._fallback_research_bundle(base_client, include_collaboration, ai_mode=ai_mode)
 
     def prefetch_research_bundle(
         self,
         base_client: str,
         regulations: str,
-        include_collaboration: bool = True
+        include_collaboration: bool = True,
+        ai_context: str = "",
     ) -> str:
-        key = self._cache_key("research", base_client, regulations, str(include_collaboration))
+        key = self._cache_key("research", base_client, regulations, str(include_collaboration), ai_context)
         if self._get_cached_research_bundle(key):
             return "cached"
 
@@ -956,7 +1396,8 @@ class ProposalSupportMixin:
                 bundle = self._build_research_bundle_uncached(
                     base_client=base_client,
                     regulations=regulations,
-                    include_collaboration=include_collaboration
+                    include_collaboration=include_collaboration,
+                    ai_context=ai_context,
                 )
                 self._store_research_bundle(key, bundle)
             finally:
@@ -972,8 +1413,14 @@ class ProposalSupportMixin:
         ).start()
         return "warming"
 
-    def _get_research_bundle(self, base_client: str, regulations: str, include_collaboration: bool = True) -> Dict[str, str]:
-        key = self._cache_key("research", base_client, regulations, str(include_collaboration))
+    def _get_research_bundle(
+        self,
+        base_client: str,
+        regulations: str,
+        include_collaboration: bool = True,
+        ai_context: str = "",
+    ) -> Dict[str, str]:
+        key = self._cache_key("research", base_client, regulations, str(include_collaboration), ai_context)
         cached = self._get_cached_research_bundle(key)
         if cached:
             return cached
@@ -997,7 +1444,8 @@ class ProposalSupportMixin:
             bundle = self._build_research_bundle_uncached(
                 base_client=base_client,
                 regulations=regulations,
-                include_collaboration=include_collaboration
+                include_collaboration=include_collaboration,
+                ai_context=ai_context,
             )
             return self._store_research_bundle(key, bundle)
         finally:
@@ -1029,6 +1477,8 @@ class ProposalSupportMixin:
             personalization_pack.get("industry", ""),
             personalization_pack.get("relationship_mode", ""),
             "|".join(personalization_pack.get("kpi_blueprint", []) or []),
+            str(personalization_pack.get("ai_mode", False)),
+            str((personalization_pack.get("ai_adoption_profile") or {}).get("summary", "")),
             value_map.get("value_statement", ""),
             value_map.get("win_theme", ""),
             "|".join(value_map.get("proof_points", []) or []),
@@ -1062,6 +1512,7 @@ class ProposalSupportMixin:
         - Relationship Mode: {personalization_pack.get('relationship_mode', 'new')}
         - KPI Blueprint: {', '.join(personalization_pack.get('kpi_blueprint', []))}
         - Terminologi Prioritas: {', '.join(personalization_pack.get('terminology', []))}
+        - AI Adoption Summary: {(personalization_pack.get('ai_adoption_profile') or {}).get('summary', '')}
         - Company DNA Positioning: {value_map.get('positioning', '')}
         - Proposal Promise: {value_map.get('proposal_promise', '')}
         - Value Statement: {value_map.get('value_statement', '')}
@@ -1069,6 +1520,7 @@ class ProposalSupportMixin:
         - Client Gains: {', '.join(value_map.get('client_gains', []) or [])}
         - Proof Points: {', '.join(value_map.get('proof_points', []) or [])}
         - Review Rule: Draft ini targetnya 80% siap pakai; sisakan ruang bagi reviewer manusia untuk menyempurnakan nuansa relasi, komersial, dan pesan penutup.
+        - Aturan AI tersembunyi: bila konteks proposal terkait AI, narasi harus terasa dimulai dari use case bisnis, lalu dikendalikan oleh kesiapan data/model, arsitektur, governance, kapabilitas tim, dan perubahan cara kerja. Jangan menuliskan enam label itu secara eksplisit.
 
         OUTPUT WAJIB (tanpa markdown code block, <= 220 kata):
         1) Narasi Inti (1-2 kalimat)
@@ -1160,6 +1612,10 @@ class ProposalSupportMixin:
             relationship_mode = personalization_pack.get("relationship_mode", "new")
             relationship_source = personalization_pack.get("relationship_source", "osint")
             profile_summary = personalization_pack.get("profile_summary", "")
+            ai_profile = personalization_pack.get("ai_adoption_profile", {}) or {}
+            ai_mode = bool(ai_profile.get("enabled"))
+            ai_posture = research_bundle.get("ai_posture", "")
+            ai_guidance = str((ai_profile.get("chapter_guidance") or {}).get(chapter.get("id", ""), "")).strip()
             initiative_facts = personalization_pack.get("initiative_facts", []) or []
             if initiative_facts:
                 anchors_text = " | ".join([
@@ -1197,6 +1653,25 @@ class ProposalSupportMixin:
             extra += (
                 f" [INITIATIVE_ANCHORS] Wajib menyisipkan minimal satu anchor inisiatif klien dari daftar berikut: {anchors_text}"
             )
+            if ai_mode:
+                extra += (
+                    f" [AI_ADOPTION_MODE] Proposal ini terkait AI/adopsi AI. Framework ini tidak boleh disebut eksplisit, "
+                    f"tetapi isi bab harus terasa dimulai dari business value lalu dijaga oleh readiness, governance, feasibility delivery, dan adopsi perubahan. "
+                    f"Jika ada detail yang belum terbukti, ubah menjadi asumsi, validation checkpoint, atau readiness requirement."
+                )
+                extra += f" [AI_SUMMARY] {ai_profile.get('summary', '')}"
+                extra += (
+                    f" [AI_PROFILE] Business: {ai_profile.get('business_case', '')} "
+                    f"| Data/Model: {ai_profile.get('data_foundation', '')} "
+                    f"| Arsitektur: {ai_profile.get('architecture_posture', '')} "
+                    f"| People: {ai_profile.get('people_capability', '')} "
+                    f"| Governance: {ai_profile.get('governance_posture', '')} "
+                    f"| Change: {ai_profile.get('culture_change', '')}"
+                )
+                if ai_posture:
+                    extra += f" [AI_OSINT] {ai_posture}"
+                if ai_guidance:
+                    extra += f" [AI_CHAPTER_GUIDANCE] {ai_guidance}"
             extra += f" [OSINT_TRACK_RECORD] {track_record_data}"
             extra += (
                 f" [{'INTERNAL_RELATIONSHIP' if relationship_source == 'internal_api' else 'OSINT_KOLABORASI'}] {collaboration_data} "
@@ -1208,6 +1683,8 @@ class ProposalSupportMixin:
             )
             if chapter['id'] == 'c_1':
                 extra += f" [FOCUS] Fokus pada latar belakang organisasi '{client}' dan tujuan proyek: '{project}'. Soroti driver bisnis utama: [{project_goal}]."
+                if ai_mode:
+                    extra += " [AI_FOCUS] Tunjukkan mengapa use case AI ini relevan secara bisnis saat ini, bukan sekadar menarik secara teknologi."
             elif chapter['id'] == 'c_2':
                 problem_rule = (CHAPTER_STANDARD_RULES.get("c_2") or {}).get("problem_definition_pattern", {})
                 problem_note = str(problem_rule.get("focus_note") or "").strip()
@@ -1218,14 +1695,24 @@ class ProposalSupportMixin:
                     f" [PROBLEM_PATTERN] {problem_note} "
                     f"Gunakan label fase tersebut secara eksplisit sebagai H2 wajib dalam urutan ini: {pattern_subsections}."
                 )
+                if ai_mode:
+                    extra += " [AI_FOCUS] Rumusan masalah harus menunjukkan gap current state vs target state, termasuk gap kesiapan data, kontrol, atau operating model bila relevan."
             elif chapter['id'] == 'c_3':
                 extra += f" [FOCUS] Klasifikasikan kebutuhan ke Problem/Opportunity/Directive berdasarkan input: '{project_goal}'. Tetapkan jenis proyek: '{project_type}'."
+                if ai_mode:
+                    extra += " [AI_FOCUS] Sertakan pembacaan readiness dan tingkat intervensi yang realistis; jangan langsung solution-first."
             elif chapter['id'] == 'c_4':
                 extra += f" [FOCUS] Gunakan framework/regulasi terpilih berikut sebagai acuan utama: '{regulations}'. Petakan langsung ke kebutuhan klien."
+                if ai_mode:
+                    extra += " [AI_FOCUS] Pendekatan harus terasa responsible, feasible, aman, dan sesuai regulasi; hindari narasi AI yang terlalu optimistis tanpa kontrol."
             elif chapter['id'] == 'c_5':
                 extra += f" [FOCUS] Jelaskan alasan pemilihan metodologi untuk engagement '{service_type}' dan gunakan baseline metodologi internal: {firm_data['methodology']}."
+                if ai_mode:
+                    extra += " [AI_FOCUS] Metodologi perlu memuat readiness assessment, validasi, pilot atau controlled rollout, dan learning loop."
             elif chapter['id'] == 'c_6':
                 extra += f" [FOCUS] Turunkan metodologi menjadi solution design yang konkret: output, deliverable, dan target state yang dapat dieksekusi."
+                if ai_mode:
+                    extra += " [AI_FOCUS] Solution design harus terasa feasible untuk integrasi, monitoring, human oversight, dan adopsi pengguna."
             elif chapter['id'] == 'c_7':
                 extra += f" [FOCUS] Timeline harus sinkron dengan durasi proyek: '{timeline}'. Tampilkan aktivitas per fase, milestone, dan deliverable yang terukur."
             elif chapter['id'] == 'c_8':
@@ -1378,6 +1865,13 @@ class ProposalSupportMixin:
                 if not anchor_hit:
                     missing_personalization_signals.append("initiative_anchor")
 
+            ai_profile = personalization_pack.get("ai_adoption_profile", {}) or {}
+            if ai_profile.get("enabled"):
+                ai_terms = self._chapter_ai_terms(chapter.get("id", ""))
+                ai_hit = self._count_signal_hits(content, ai_terms, max_hits=3) if ai_terms else 1
+                if ai_terms and ai_hit == 0:
+                    missing_personalization_signals.append("ai_adoption")
+
             if missing_personalization_signals:
                 issues.append("missing_personalization")
 
@@ -1433,6 +1927,51 @@ class ProposalSupportMixin:
                 f"- Setiap butir pada bab ini harus bisa ditelusuri ke KPI, risiko, atau keputusan kerja yang nyata."
             )
         return patched
+
+    def _ensure_ai_adoption_signals(
+        self,
+        chapter: Dict[str, Any],
+        content: str,
+        personalization_pack: Optional[Dict[str, Any]] = None
+    ) -> str:
+        data = personalization_pack or {}
+        ai_profile = data.get("ai_adoption_profile", {}) or {}
+        if not ai_profile.get("enabled"):
+            return content
+
+        chapter_id = str(chapter.get("id") or "").strip()
+        chapter_terms = self._chapter_ai_terms(chapter_id)
+        if not chapter_terms:
+            return content
+
+        patched = (content or "").rstrip()
+        if self._count_signal_hits(patched, chapter_terms, max_hits=4) >= 2:
+            return patched
+
+        additions: List[str] = []
+        chapter_guidance = str((ai_profile.get("chapter_guidance") or {}).get(chapter_id, "")).strip()
+        if chapter_guidance:
+            additions.append(f"- {chapter_guidance}")
+
+        ai_field_map = {
+            "business_use_case": "business_case",
+            "data_model_foundation": "data_foundation",
+            "infrastructure_architecture": "architecture_posture",
+            "people_capability": "people_capability",
+            "governance": "governance_posture",
+            "culture_change": "culture_change",
+        }
+        for dimension_id in self._ai_chapter_dimensions(chapter_id):
+            field_name = ai_field_map.get(dimension_id)
+            line = str(ai_profile.get(field_name, "") or "").strip()
+            if line:
+                additions.append(f"- {line}")
+            if len(additions) >= 2:
+                break
+
+        if not additions:
+            return patched
+        return patched + "\n" + "\n".join(additions)
 
     def _ensure_problem_definition_pattern(
         self,
@@ -1708,6 +2247,11 @@ class ProposalSupportMixin:
             personalization_pack=personalization_pack,
             chapter=chapter,
         )
+        repaired = self._ensure_ai_adoption_signals(
+            chapter=chapter,
+            content=repaired,
+            personalization_pack=personalization_pack,
+        )
         repaired = self._ensure_minimum_substance(
             chapter,
             repaired,
@@ -1849,6 +2393,8 @@ class ProposalSupportMixin:
             (value_map.get("industry_drivers", []) or []),
             max_terms=18
         )
+        ai_profile = personalization_pack.get("ai_adoption_profile", {}) or {}
+        ai_mode = bool(ai_profile.get("enabled"))
         pressure_terms = self._semantic_terms([project, notes, value_map.get("customer_pressure", "")], max_terms=12)
         anchor_terms = personalization_pack.get("anchor_citations", []) or []
         if not anchor_terms:
@@ -1898,6 +2444,7 @@ class ProposalSupportMixin:
             anchor_hits = self._count_signal_hits(content, anchor_terms, max_hits=2) if anchor_expected else 1
             value_hits = self._count_signal_hits(content, persuasion_terms, max_hits=4)
             usefulness_hits = self._count_signal_hits(content, self._chapter_usefulness_terms(chapter_id), max_hits=3)
+            ai_hits = self._count_signal_hits(content, self._chapter_ai_terms(chapter_id), max_hits=4) if ai_mode else 0
 
             business_rank = self._chapter_business_rank(chapter_id)
             chapter_personalization = (
@@ -1927,6 +2474,8 @@ class ProposalSupportMixin:
                 weaknesses.append("business_value")
             if usefulness_hits == 0:
                 weaknesses.append("actionability")
+            if ai_mode and self._chapter_ai_terms(chapter_id) and ai_hits == 0:
+                weaknesses.append("ai_adoption_balance")
             if "too_short" in issues:
                 weaknesses.append("substance")
 
@@ -1940,6 +2489,7 @@ class ProposalSupportMixin:
                 "anchor_hits": anchor_hits,
                 "value_hits": value_hits,
                 "usefulness_hits": usefulness_hits,
+                "ai_hits": ai_hits,
                 "weaknesses": weaknesses,
             }
 
@@ -2033,6 +2583,60 @@ class ProposalSupportMixin:
             "usefulness": usefulness_score,
             "factual_safety": factual_safety,
         }
+        ai_adoption_fit = 100
+        if ai_mode:
+            quality_signals = SPIRIT_OF_AI_RULES.get("quality_signals") or {}
+            business_terms = self._semantic_terms(
+                quality_signals.get("business_value", []) + [ai_profile.get("business_case", ""), value_map.get("value_statement", "")],
+                max_terms=20
+            )
+            readiness_terms = self._semantic_terms(
+                quality_signals.get("readiness_realism", []) + [ai_profile.get("data_foundation", ""), ai_profile.get("architecture_posture", "")],
+                max_terms=20
+            )
+            governance_terms = self._semantic_terms(
+                quality_signals.get("governance_control", []) + [ai_profile.get("governance_posture", "")],
+                max_terms=20
+            )
+            delivery_terms = self._semantic_terms(
+                quality_signals.get("delivery_feasibility", []) + (ai_profile.get("delivery_guidance", []) or []),
+                max_terms=20
+            )
+            change_terms = self._semantic_terms(
+                quality_signals.get("change_adoption", []) + [ai_profile.get("culture_change", ""), ai_profile.get("people_capability", "")],
+                max_terms=20
+            )
+            readiness_text = "\n".join([
+                chapter_outputs.get("c_2", ""),
+                chapter_outputs.get("c_3", ""),
+                chapter_outputs.get("c_5", ""),
+                chapter_outputs.get("c_6", ""),
+            ])
+            governance_text = "\n".join([
+                chapter_outputs.get("c_4", ""),
+                chapter_outputs.get("c_8", ""),
+                chapter_outputs.get("c_10", ""),
+            ])
+            delivery_text = "\n".join([
+                chapter_outputs.get("c_5", ""),
+                chapter_outputs.get("c_6", ""),
+                chapter_outputs.get("c_7", ""),
+            ])
+            change_text = "\n".join([
+                chapter_outputs.get("c_7", ""),
+                chapter_outputs.get("c_9", ""),
+                full_text,
+            ])
+            ai_components = [
+                min(1.0, self._count_signal_hits(full_text, business_terms, max_hits=8) / 4.0),
+                min(1.0, self._count_signal_hits(readiness_text, readiness_terms, max_hits=8) / 4.0),
+                min(1.0, self._count_signal_hits(governance_text, governance_terms, max_hits=8) / 4.0),
+                min(1.0, self._count_signal_hits(delivery_text, delivery_terms, max_hits=8) / 4.0),
+                min(1.0, self._count_signal_hits(change_text, change_terms, max_hits=8) / 4.0),
+            ]
+            ai_adoption_fit = self._safe_score(100 * (sum(ai_components) / max(len(ai_components), 1)))
+            if ai_adoption_fit < self.PROPOSAL_CATEGORY_FLOOR:
+                soft_findings.append("ai_adoption_fit_low")
         total_score = self._safe_score(
             (format_fidelity * 0.20) +
             (personalization_score * 0.25) +
@@ -2041,18 +2645,26 @@ class ProposalSupportMixin:
             (usefulness_score * 0.10) +
             (factual_safety * 0.10)
         )
+        if ai_mode:
+            total_score = self._safe_score((total_score * 0.85) + (ai_adoption_fit * 0.15))
         low_categories = [name for name, score in categories.items() if score < self.PROPOSAL_CATEGORY_FLOOR]
 
         return {
             "score": total_score,
             "categories": categories,
+            "ai_adoption_fit": ai_adoption_fit,
             "estimated_pages": estimated_pages,
             "generated_words": generated_words,
             "hard_failures": sorted(set(hard_failures)),
             "soft_findings": sorted(set(soft_findings)),
             "low_categories": low_categories,
             "chapter_findings": chapter_findings,
-            "passes": not hard_failures and total_score >= self.PROPOSAL_ACCEPTANCE_TARGET and not low_categories,
+            "passes": (
+                not hard_failures
+                and total_score >= self.PROPOSAL_ACCEPTANCE_TARGET
+                and not low_categories
+                and (not ai_mode or ai_adoption_fit >= self.PROPOSAL_CATEGORY_FLOOR)
+            ),
         }
 
     def _select_improvement_chapters(
@@ -2095,6 +2707,14 @@ class ProposalSupportMixin:
         focus_terms = ", ".join(personalization_pack.get("terminology", [])[:3]) or "governance, delivery, risk control"
         kpi_line = " | ".join(personalization_pack.get("kpi_blueprint", [])[:3]) or f"hasil bisnis terukur untuk {client}"
         proof_line = ", ".join(value_map.get("proof_points", [])[:3]) or "kapabilitas delivery dan kontrol mutu yang tersedia"
+        ai_profile = personalization_pack.get("ai_adoption_profile", {}) or {}
+        ai_guidance = str((ai_profile.get("chapter_guidance") or {}).get(chapter["id"], "")).strip()
+        ai_extra = ""
+        if ai_profile.get("enabled"):
+            ai_extra = (
+                "- untuk konteks AI, perkuat nuansa use case bisnis, readiness, governance, feasibility, dan adoption tanpa menyebut framework enam pilar secara eksplisit\n"
+                f"- arahan AI khusus bab ini: {ai_guidance or 'jaga keseimbangan antara nilai bisnis, kontrol, dan kesiapan eksekusi'}\n"
+            )
         try:
             res = self.ollama.chat(
                 model=LLM_MODEL,
@@ -2110,7 +2730,8 @@ class ProposalSupportMixin:
                         f"- lebih actionable untuk sponsor, decision maker, dan delivery team\n"
                         f"- tetap faktual, jangan menambah klaim baru di luar draft/sumber yang sudah ada\n"
                         f"- pertahankan H2 wajib, numbering, bullet, dan disiplin panjang sekitar {target_words} kata\n"
-                        f"- gunakan istilah domain secara natural: {focus_terms}\n\n"
+                        f"- gunakan istilah domain secara natural: {focus_terms}\n"
+                        f"{ai_extra}\n"
                         f"DRAFT SAAT INI:\n{content}"
                     )},
                 ],

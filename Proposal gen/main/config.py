@@ -165,6 +165,88 @@ CHAPTER_STANDARD_RULES = {
     }
 }
 
+SPIRIT_OF_AI_RULES = {
+    "strong_trigger_keywords": [
+        "ai", "genai", "generative ai", "artificial intelligence", "machine learning",
+        "ml", "llm", "large language model", "rag", "computer vision", "predictive model",
+        "model-based", "model driven", "intelligent automation", "ai adoption",
+    ],
+    "supporting_signals": [
+        "chatbot", "copilot", "knowledge assistant", "recommendation engine", "forecasting",
+        "anomaly detection", "molecule", "safety ai", "network optimization", "data readiness",
+        "model validation", "prompt", "embedding", "ai governance", "hallucination", "bias",
+        "human in the loop", "responsible ai", "pilot", "use case", "change management",
+        "adopsi ai", "otomasi cerdas", "analytics", "data science",
+    ],
+    "dimension_terms": {
+        "business_use_case": [
+            "use case prioritas", "nilai bisnis", "outcome bisnis", "revenue", "cost",
+            "risk reduction", "efisiensi", "keputusan lebih cepat", "sponsor bisnis",
+        ],
+        "data_model_foundation": [
+            "kesiapan data", "kualitas data", "ownership data", "model validation",
+            "ground truth", "monitoring model", "data governance", "knowledge base",
+        ],
+        "infrastructure_architecture": [
+            "arsitektur yang aman", "scalable", "cloud", "hybrid", "on-prem",
+            "integration", "latency", "security control", "deployment posture",
+        ],
+        "people_capability": [
+            "business translator", "ai engineer", "data steward", "kapabilitas tim",
+            "enablement", "upskilling", "user readiness", "operating model",
+        ],
+        "governance": [
+            "governance", "risk control", "sop", "approval", "audit trail",
+            "bias", "hallucination", "human oversight", "continue stop criteria",
+        ],
+        "culture_change": [
+            "change management", "adopsi pengguna", "perubahan perilaku kerja", "trust",
+            "pilot terbatas", "pembelajaran bertahap", "cara kerja baru", "adoption loop",
+        ],
+    },
+    "chapter_dimension_map": {
+        "c_1": ["business_use_case", "culture_change"],
+        "c_2": ["business_use_case", "data_model_foundation", "governance"],
+        "c_3": ["business_use_case", "data_model_foundation", "infrastructure_architecture"],
+        "c_4": ["governance", "infrastructure_architecture"],
+        "c_5": ["data_model_foundation", "governance", "culture_change"],
+        "c_6": ["infrastructure_architecture", "people_capability", "governance"],
+        "c_7": ["business_use_case", "culture_change", "governance"],
+        "c_8": ["governance", "people_capability"],
+        "c_9": ["people_capability", "culture_change"],
+        "c_10": ["business_use_case", "governance", "culture_change"],
+    },
+    "quality_signals": {
+        "business_value": [
+            "nilai bisnis", "outcome bisnis", "use case prioritas", "manfaat terukur",
+            "revenue", "cost", "risk reduction", "keputusan sponsor",
+        ],
+        "readiness_realism": [
+            "kesiapan data", "validasi", "assumption", "asumsi", "dependency",
+            "baseline", "current state", "target state", "kelayakan implementasi",
+        ],
+        "governance_control": [
+            "governance", "risk control", "sop", "approval", "quality gate",
+            "monitoring", "audit trail", "human oversight",
+        ],
+        "delivery_feasibility": [
+            "pilot", "rollout", "milestone", "dependency", "integrasi", "hypercare",
+            "phase", "readiness", "cut-over",
+        ],
+        "change_adoption": [
+            "change management", "enablement", "upskilling", "adopsi pengguna",
+            "perubahan perilaku", "training", "operating model", "business translator",
+        ],
+    },
+    "pricing_driver_terms": {
+        "data_readiness": ["kesiapan data", "data governance", "data quality", "dataset", "labeling"],
+        "model_uncertainty": ["model validation", "pilot", "prompt", "rag", "hallucination", "bias"],
+        "architecture_constraints": ["hybrid", "on-prem", "security", "latency", "integrasi", "api"],
+        "governance_overhead": ["governance", "sop", "approval", "audit", "compliance", "regulasi"],
+        "change_enablement": ["change management", "adoption", "training", "enablement", "capability"],
+    },
+}
+
 DATA_MAPPING = {
     "entity": "Client Entity",
     "topic": "Strategic Initiative",

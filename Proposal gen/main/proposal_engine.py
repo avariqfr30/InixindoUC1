@@ -325,8 +325,6 @@ class ProposalEngineMixin:
                 if not chapter:
                     continue
                 prompt = chapter_prompts.get(cid)
-                if not prompt:
-                    continue
 
                 current_words = self._word_count(outputs[cid])
                 minimum = self._chapter_floor_words(cid, for_compression=True)
@@ -336,13 +334,22 @@ class ProposalEngineMixin:
 
                 target = max(minimum, current_words - min(reducible, max(120, overflow)))
                 target = min(target, max(minimum, int(chapter_targets.get(cid, target) * 0.95)))
-                compressed = self._tighten_chapter(
-                    chapter,
-                    prompt,
-                    outputs[cid],
-                    target,
-                    allowed_external_citations=allowed_external_citations
-                )
+                if prompt:
+                    compressed = self._tighten_chapter(
+                        chapter,
+                        prompt,
+                        outputs[cid],
+                        target,
+                        allowed_external_citations=allowed_external_citations
+                    )
+                elif self._use_structured_chapter(cid):
+                    compressed = self._tighten_structured_chapter(
+                        chapter=chapter,
+                        content=outputs[cid],
+                        target_words=target,
+                    )
+                else:
+                    continue
                 if compressed == outputs[cid]:
                     continue
                 outputs[cid] = compressed
@@ -361,20 +368,27 @@ class ProposalEngineMixin:
             for cid, text in ordered_items:
                 chapter = chapter_map.get(cid)
                 prompt = chapter_prompts.get(cid)
-                if not chapter or not prompt or not text:
+                if not chapter or not text:
                     continue
                 minimum = self._chapter_floor_words(cid, for_compression=True)
                 current_words = self._word_count(text)
                 target = max(minimum, int(current_words * ratio))
                 if target >= current_words - 60:
                     continue
-                outputs[cid] = self._tighten_chapter(
-                    chapter,
-                    prompt,
-                    text,
-                    target,
-                    allowed_external_citations=allowed_external_citations
-                )
+                if prompt:
+                    outputs[cid] = self._tighten_chapter(
+                        chapter,
+                        prompt,
+                        text,
+                        target,
+                        allowed_external_citations=allowed_external_citations
+                    )
+                elif self._use_structured_chapter(cid):
+                    outputs[cid] = self._tighten_structured_chapter(
+                        chapter=chapter,
+                        content=text,
+                        target_words=target,
+                    )
 
         return outputs
 
@@ -399,11 +413,13 @@ class ProposalEngineMixin:
         firm_data = self.firm_api.get_project_standards(project_type)
         firm_profile = self.firm_api.get_firm_profile()
         base_client = re.sub(r'\b(Cabang|Branch|Tbk)\b.*$|^(PT\.|CV\.)', '', client, flags=re.IGNORECASE).strip()
+        ai_context = " ".join([project, project_goal, project_type, service_type, notes]).strip()
         relationship_context = self.firm_api.get_client_relationship(base_client)
         research_bundle = self._get_research_bundle(
             base_client,
             regulations,
-            include_collaboration=use_demo_logic
+            include_collaboration=use_demo_logic,
+            ai_context=ai_context,
         )
         if not use_demo_logic:
             research_bundle = dict(research_bundle)
@@ -412,6 +428,7 @@ class ProposalEngineMixin:
             client=client,
             project=project,
             project_goal=project_goal,
+            project_type=project_type,
             timeline=timeline,
             notes=notes,
             regulations=regulations,
@@ -646,19 +663,22 @@ class ProposalEngineMixin:
                     value_map=value_map,
                 )
 
-        if acceptance_report["hard_failures"] or acceptance_report["low_categories"]:
+        if not acceptance_report["passes"]:
             logger.warning(
-                "Proposal acceptance below target | score=%s | categories=%s | hard_failures=%s | low_categories=%s",
+                "Proposal acceptance below target | score=%s | categories=%s | ai_adoption_fit=%s | hard_failures=%s | low_categories=%s | soft_findings=%s",
                 acceptance_report["score"],
                 acceptance_report["categories"],
+                acceptance_report.get("ai_adoption_fit"),
                 acceptance_report["hard_failures"],
                 acceptance_report["low_categories"],
+                acceptance_report.get("soft_findings"),
             )
         else:
             logger.info(
-                "Proposal acceptance passed | score=%s | categories=%s | estimated_pages=%s",
+                "Proposal acceptance passed | score=%s | categories=%s | ai_adoption_fit=%s | estimated_pages=%s",
                 acceptance_report["score"],
                 acceptance_report["categories"],
+                acceptance_report.get("ai_adoption_fit"),
                 acceptance_report["estimated_pages"],
             )
 
