@@ -26,6 +26,14 @@ class ProposalGenerator(ProposalEngineMixin, ProposalSupportMixin):
         "c_11": 320,
         "c_12": 280,
         "c_closing": 220,
+        "k_1": 360,
+        "k_2": 500,
+        "k_3": 420,
+        "k_4": 360,
+        "k_5": 360,
+        "k_6": 260,
+        "k_7": 220,
+        "k_8": 220,
     }
     CHAPTER_COMPRESSION_FLOORS = {
         "c_1": 320,
@@ -41,6 +49,14 @@ class ProposalGenerator(ProposalEngineMixin, ProposalSupportMixin):
         "c_11": 250,
         "c_12": 230,
         "c_closing": 180,
+        "k_1": 280,
+        "k_2": 380,
+        "k_3": 320,
+        "k_4": 280,
+        "k_5": 280,
+        "k_6": 210,
+        "k_7": 180,
+        "k_8": 180,
     }
     CHAPTER_COMPRESSION_RANK = {
         "c_12": 0,
@@ -56,6 +72,14 @@ class ProposalGenerator(ProposalEngineMixin, ProposalSupportMixin):
         "c_2": 3,
         "c_5": 4,
         "c_6": 4,
+        "k_7": 0,
+        "k_8": 0,
+        "k_6": 1,
+        "k_1": 1,
+        "k_5": 2,
+        "k_4": 2,
+        "k_3": 3,
+        "k_2": 4,
     }
     CHAPTER_BUSINESS_RANK = {
         "c_1": 5,
@@ -71,6 +95,14 @@ class ProposalGenerator(ProposalEngineMixin, ProposalSupportMixin):
         "c_11": 4,
         "c_12": 3,
         "c_closing": 2,
+        "k_1": 4,
+        "k_2": 5,
+        "k_3": 5,
+        "k_4": 4,
+        "k_5": 4,
+        "k_6": 4,
+        "k_7": 2,
+        "k_8": 3,
     }
     PROPOSAL_ACCEPTANCE_TARGET = 80
     PROPOSAL_CATEGORY_FLOOR = 70

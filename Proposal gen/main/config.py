@@ -488,6 +488,89 @@ UNIVERSAL_STRUCTURE = [
     }
 ]
 
+KAK_RESPONSE_STRUCTURE = [
+    {
+        "id": "k_1", "title": "BAB 1: DATA INFORMASI DAN PENGALAMAN PERUSAHAAN",
+        "subs": [
+            "1.1 Informasi Perusahaan",
+            "1.2 Struktur Organisasi Perusahaan",
+            "1.3 Daftar Pengalaman Pekerjaan Sejenis",
+        ],
+        "keywords": "company information organization structure similar experience",
+        "length_intent": "Sajikan profil perusahaan penyusun, struktur organisasi perusahaan, dan pengalaman pekerjaan sejenis secara formal dan meyakinkan. (Target: 700 words)."
+    },
+    {
+        "id": "k_2", "title": "BAB 2: TANGGAPAN DAN SARAN TERHADAP KERANGKA ACUAN KERJA",
+        "subs": [
+            "2.1 Pemahaman terhadap Kerangka Acuan Kerja",
+            "2.2 Tanggapan dan Saran terhadap Kerangka Acuan Kerja",
+        ],
+        "keywords": "kak response understanding recommendations scope objectives outputs",
+        "length_intent": "Jelaskan pemahaman terhadap KAK dan berikan tanggapan serta saran yang formal, runtut, dan langsung menanggapi butir kerja utama. (Target: 950 words)."
+    },
+    {
+        "id": "k_3", "title": "BAB 3: PENDEKATAN DAN METODOLOGI",
+        "subs": [
+            "3.1 Pemilihan Framework",
+            "3.2 Metodologi Pekerjaan",
+        ],
+        "keywords": "approach framework methodology work method",
+        "length_intent": "Tunjukkan pendekatan, kerangka acuan, dan metodologi pekerjaan yang paling tepat untuk menjawab KAK secara profesional. (Target: 800 words)."
+    },
+    {
+        "id": "k_4", "title": "BAB 4: PROGRAM KERJA DAN JADWAL PENUGASAN",
+        "subs": [
+            "4.1 Program Kerja / Timeline",
+            "4.2 Tabel Penugasan Tenaga Ahli",
+        ],
+        "keywords": "work program timeline expert assignment schedule",
+        "length_intent": "Jelaskan program kerja, timeline, dan penugasan tenaga ahli secara jelas, terukur, dan mudah ditelaah. (Target: 700 words).",
+        "visual_intent": "gantt"
+    },
+    {
+        "id": "k_5", "title": "BAB 5: STRUKTUR ORGANISASI KOMPOSISI TIM DAN URAIAN TUGAS",
+        "subs": [
+            "5.1 Struktur Organisasi Pelaksana",
+            "5.2 Komposisi Tim Tenaga Ahli dan Penugasan",
+        ],
+        "keywords": "organization structure team composition expert roles responsibilities",
+        "length_intent": "Uraikan struktur organisasi pelaksana, komposisi tim, dan tugas masing-masing peran secara profesional dan konkret. (Target: 700 words)."
+    },
+    {
+        "id": "k_6", "title": "BAB 6: HASIL KERJA (DELIVERABLE)",
+        "subs": [
+            "6.1 Hasil Kerja (Deliverable)",
+        ],
+        "keywords": "deliverables outputs work products",
+        "length_intent": "Jelaskan hasil kerja atau deliverable yang akan dihasilkan secara konkret dan sesuai dengan kebutuhan KAK. (Target: 500 words)."
+    },
+    {
+        "id": "k_7", "title": "BAB 7: FASILITAS PENDUKUNG PELAKSANAAN PEKERJAAN",
+        "subs": [
+            "7.1 Fasilitas Pendukung Pelaksanaan Pekerjaan",
+        ],
+        "keywords": "supporting facilities work execution support tools",
+        "length_intent": "Jelaskan fasilitas pendukung yang disiapkan untuk menunjang pelaksanaan pekerjaan secara profesional. (Target: 420 words)."
+    },
+    {
+        "id": "k_8", "title": "BAB 8: INOVASI GAGASAN BARU",
+        "subs": [
+            "8.1 Inovasi Gagasan Baru",
+        ],
+        "keywords": "innovation new ideas improvement value add",
+        "length_intent": "Sampaikan inovasi atau gagasan baru yang relevan, realistis, dan memberi nilai tambah pada pelaksanaan pekerjaan. (Target: 450 words)."
+    },
+    {
+        "id": "c_closing", "title": "PENUTUP & APRESIASI KEMITRAAN",
+        "subs": [
+            "Apresiasi dan Komitmen Kemitraan",
+            "Informasi Kontak dan Langkah Lanjutan",
+        ],
+        "keywords": "closing gratitude partnership contact office address next steps",
+        "length_intent": "Tutup proposal dengan apresiasi profesional, aspirasi pelaksanaan pekerjaan, dan informasi kontak resmi perusahaan penyusun. (Target: 240 words)."
+    },
+]
+
 PERSONAS = {
     "c_1": "Senior Business Analyst",
     "c_2": "Principal Enterprise Architect",
@@ -502,6 +585,14 @@ PERSONAS = {
     "c_11": "People & Delivery Lead",
     "c_12": "Commercial Lead",
     "c_closing": "Client Engagement Partner",
+    "k_1": "Corporate Profile & Bid Manager",
+    "k_2": "Senior Bid Response Lead",
+    "k_3": "Principal Methodology Consultant",
+    "k_4": "Program Planning Lead",
+    "k_5": "PMO and Delivery Organization Lead",
+    "k_6": "Solution Delivery Lead",
+    "k_7": "Operations Support Lead",
+    "k_8": "Value Innovation Lead",
     "default": "Principal Management Consultant"
 }
 

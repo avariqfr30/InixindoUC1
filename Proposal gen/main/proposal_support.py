@@ -151,7 +151,7 @@ class ProposalSupportMixin:
 
     @staticmethod
     def _anchor_required_chapters() -> Set[str]:
-        return {"c_1", "c_2", "c_3"}
+        return {"c_1", "c_2", "c_3", "k_2", "k_3"}
 
     @staticmethod
     def _text_has_signal(text: str, candidate: str) -> bool:
@@ -193,6 +193,27 @@ class ProposalSupportMixin:
 
     @classmethod
     def _chapter_ai_terms(cls, chapter_id: str) -> List[str]:
+        kak_dimension_map = {
+            "k_1": ["people_capability", "business_use_case"],
+            "k_2": ["business_use_case", "governance", "culture_change"],
+            "k_3": ["governance", "data_model_foundation", "infrastructure_architecture"],
+            "k_4": ["people_capability", "culture_change"],
+            "k_5": ["people_capability", "culture_change"],
+            "k_6": ["business_use_case", "governance"],
+            "k_7": ["infrastructure_architecture"],
+            "k_8": ["business_use_case", "culture_change"],
+        }
+        if chapter_id in kak_dimension_map:
+            terms: List[str] = []
+            seen: Set[str] = set()
+            for dimension_id in kak_dimension_map.get(chapter_id, []):
+                for term in cls._ai_dimension_terms(dimension_id):
+                    key = term.lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    terms.append(term)
+            return terms
         terms: List[str] = []
         seen: Set[str] = set()
         for dimension_id in cls._ai_chapter_dimensions(chapter_id):
@@ -724,7 +745,10 @@ class ProposalSupportMixin:
 
     @staticmethod
     def _structured_chapter_ids() -> Set[str]:
-        return {"c_1", "c_2", "c_3", "c_4", "c_5", "c_6", "c_7", "c_8", "c_9", "c_10", "c_11", "c_12", "c_closing"}
+        return {
+            "c_1", "c_2", "c_3", "c_4", "c_5", "c_6", "c_7", "c_8", "c_9", "c_10", "c_11", "c_12", "c_closing",
+            "k_1", "k_2", "k_3", "k_4", "k_5", "k_6", "k_7", "k_8",
+        }
 
     def _use_structured_chapter(self, chapter_id: str) -> bool:
         return chapter_id in self._structured_chapter_ids()
@@ -826,6 +850,9 @@ class ProposalSupportMixin:
     def _normalize_proposal_mode(proposal_mode: str) -> str:
         normalized = re.sub(r"[^a-z0-9]+", "_", str(proposal_mode or "").strip().lower()).strip("_")
         return "kak_response" if normalized in {"kak", "kak_response", "tanggapan_kak"} else "canvassing"
+
+    def _structure_for_mode(self, proposal_mode: str) -> List[Dict[str, Any]]:
+        return KAK_RESPONSE_STRUCTURE if self._normalize_proposal_mode(proposal_mode) == "kak_response" else UNIVERSAL_STRUCTURE
 
     @classmethod
     def _extract_need_candidates(cls, project_goal: str) -> List[str]:
@@ -1014,6 +1041,117 @@ class ProposalSupportMixin:
                 }
             )
         return rows
+
+    @classmethod
+    def _kak_understanding_points(
+        cls,
+        project: str,
+        project_goal: str,
+        notes: str,
+        regulations: str,
+    ) -> List[Tuple[str, str]]:
+        short_project = cls._summarize_phrase(project, "pekerjaan yang diminta", max_words=16)
+        short_goal = cls._summarize_phrase(project_goal, "maksud dan tujuan pekerjaan", max_words=18)
+        short_notes = cls._summarize_phrase(notes, "ruang lingkup, tantangan, dan kebutuhan pelaksanaan", max_words=20)
+        context_blob = f"{project_goal} {notes} {regulations}".lower()
+        points: List[str] = [
+            f"Pemahaman terhadap latar belakang pekerjaan {short_project.lower()} dan konteks kebutuhan yang mendasarinya.",
+            f"Pemahaman terhadap maksud, tujuan, dan sasaran pekerjaan yang diarahkan untuk {short_goal.lower()}.",
+            f"Pemahaman terhadap lingkup pekerjaan, keluaran, dan prioritas pelaksanaan yang tercermin dari {short_notes.lower()}.",
+        ]
+        if regulations.strip():
+            points.append(
+                f"Pemahaman terhadap acuan, standar, atau regulasi yang perlu dijaga, termasuk {cls._summarize_phrase(regulations, 'acuan kerja yang dipilih', max_words=14)}."
+            )
+        if any(token in context_blob for token in ["sasaran", "indikator keberhasilan", "target kinerja"]):
+            points.append("Pemahaman terhadap sasaran pekerjaan dan indikator keberhasilan yang perlu dicapai selama pelaksanaan.")
+        if any(token in context_blob for token in ["lokasi", "wilayah", "site", "unit kerja", "cabang"]):
+            points.append("Pemahaman terhadap lokasi, cakupan area, atau unit kerja yang menjadi ruang pelaksanaan pekerjaan.")
+        if any(token in context_blob for token in ["jangka waktu", "durasi", "timeline", "bulan", "minggu"]):
+            points.append("Pemahaman terhadap jangka waktu pelaksanaan dan implikasinya terhadap ritme kerja, tahapan, serta pengendalian pekerjaan.")
+        if any(token in context_blob for token in ["tenaga ahli", "kualifikasi", "personel", "kompetensi"]):
+            points.append("Pemahaman terhadap kebutuhan tenaga ahli, kompetensi utama, dan tingkat keterlibatan personel yang disyaratkan.")
+        limited_points = points[:6]
+        return [(chr(97 + idx), text) for idx, text in enumerate(limited_points)]
+
+    @classmethod
+    def _kak_response_points(
+        cls,
+        project: str,
+        project_goal: str,
+        notes: str,
+        timeline: str,
+    ) -> List[Tuple[str, str]]:
+        short_project = cls._summarize_phrase(project, "pekerjaan yang dimaksud", max_words=14)
+        short_goal = cls._summarize_phrase(project_goal, "tujuan pekerjaan", max_words=16)
+        short_notes = cls._summarize_phrase(notes, "lingkup pekerjaan dan keluaran kegiatan", max_words=18)
+        timeline_label = timeline or "jangka waktu yang ditetapkan"
+        context_blob = f"{project_goal} {notes} {timeline}".lower()
+        points: List[str] = [
+            f"Tanggapan terhadap urgensi pekerjaan {short_project.lower()} dan alasan mengapa pekerjaan ini perlu ditangani secara terstruktur.",
+            f"Tanggapan terhadap maksud, tujuan, dan sasaran agar pekerjaan tetap terarah pada {short_goal.lower()}.",
+            f"Tanggapan terhadap lingkup pekerjaan dan keluaran kegiatan, khususnya pada area {short_notes.lower()}.",
+            f"Tanggapan terhadap kesiapan pelaksanaan, jadwal kerja, dan sumber daya agar pekerjaan tetap realistis dalam horizon {timeline_label}.",
+        ]
+        if any(token in context_blob for token in ["sasaran", "indikator keberhasilan", "target kinerja"]):
+            points.append("Tanggapan terhadap sasaran dan indikator keberhasilan agar hasil kerja dapat diukur secara lebih objektif.")
+        if any(token in context_blob for token in ["lokasi", "wilayah", "site", "unit kerja", "cabang"]):
+            points.append("Tanggapan terhadap cakupan lokasi atau unit kerja agar pengaturan pelaksanaan dan koordinasi menjadi lebih jelas.")
+        if any(token in context_blob for token in ["tenaga ahli", "kualifikasi", "personel", "kompetensi"]):
+            points.append("Tanggapan terhadap kebutuhan tenaga ahli dan kualifikasi agar penugasan personel sejalan dengan kompleksitas pekerjaan.")
+        if any(token in context_blob for token in ["fasilitas", "sarana", "prasarana", "dukungan"]):
+            points.append("Tanggapan terhadap fasilitas pendukung agar pelaksanaan pekerjaan dapat berlangsung lebih tertib dan efektif.")
+        limited_points = points[:6]
+        return [(chr(97 + idx), text) for idx, text in enumerate(limited_points)]
+
+    @staticmethod
+    def _kak_company_structure_rows() -> List[Dict[str, str]]:
+        return [
+            {"unit": "Pimpinan / Partner", "peran": "menetapkan arah layanan, menjaga kualitas, dan memberi keputusan strategis", "fungsi": "pengendali mutu dan sponsor perusahaan"},
+            {"unit": "Practice / Engagement Lead", "peran": "menerjemahkan kebutuhan klien ke pendekatan, metodologi, dan pengawasan pelaksanaan", "fungsi": "penanggung jawab delivery"},
+            {"unit": "Project Management Office", "peran": "mengendalikan jadwal, administrasi proyek, dan koordinasi lintas pihak", "fungsi": "pengendali ritme dan dokumentasi kerja"},
+            {"unit": "Tim Ahli / Subject Matter Team", "peran": "menyusun analisis, keluaran kerja, dan dukungan substansi sesuai lingkup pekerjaan", "fungsi": "pelaksana teknis dan substansi"},
+        ]
+
+    @classmethod
+    def _kak_facility_rows(
+        cls,
+        firm_profile: Dict[str, Any],
+        service_type: str,
+    ) -> List[Dict[str, str]]:
+        credentials = cls._summarize_phrase(
+            firm_profile.get("credential_highlights", ""),
+            "kapabilitas internal, sarana kolaborasi, dan dukungan dokumentasi",
+            max_words=18,
+        )
+        return [
+            {"fasilitas": "Perangkat kolaborasi dan rapat kerja", "dukungan": "rapat daring/luring, koordinasi rutin, dan dokumentasi hasil rapat", "manfaat": "mempercepat sinkronisasi keputusan selama pelaksanaan"},
+            {"fasilitas": "Sarana pengolahan dokumen dan analisis", "dukungan": "penyusunan bahan kerja, reviu mutu, dan finalisasi deliverable", "manfaat": "menjaga konsistensi kualitas keluaran"},
+            {"fasilitas": "Dukungan manajemen proyek", "dukungan": f"pengendalian jadwal, tindak lanjut, dan administrasi untuk layanan {service_type}", "manfaat": "menjaga ritme kerja tetap terukur"},
+            {"fasilitas": "Kapabilitas pendukung perusahaan", "dukungan": credentials, "manfaat": "memastikan pelaksanaan pekerjaan didukung sumber daya perusahaan yang memadai"},
+        ]
+
+    @classmethod
+    def _kak_innovation_rows(
+        cls,
+        client: str,
+        project_type: str,
+        ai_mode: bool = False,
+    ) -> List[Dict[str, str]]:
+        rows = [
+            {"gagasan": "Penguatan quality gate pekerjaan", "nilai_tambah": f"membantu {client} menilai hasil tiap fase secara lebih objektif", "penerapan": "diterapkan pada titik review dan persetujuan keluaran"},
+            {"gagasan": "Format deliverable yang lebih siap pakai", "nilai_tambah": "memudahkan sponsor dan tim inti menindaklanjuti hasil kerja", "penerapan": "dimuat pada dokumen, tabel kerja, dan bahan keputusan"},
+            {"gagasan": "Ritme koordinasi yang lebih disiplin", "nilai_tambah": "menurunkan risiko miskomunikasi dan deviasi prioritas", "penerapan": "dipakai pada forum kerja, notulen, dan action tracker"},
+        ]
+        if ai_mode:
+            rows.append(
+                {"gagasan": "Validasi bertahap sebelum perluasan solusi", "nilai_tambah": "menjaga inovasi tetap realistis, aman, dan mudah diadopsi", "penerapan": "dipakai pada fase kesiapan, pilot, dan keputusan scale-up"}
+            )
+        elif (project_type or "").strip().lower() in {"transformation", "implementation"}:
+            rows.append(
+                {"gagasan": "Pemetaan kesiapan implementasi per fase", "nilai_tambah": "membantu pelaksanaan bergerak lebih stabil dan mudah dikendalikan", "penerapan": "dipakai sebelum transisi dari desain ke eksekusi"}
+            )
+        return rows[:4]
 
     @classmethod
     def _company_experience_rows(
@@ -1397,6 +1535,232 @@ class ProposalSupportMixin:
             f"| {item['fase']} | {item['periode']} | {item['tujuan']} | {item['keluaran']} | {item['quality_gate']} |"
             for item in self._methodology_rows(project_type, service_type, timeline, ai_mode=ai_mode)
         )
+
+        if normalized_mode == "kak_response" and chapter["id"].startswith("k_"):
+            verified_contact = self._verified_firm_contact_block(firm_profile)
+            company_structure_rows = "\n".join(
+                f"| {item['unit']} | {item['peran']} | {item['fungsi']} |"
+                for item in self._kak_company_structure_rows()
+            )
+            experience_rows = "\n".join(
+                f"| {item['area']} | {item['relevansi']} | {item['bukti']} | {item['nilai_tambah']} |"
+                for item in self._company_experience_rows(
+                    project_type=project_type,
+                    service_type=service_type,
+                    firm_profile=firm_profile,
+                    value_map=value_map,
+                    ai_mode=ai_mode,
+                )
+            )
+            understanding_points = self._kak_understanding_points(project, project_goal, notes, regulations)
+            response_points = self._kak_response_points(project, project_goal, notes, timeline)
+            understanding_list = "\n".join(
+                f"{label}) {text}"
+                for label, text in understanding_points
+            )
+            response_list = "\n".join(
+                f"{label}) {text}"
+                for label, text in response_points
+            )
+            phase_rows = "\n".join(
+                f"| {item['phase']} | {item['period']} | {item['activity']} | {item['deliverable']} |"
+                for item in phase_plan
+            )
+            expert_rows = "\n".join(
+                f"| {item['peran']} | {item['fokus']} | {item['kompetensi']} | {item['keterlibatan']} |"
+                for item in self._expert_rows(project_type, service_type, regulations, team_points, ai_mode=ai_mode)
+            )
+            deliverable_rows = "\n".join(
+                f"| {item['kategori']} | {item['bentuk']} | {item['tujuan']} |"
+                for item in self._deliverable_matrix(project_type, service_type, ai_mode=ai_mode)
+            )
+            facility_rows = "\n".join(
+                f"| {item['fasilitas']} | {item['dukungan']} | {item['manfaat']} |"
+                for item in self._kak_facility_rows(firm_profile, service_type)
+            )
+            innovation_rows = "\n".join(
+                f"| {item['gagasan']} | {item['nilai_tambah']} | {item['penerapan']} |"
+                for item in self._kak_innovation_rows(client, project_type, ai_mode=ai_mode)
+            )
+
+            if chapter["id"] == "k_1":
+                company_identity_lines = verified_contact or (
+                    "- Nama perusahaan dan data kontak resmi akan disampaikan sesuai dokumen perusahaan yang telah diverifikasi.\n"
+                    f"- Perusahaan penyusun diposisikan sebagai {self._summarize_phrase(value_map.get('positioning', ''), 'mitra konsultasi dan pelaksanaan yang terstruktur', max_words=18)}."
+                )
+                return (
+                    f"Bab ini menyajikan data perusahaan penyusun sebagai dasar administratif dan profesional untuk mendukung penawaran tanggapan Kerangka Acuan Kerja {client}. "
+                    f"Fokusnya adalah menunjukkan identitas perusahaan, struktur organisasi, serta pengalaman pekerjaan sejenis yang relevan dengan kebutuhan {short_project.lower()} (Data Internal, {year}).\n\n"
+                    "## 1.1 Informasi Perusahaan\n"
+                    f"{WRITER_FIRM_NAME} hadir sebagai perusahaan penyusun yang menempatkan kualitas pelaksanaan, disiplin tata kelola, dan ketepatan keluaran sebagai bagian utama dari komitmen layanan. "
+                    f"Dalam konteks pekerjaan {client}, informasi perusahaan ditampilkan untuk memberi kepastian bahwa penawaran ini didukung kapabilitas yang memadai dan pengalaman yang relevan.\n"
+                    "1. Informasi perusahaan dipakai untuk menunjukkan identitas penyedia, posisi layanan, dan kesiapan organisasi.\n"
+                    "2. Informasi ini juga menjadi dasar untuk menilai kecocokan perusahaan penyusun dengan lingkup pekerjaan yang ditawarkan.\n"
+                    f"{company_identity_lines}\n\n"
+                    "## 1.2 Struktur Organisasi Perusahaan\n"
+                    f"Struktur organisasi perusahaan disusun agar fungsi pengendalian mutu, pengelolaan proyek, dan dukungan substansi dapat bergerak seirama selama pekerjaan berlangsung.\n"
+                    "| Unit / Fungsi | Peran Utama | Fungsi dalam Dukungan Pekerjaan |\n"
+                    "| --- | --- | --- |\n"
+                    f"{company_structure_rows}\n\n"
+                    "## 1.3 Daftar Pengalaman Pekerjaan Sejenis\n"
+                    f"Pengalaman pekerjaan sejenis berikut ditampilkan untuk menunjukkan relevansi kemampuan perusahaan penyusun terhadap kebutuhan {client}. "
+                    f"Daftar ini menekankan area pengalaman, bukti kapabilitas, dan nilai tambah yang dapat dibawa pada pelaksanaan pekerjaan.\n"
+                    f"| Area Pengalaman | Relevansi | Bukti Kapabilitas | Nilai Tambah |\n"
+                    "| --- | --- | --- | --- |\n"
+                    f"{experience_rows}\n"
+                    "- Pengalaman sejenis dipakai sebagai dasar keyakinan bahwa pekerjaan dapat dijalankan secara terstruktur.\n"
+                    "- Relevansi pengalaman tidak hanya dilihat dari tema pekerjaan, tetapi juga dari disiplin delivery, pengendalian mutu, dan kualitas hasil kerja."
+                )
+
+            if chapter["id"] == "k_2":
+                anchor_line = self._chapter_anchor_line(
+                    "k_2",
+                    personalization_pack,
+                    prefix="Sebagai konteks eksternal yang tervalidasi"
+                )
+                ai_note = (
+                    f" Untuk konteks AI/adopsi, tanggapan juga memperhatikan kesiapan data, kontrol, dan kemampuan organisasi menyerap perubahan secara bertahap."
+                    if ai_mode else ""
+                )
+                return (
+                    f"Bab ini memuat pemahaman perusahaan penyusun terhadap Kerangka Acuan Kerja serta tanggapan dan saran yang dipandang perlu agar pelaksanaan pekerjaan {client} berlangsung lebih terarah, terukur, dan sesuai tujuan.{ai_note} {anchor_line}".strip() + f" (Data Internal, {year}).\n\n"
+                    "## 2.1 Pemahaman terhadap Kerangka Acuan Kerja\n"
+                    f"Pemahaman terhadap Kerangka Acuan Kerja disusun untuk memastikan bahwa pekerjaan {short_project.lower()} dibaca secara utuh, baik dari sisi latar belakang, tujuan, lingkup, maupun keluaran yang diharapkan.\n"
+                    f"{understanding_list}\n"
+                    f"- Pemahaman ini menempatkan kebutuhan {client} sebagai dasar utama sebelum pendekatan dan metodologi dirumuskan.\n"
+                    f"- Dengan pembacaan yang runtut, proposal tidak berhenti pada pengulangan KAK, melainkan menjadi tanggapan yang menunjukkan kesiapan pelaksanaan.\n\n"
+                    "## 2.2 Tanggapan dan Saran terhadap Kerangka Acuan Kerja\n"
+                    f"Tanggapan dan saran berikut disampaikan untuk memperkuat ketepatan pelaksanaan, menjaga keselarasan ruang lingkup, serta membantu {client} memperoleh hasil kerja yang lebih siap ditindaklanjuti.\n"
+                    f"{response_list}\n"
+                    f"- Tanggapan ini diarahkan untuk menjaga hubungan antara urgensi pekerjaan, ruang lingkup, keluaran, dan kesiapan pelaksanaan.\n"
+                    f"- Apabila dalam pelaksanaan ditemukan butir tambahan pada KAK yang memerlukan penajaman, perusahaan penyusun siap menyesuaikan rincian tanggapan sepanjang tetap sejalan dengan tujuan pekerjaan."
+                )
+
+            if chapter["id"] == "k_3":
+                ai_kak_note = (
+                    f"\n- Untuk konteks AI/adopsi, kerangka dan metodologi juga digunakan untuk menjaga {ai_bridge.lower()}."
+                    if ai_mode else ""
+                )
+                return (
+                    f"Pendekatan dan metodologi pada bab ini dirumuskan untuk menunjukkan bagaimana perusahaan penyusun menjawab KAK secara sistematis. "
+                    f"Bagi {client}, bagian ini penting agar terdapat hubungan yang jelas antara acuan kerja, langkah pelaksanaan, dan kualitas hasil yang ditargetkan (Data Internal, {year}).\n\n"
+                    "## 3.1 Pemilihan Framework\n"
+                    f"Pemilihan kerangka acuan dilakukan untuk memastikan pekerjaan {short_project.lower()} memiliki dasar kerja yang jelas, terukur, dan dapat dipertanggungjawabkan. "
+                    f"Kerangka yang dipilih juga harus mampu menjaga konsistensi antara kebutuhan {client}, ruang lingkup pekerjaan, dan bentuk keluaran yang dijanjikan.\n"
+                    "1. Kerangka acuan dipilih berdasarkan relevansi terhadap tujuan pekerjaan, kompleksitas lingkup, dan kebutuhan tata kelola.\n"
+                    "2. Kerangka acuan dipakai sebagai pedoman agar analisis, keputusan, dan keluaran pekerjaan mempunyai standar yang konsisten.\n"
+                    "| Kerangka / Acuan | Peran dalam Pekerjaan | Relevansi bagi Klien |\n"
+                    "| --- | --- | --- |\n"
+                    f"{framework_rows}\n"
+                    f"{ai_kak_note}\n\n"
+                    "## 3.2 Metodologi Pekerjaan\n"
+                    f"Metodologi pekerjaan disusun agar pelaksanaan dapat bergerak secara bertahap, mulai dari pemahaman kebutuhan sampai keluaran akhir yang diterima {client}. "
+                    f"Dengan metodologi yang jelas, sponsor dapat melihat bagaimana pekerjaan dijalankan, kapan keputusan penting perlu diambil, dan keluaran apa yang dihasilkan pada tiap tahap.\n"
+                    "1. Metodologi menjaga agar tiap fase mempunyai tujuan kerja, keluaran, dan titik pengendalian yang jelas.\n"
+                    "2. Metodologi juga membantu memastikan bahwa tanggapan terhadap KAK turun menjadi program kerja yang dapat dijalankan.\n"
+                    "| Fase | Periode | Tujuan Kerja | Keluaran Utama | Gerbang Mutu |\n"
+                    "| --- | --- | --- | --- | --- |\n"
+                    f"{methodology_rows}\n"
+                    f"- Dengan struktur ini, pekerjaan dapat dikendalikan secara lebih teratur dari awal sampai akhir.\n"
+                    f"- Metodologi juga menjadi dasar bagi penyusunan program kerja, jadwal penugasan, dan pengendalian mutu pada bab berikutnya."
+                )
+
+            if chapter["id"] == "k_4":
+                numbered_phases = "\n".join(
+                    f"{idx}. **{item['phase']}** ({item['period']}): {item['activity']} Keluaran utama: {item['deliverable']}."
+                    for idx, item in enumerate(phase_plan, start=1)
+                )
+                return (
+                    f"Program kerja dan jadwal penugasan disusun agar pelaksanaan pekerjaan {client} dapat berlangsung terukur, disiplin, dan mudah dipantau sepanjang {timeline}. "
+                    f"Bab ini memperlihatkan ritme kerja per fase sekaligus penempatan tenaga ahli sesuai kebutuhan pekerjaan (Data Internal, {year}).\n\n"
+                    "## 4.1 Program Kerja / Timeline\n"
+                    f"Program kerja dibangun dari urutan fase yang realistis terhadap kebutuhan {short_project.lower()}.\n"
+                    f"{numbered_phases}\n"
+                    f"- Setiap fase memiliki keluaran utama yang menjadi dasar evaluasi sebelum melanjutkan ke fase berikutnya.\n"
+                    f"- Program kerja dijaga agar tetap selaras dengan tujuan pekerjaan dan prioritas keputusan {client}.\n"
+                    f"[[GANTT: Jadwal Penugasan | Bulan | {gantt_points}]]\n"
+                    "| Fase | Periode | Aktivitas Kunci | Keluaran |\n"
+                    "| --- | --- | --- | --- |\n"
+                    f"{phase_rows}\n\n"
+                    "## 4.2 Tabel Penugasan Tenaga Ahli\n"
+                    f"Penugasan tenaga ahli berikut disusun untuk memastikan tiap fase didukung peran yang tepat sesuai fokus pekerjaan.\n"
+                    "| Peran Tenaga Ahli | Fokus Tanggung Jawab | Kompetensi Kunci | Keterlibatan |\n"
+                    "| --- | --- | --- | --- |\n"
+                    f"{expert_rows}\n"
+                    f"- Penugasan dapat disesuaikan lebih rinci pada saat kickoff dan finalisasi jadwal bersama {client}.\n"
+                    f"- Tabel ini dipakai untuk memastikan tidak ada fase yang berjalan tanpa dukungan peran yang memadai."
+                )
+
+            if chapter["id"] == "k_5":
+                role_list = "\n".join(
+                    [
+                        "1. Pimpinan pelaksana menjaga arah umum, kualitas, dan pengambilan keputusan strategis.",
+                        "2. Project manager atau PMO lead mengendalikan jadwal, koordinasi, dan tindak lanjut lintas pihak.",
+                        "3. Lead substansi menjaga kualitas analisis, keluaran kerja, dan kesesuaian terhadap kebutuhan klien.",
+                        "4. Reviewer mutu atau governance memastikan hasil pekerjaan memenuhi standar yang disepakati.",
+                    ]
+                )
+                return (
+                    f"Struktur organisasi pelaksana dan komposisi tim pada bab ini dimaksudkan untuk memperjelas tata kerja internal perusahaan penyusun dalam menjalankan pekerjaan {client}. "
+                    f"Dengan struktur yang jelas, peran tiap personel dapat ditelusuri dan akuntabilitas pelaksanaan menjadi lebih kuat (Data Internal, {year}).\n\n"
+                    "## 5.1 Struktur Organisasi Pelaksana\n"
+                    f"{role_list}\n"
+                    f"- Struktur pelaksana dirancang agar koordinasi strategis, kendali mutu, dan pelaksanaan harian tetap saling terhubung.\n"
+                    f"- Susunan ini juga memudahkan {client} memahami jalur koordinasi dan eskalasi selama pekerjaan berlangsung.\n\n"
+                    "## 5.2 Komposisi Tim Tenaga Ahli dan Penugasan\n"
+                    f"Komposisi tim tenaga ahli disajikan agar peran, fokus tugas, dan tingkat keterlibatan tiap personel dapat dibaca secara jelas.\n"
+                    "| Peran | Fokus Tanggung Jawab | Kompetensi / Pengalaman Kunci | Keterlibatan |\n"
+                    "| --- | --- | --- | --- |\n"
+                    f"{expert_rows}\n"
+                    f"- Uraian tugas tiap peran menjadi dasar pengaturan tanggung jawab selama pelaksanaan.\n"
+                    f"- Komposisi tim dapat diperinci lebih lanjut sesuai kebutuhan kickoff dan finalisasi penugasan bersama {client}."
+                )
+
+            if chapter["id"] == "k_6":
+                return (
+                    f"Bab hasil kerja menjelaskan keluaran utama yang akan diterima {client} dari pelaksanaan pekerjaan. "
+                    f"Bagian ini dibuat agar ekspektasi terhadap bentuk hasil, fungsi praktis, dan relevansi tiap keluaran dapat dipahami sejak awal (Data Internal, {year}).\n\n"
+                    "## 6.1 Hasil Kerja (Deliverable)\n"
+                    f"| Kategori Keluaran | Bentuk Keluaran | Tujuan Praktis |\n"
+                    "| --- | --- | --- |\n"
+                    f"{deliverable_rows}\n\n"
+                    "1. Setiap hasil kerja diarahkan untuk mendukung keputusan, pengendalian, atau tindak lanjut yang dibutuhkan klien.\n"
+                    "2. Keluaran tidak hanya diposisikan sebagai dokumen, tetapi sebagai artefak kerja yang siap digunakan pada fase berikutnya.\n"
+                    f"- Bentuk keluaran akhir akan dikalibrasi dengan kebutuhan rinci pekerjaan {client} tanpa melepaskan inti scope yang telah ditawarkan.\n"
+                    f"- Dengan penjelasan ini, klien dapat menilai kecukupan hasil kerja secara lebih objektif."
+                )
+
+            if chapter["id"] == "k_7":
+                return (
+                    f"Fasilitas pendukung pelaksanaan pekerjaan disiapkan agar proses kerja, koordinasi, dan penyusunan keluaran dapat berjalan lebih lancar dan profesional. "
+                    f"Bab ini menunjukkan dukungan perusahaan penyusun terhadap kelancaran pekerjaan {client} (Data Internal, {year}).\n\n"
+                    "## 7.1 Fasilitas Pendukung Pelaksanaan Pekerjaan\n"
+                    f"| Fasilitas | Dukungan yang Disediakan | Manfaat bagi Pelaksanaan |\n"
+                    "| --- | --- | --- |\n"
+                    f"{facility_rows}\n\n"
+                    "1. Fasilitas pendukung disiapkan untuk membantu koordinasi, dokumentasi, dan pengendalian mutu selama pekerjaan berjalan.\n"
+                    "2. Dukungan ini memastikan pekerjaan tidak hanya bergantung pada personel, tetapi juga pada sistem kerja yang memadai.\n"
+                    f"- Pemanfaatan fasilitas akan disesuaikan dengan sifat pekerjaan dan cara kerja yang disepakati bersama {client}.\n"
+                    f"- Dengan dukungan ini, pelaksanaan pekerjaan diharapkan berjalan lebih tertib dan responsif."
+                )
+
+            if chapter["id"] == "k_8":
+                ai_innovation_note = (
+                    f"\n- Pada konteks AI/adopsi, gagasan baru juga diarahkan agar tetap feasible, terkontrol, dan mudah diadopsi organisasi."
+                    if ai_mode else ""
+                )
+                return (
+                    f"Inovasi gagasan baru pada bab ini dimaksudkan sebagai nilai tambah perusahaan penyusun dalam melaksanakan pekerjaan {client}. "
+                    f"Gagasan tersebut tidak dimaksudkan untuk mengubah tujuan pekerjaan, melainkan memperkuat cara pelaksanaannya agar hasil kerja menjadi lebih bernilai dan lebih mudah ditindaklanjuti (Data Internal, {year}).\n\n"
+                    "## 8.1 Inovasi Gagasan Baru\n"
+                    f"| Gagasan Baru | Nilai Tambah | Cara Penerapan |\n"
+                    "| --- | --- | --- |\n"
+                    f"{innovation_rows}\n\n"
+                    "1. Gagasan baru dipilih dengan prinsip realistis, relevan terhadap lingkup kerja, dan dapat diterapkan tanpa mengganggu baseline pekerjaan.\n"
+                    "2. Inovasi diarahkan untuk memperkuat kualitas hasil, disiplin koordinasi, dan kesiapan tindak lanjut setelah pekerjaan selesai.\n"
+                    f"- Inovasi tidak diposisikan sebagai tambahan kosmetik, tetapi sebagai pengungkit untuk meningkatkan nilai manfaat pekerjaan bagi {client}.\n"
+                    f"- Dengan demikian, penawaran ini tetap formal terhadap KAK, namun tetap memberi pembeda yang bernilai.{ai_innovation_note}"
+                )
 
         if chapter["id"] == "c_1":
             anchor_line = self._chapter_anchor_line(
@@ -1807,8 +2171,21 @@ class ProposalSupportMixin:
         if chapter["id"] == "c_closing":
             verified_contact = self._verified_firm_contact_block(firm_profile)
             closing_contact = verified_contact or "- Kontak resmi writer firm akan diberikan sesuai data yang telah diverifikasi."
-            return (
+            visit_line = (
+                "Alamat kantor di atas dapat digunakan sebagai rujukan apabila diperlukan kunjungan on-site, pertemuan lanjutan, atau verifikasi administratif secara langsung."
+                if verified_contact else
+                "Apabila dibutuhkan kunjungan on-site atau pertemuan lanjutan, lokasi dan detail kontak resmi akan dikonfirmasi melalui data perusahaan yang telah diverifikasi."
+            )
+            mode_opening = (
+                f"Terima kasih atas kesempatan yang diberikan kepada {WRITER_FIRM_NAME} untuk menyampaikan tanggapan Kerangka Acuan Kerja bagi {client}. "
+                if normalized_mode == "kak_response" else
                 f"Terima kasih atas kesempatan yang diberikan kepada {WRITER_FIRM_NAME} untuk menyusun proposal bagi {client}. "
+            )
+            aspiration_line = (
+                f"Kami berharap pekerjaan {short_project.lower()} dapat berjalan sebagai fondasi kolaborasi yang profesional, terukur, dan memberi hasil yang benar-benar dapat dipakai oleh {client}."
+            )
+            return (
+                f"{mode_opening}"
                 f"Kami memandang inisiatif {short_project.lower()} bukan hanya sebagai pekerjaan delivery, tetapi sebagai fondasi kemitraan profesional yang harus terasa rapi, hangat, dan dapat dipertanggungjawabkan. "
                 f"Komitmen kami adalah membantu {client} bergerak dari kebutuhan {short_goal.lower()} menuju hasil yang konkret, terukur, dan dapat dijalankan secara disiplin. "
                 f"Di atas itu, kami ingin memastikan bahwa nilai yang dijanjikan dalam proposal ini benar-benar terasa: {short_value} (Data Internal, {year}).\n\n"
@@ -1816,12 +2193,14 @@ class ProposalSupportMixin:
                 f"1. Kami mengapresiasi keterbukaan {client} dalam mengangkat konteks, tantangan, dan target bisnis yang menjadi dasar proposal ini.\n"
                 f"2. Kami berkomitmen menjaga kualitas kolaborasi melalui cara kerja yang jelas, komunikasi yang responsif, dan deliverable yang dapat ditindaklanjuti, sejalan dengan positioning {WRITER_FIRM_NAME} sebagai {self._summarize_phrase(value_map.get('positioning', ''), 'mitra delivery dan konsultasi yang terstruktur', max_words=24)}.\n"
                 f"3. Fokus awal kemitraan diarahkan pada prioritas seperti {kpi_line}, dengan tata kelola dan ritme eksekusi yang stabil sejak kickoff.\n"
+                f"4. {aspiration_line}\n"
                 f"- Nilai kemitraan yang ingin dibangun adalah kombinasi antara kecepatan delivery, {term_line}, disiplin kualitas, dan manfaat seperti {gains_line}.\n"
                 "- Setiap langkah lanjutan akan dibuka secara transparan agar sponsor dan tim inti memiliki ekspektasi yang sama sejak awal.\n"
                 f"- Bila proposal ini disetujui, tahap berikutnya adalah finalisasi scope, konfirmasi tim inti, dan penetapan agenda kickoff bersama {client}.\n\n"
                 "## Informasi Kontak dan Langkah Lanjutan\n"
                 f"Untuk melanjutkan pembahasan, {WRITER_FIRM_NAME} siap menindaklanjuti review proposal, penajaman ruang lingkup, dan penyesuaian komersial yang diperlukan.\n"
                 f"{closing_contact}\n"
+                f"- {visit_line}\n"
                 "- Agenda lanjutan yang disarankan: review scope final, konfirmasi sponsor dan PIC, lalu penjadwalan workshop kickoff.\n"
                 "- Dengan fondasi ini, kemitraan dapat dimulai secara profesional sekaligus tetap terasa personal dan well-hearted."
             )
@@ -1829,16 +2208,17 @@ class ProposalSupportMixin:
         return ""
 
     def _resolve_chapters(self, chapter_id: Optional[str], proposal_mode: str = "canvassing") -> List[Dict[str, Any]]:
+        structure = self._structure_for_mode(proposal_mode)
         normalized_id = (chapter_id or "").strip()
         if not normalized_id or normalized_id.lower() in {"all", "semua"}:
-            return UNIVERSAL_STRUCTURE
+            return structure
 
-        selected = [chapter for chapter in UNIVERSAL_STRUCTURE if chapter["id"] == normalized_id]
+        selected = [chapter for chapter in structure if chapter["id"] == normalized_id]
         if selected:
             return selected
 
         normalized = normalized_id.lower()
-        selected = [chapter for chapter in UNIVERSAL_STRUCTURE if chapter["title"].strip().lower() == normalized]
+        selected = [chapter for chapter in structure if chapter["title"].strip().lower() == normalized]
         if selected:
             return selected
 
@@ -1850,7 +2230,7 @@ class ProposalSupportMixin:
         try:
             chapters = self._resolve_chapters(chapter_id, proposal_mode=proposal_mode)
         except ValueError:
-            chapters = UNIVERSAL_STRUCTURE
+            chapters = self._structure_for_mode(proposal_mode)
 
         client = (data or {}).get("nama_perusahaan", "Klien")
         objective = (data or {}).get("konteks_organisasi", "").strip() or "tujuan proyek belum diisi"
@@ -1905,9 +2285,17 @@ class ProposalSupportMixin:
             })
 
         if proposal_mode == "kak_response":
-            preview_map["c_1"] = f"Menetapkan konteks klien dan menjelaskan posisi tanggapan proposal terhadap kebutuhan kerja {client}."
-            preview_map["c_7"] = "Menegaskan ruang lingkup, batas kerja, serta keluaran yang ditawarkan agar mudah dibandingkan dengan kebutuhan acuan kerja."
-            preview_map["c_12"] = f"Menjelaskan model pembiayaan dan batas komitmen kerja secara formal dengan estimasi {budget}."
+            preview_map = {
+                "k_1": "Menyajikan informasi perusahaan, struktur organisasi perusahaan, dan pengalaman pekerjaan sejenis sebagai dasar kredibilitas penyedia.",
+                "k_2": "Menunjukkan pemahaman terhadap KAK sekaligus tanggapan dan saran atas butir pekerjaan, tujuan, ruang lingkup, dan keluaran yang diminta.",
+                "k_3": f"Menjelaskan pendekatan, pemilihan kerangka acuan, dan metodologi pekerjaan yang paling tepat untuk {client}.",
+                "k_4": f"Menyusun program kerja, timeline, dan tabel penugasan tenaga ahli berdasarkan durasi {timeline}.",
+                "k_5": "Menguraikan struktur organisasi pelaksana, komposisi tim, dan uraian tugas tiap peran utama.",
+                "k_6": "Menegaskan hasil kerja atau deliverable yang akan diterima klien sesuai kebutuhan pekerjaan.",
+                "k_7": "Menjelaskan fasilitas pendukung yang disiapkan untuk menunjang pelaksanaan pekerjaan secara profesional.",
+                "k_8": "Menyampaikan inovasi atau gagasan baru yang relevan dan memberi nilai tambah pada pelaksanaan pekerjaan.",
+                "c_closing": f"Menutup proposal dengan apresiasi kepada {client}, aspirasi pelaksanaan pekerjaan, serta kontak resmi {WRITER_FIRM_NAME} untuk tindak lanjut dan kunjungan on-site.",
+            }
 
         return [
             {
@@ -2972,8 +3360,24 @@ class ProposalSupportMixin:
             "c_11": ["tenaga ahli", "tim", "kapabilitas", "pengalaman", "sertifikasi"],
             "c_12": ["biaya", "pembayaran", "scope", "batasan"],
             "c_closing": ["terima kasih", "langkah lanjutan", "kemitraan"],
+            "k_1": ["informasi perusahaan", "struktur organisasi", "pengalaman pekerjaan sejenis", "kapabilitas"],
+            "k_2": ["kerangka acuan kerja", "pemahaman", "tanggapan", "saran", "lingkup pekerjaan", "keluaran"],
+            "k_3": ["framework", "kerangka acuan", "metodologi", "fase", "gerbang mutu"],
+            "k_4": ["program kerja", "timeline", "penugasan", "tenaga ahli", "gantt"],
+            "k_5": ["struktur organisasi pelaksana", "komposisi tim", "uraian tugas", "tenaga ahli"],
+            "k_6": ["hasil kerja", "deliverable", "keluaran", "output"],
+            "k_7": ["fasilitas pendukung", "pelaksanaan pekerjaan", "dukungan"],
+            "k_8": ["inovasi", "gagasan baru", "nilai tambah"],
         }
         return mapping.get(chapter_id, ["deliverable", "risiko", "kpi"])
+
+    @staticmethod
+    def _chapter_output_by_aliases(chapter_outputs: Dict[str, str], *aliases: str) -> str:
+        for alias in aliases:
+            text = chapter_outputs.get(alias, "")
+            if text:
+                return text
+        return ""
 
     @staticmethod
     def _safe_score(value: float) -> int:
@@ -3011,6 +3415,7 @@ class ProposalSupportMixin:
         value_map: Dict[str, Any],
     ) -> Dict[str, Any]:
         chapter_map = {chapter["id"]: chapter for chapter in selected_chapters}
+        kak_mode = any(chapter["id"].startswith("k_") for chapter in selected_chapters)
         full_text = "\n\n".join(
             chapter_outputs.get(chapter["id"], "")
             for chapter in selected_chapters
@@ -3156,7 +3561,7 @@ class ProposalSupportMixin:
             min(1.0, self._count_signal_hits(full_text, value_map.get("proof_points", []) or [], max_hits=3) / 2.0),
         ]
         verified_contact_lines = FirmAPIClient.build_contact_lines(firm_profile)
-        if verified_contact_lines:
+        if verified_contact_lines and chapter_map.get("c_closing"):
             closing_text = chapter_outputs.get("c_closing", "")
             extracted_contact = FirmAPIClient._extract_contact_fields(closing_text)
             expected_contact = {
@@ -3180,8 +3585,13 @@ class ProposalSupportMixin:
             min(1.0, self._count_signal_hits(full_text, persuasion_terms, max_hits=8) / 5.0),
             min(1.0, self._count_signal_hits(full_text, pressure_terms, max_hits=6) / 3.0),
         ]
-        for chapter_id in ("c_2", "c_3", "c_5", "c_6", "c_10", "c_11", "c_12"):
-            chapter_text = chapter_outputs.get(chapter_id, "")
+        persuasion_aliases = (
+            [("k_2",), ("k_3",), ("k_4",), ("k_5",), ("k_6",), ("k_8",)]
+            if kak_mode else
+            [("c_2",), ("c_3",), ("c_5",), ("c_6",), ("c_10",), ("c_11",), ("c_12",)]
+        )
+        for aliases in persuasion_aliases:
+            chapter_text = self._chapter_output_by_aliases(chapter_outputs, *aliases)
             if not chapter_text:
                 continue
             persuasion_components.append(
@@ -3189,21 +3599,31 @@ class ProposalSupportMixin:
             )
         persuasion_score = self._safe_score(100 * (sum(persuasion_components) / max(len(persuasion_components), 1)))
 
-        usefulness_checks = [
-            1.0 if "[[GANTT:" in chapter_outputs.get("c_8", "") else 0.0 if chapter_map.get("c_8") else 1.0,
-            min(1.0, self._count_signal_hits(chapter_outputs.get("c_5", ""), self._chapter_usefulness_terms("c_5"), max_hits=4) / 2.0) if chapter_map.get("c_5") else 1.0,
-            min(1.0, self._count_signal_hits(chapter_outputs.get("c_6", ""), self._chapter_usefulness_terms("c_6"), max_hits=4) / 2.0) if chapter_map.get("c_6") else 1.0,
-            min(1.0, self._count_signal_hits(chapter_outputs.get("c_10", ""), self._chapter_usefulness_terms("c_10"), max_hits=4) / 2.0) if chapter_map.get("c_10") else 1.0,
-            min(1.0, self._count_signal_hits(chapter_outputs.get("c_11", ""), self._chapter_usefulness_terms("c_11"), max_hits=4) / 2.0) if chapter_map.get("c_11") else 1.0,
-            min(1.0, self._count_signal_hits(chapter_outputs.get("c_12", ""), self._chapter_usefulness_terms("c_12"), max_hits=4) / 2.0) if chapter_map.get("c_12") else 1.0,
-        ]
+        if kak_mode:
+            usefulness_checks = [
+                1.0 if "[[GANTT:" in chapter_outputs.get("k_4", "") else 0.0 if chapter_map.get("k_4") else 1.0,
+                min(1.0, self._count_signal_hits(chapter_outputs.get("k_3", ""), self._chapter_usefulness_terms("k_3"), max_hits=4) / 2.0) if chapter_map.get("k_3") else 1.0,
+                min(1.0, self._count_signal_hits(chapter_outputs.get("k_4", ""), self._chapter_usefulness_terms("k_4"), max_hits=4) / 2.0) if chapter_map.get("k_4") else 1.0,
+                min(1.0, self._count_signal_hits(chapter_outputs.get("k_5", ""), self._chapter_usefulness_terms("k_5"), max_hits=4) / 2.0) if chapter_map.get("k_5") else 1.0,
+                min(1.0, self._count_signal_hits(chapter_outputs.get("k_6", ""), self._chapter_usefulness_terms("k_6"), max_hits=4) / 2.0) if chapter_map.get("k_6") else 1.0,
+                min(1.0, self._count_signal_hits(chapter_outputs.get("k_1", ""), self._chapter_usefulness_terms("k_1"), max_hits=4) / 2.0) if chapter_map.get("k_1") else 1.0,
+            ]
+        else:
+            usefulness_checks = [
+                1.0 if "[[GANTT:" in chapter_outputs.get("c_8", "") else 0.0 if chapter_map.get("c_8") else 1.0,
+                min(1.0, self._count_signal_hits(chapter_outputs.get("c_5", ""), self._chapter_usefulness_terms("c_5"), max_hits=4) / 2.0) if chapter_map.get("c_5") else 1.0,
+                min(1.0, self._count_signal_hits(chapter_outputs.get("c_6", ""), self._chapter_usefulness_terms("c_6"), max_hits=4) / 2.0) if chapter_map.get("c_6") else 1.0,
+                min(1.0, self._count_signal_hits(chapter_outputs.get("c_10", ""), self._chapter_usefulness_terms("c_10"), max_hits=4) / 2.0) if chapter_map.get("c_10") else 1.0,
+                min(1.0, self._count_signal_hits(chapter_outputs.get("c_11", ""), self._chapter_usefulness_terms("c_11"), max_hits=4) / 2.0) if chapter_map.get("c_11") else 1.0,
+                min(1.0, self._count_signal_hits(chapter_outputs.get("c_12", ""), self._chapter_usefulness_terms("c_12"), max_hits=4) / 2.0) if chapter_map.get("c_12") else 1.0,
+            ]
         usefulness_score = self._safe_score(100 * (sum(usefulness_checks) / max(len(usefulness_checks), 1)))
 
         factual_penalty = 0
         if invalid_external_citations:
             factual_penalty += min(50, len(set(invalid_external_citations)) * 20)
-        closing_contact_lines = self._find_contact_like_lines(chapter_outputs.get("c_closing", ""))
-        if verified_contact_lines:
+        closing_contact_lines = self._find_contact_like_lines(chapter_outputs.get("c_closing", "")) if chapter_map.get("c_closing") else []
+        if verified_contact_lines and chapter_map.get("c_closing"):
             allowed_contact_values = set()
             for line in verified_contact_lines:
                 extracted = FirmAPIClient._extract_contact_fields(line)
@@ -3252,28 +3672,53 @@ class ProposalSupportMixin:
                 quality_signals.get("change_adoption", []) + [ai_profile.get("culture_change", ""), ai_profile.get("people_capability", "")],
                 max_terms=20
             )
-            readiness_text = "\n".join([
-                chapter_outputs.get("c_2", ""),
-                chapter_outputs.get("c_3", ""),
-                chapter_outputs.get("c_5", ""),
-                chapter_outputs.get("c_6", ""),
-            ])
-            governance_text = "\n".join([
-                chapter_outputs.get("c_4", ""),
-                chapter_outputs.get("c_9", ""),
-                chapter_outputs.get("c_12", ""),
-            ])
-            delivery_text = "\n".join([
-                chapter_outputs.get("c_5", ""),
-                chapter_outputs.get("c_6", ""),
-                chapter_outputs.get("c_7", ""),
-                chapter_outputs.get("c_8", ""),
-            ])
-            change_text = "\n".join([
-                chapter_outputs.get("c_8", ""),
-                chapter_outputs.get("c_11", ""),
-                full_text,
-            ])
+            if kak_mode:
+                readiness_text = "\n".join([
+                    chapter_outputs.get("k_2", ""),
+                    chapter_outputs.get("k_3", ""),
+                    chapter_outputs.get("k_4", ""),
+                ])
+                governance_text = "\n".join([
+                    chapter_outputs.get("k_2", ""),
+                    chapter_outputs.get("k_3", ""),
+                    chapter_outputs.get("k_5", ""),
+                    chapter_outputs.get("k_7", ""),
+                ])
+                delivery_text = "\n".join([
+                    chapter_outputs.get("k_3", ""),
+                    chapter_outputs.get("k_4", ""),
+                    chapter_outputs.get("k_5", ""),
+                    chapter_outputs.get("k_6", ""),
+                ])
+                change_text = "\n".join([
+                    chapter_outputs.get("k_4", ""),
+                    chapter_outputs.get("k_5", ""),
+                    chapter_outputs.get("k_8", ""),
+                    full_text,
+                ])
+            else:
+                readiness_text = "\n".join([
+                    chapter_outputs.get("c_2", ""),
+                    chapter_outputs.get("c_3", ""),
+                    chapter_outputs.get("c_5", ""),
+                    chapter_outputs.get("c_6", ""),
+                ])
+                governance_text = "\n".join([
+                    chapter_outputs.get("c_4", ""),
+                    chapter_outputs.get("c_9", ""),
+                    chapter_outputs.get("c_12", ""),
+                ])
+                delivery_text = "\n".join([
+                    chapter_outputs.get("c_5", ""),
+                    chapter_outputs.get("c_6", ""),
+                    chapter_outputs.get("c_7", ""),
+                    chapter_outputs.get("c_8", ""),
+                ])
+                change_text = "\n".join([
+                    chapter_outputs.get("c_8", ""),
+                    chapter_outputs.get("c_11", ""),
+                    full_text,
+                ])
             ai_components = [
                 min(1.0, self._count_signal_hits(full_text, business_terms, max_hits=8) / 4.0),
                 min(1.0, self._count_signal_hits(readiness_text, readiness_terms, max_hits=8) / 4.0),
