@@ -37,6 +37,10 @@ from docx.shared import Pt, RGBColor, Inches, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+try:
+    from pypdf import PdfReader
+except Exception:  # pragma: no cover - optional document extraction dependency
+    PdfReader = None
 
 from ollama import Client
 from chromadb.utils import embedding_functions

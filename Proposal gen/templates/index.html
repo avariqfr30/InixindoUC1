@@ -67,6 +67,14 @@
         .history-meta { font-size: 0.84rem; color: #64748b; margin-bottom: 10px; line-height: 1.5; }
         .small-note { font-size: 0.82rem; color: #64748b; margin: 0 0 10px 0; }
         .template-status { background: #f8fafc; border: 1px dashed #cbd5e1; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 0.86rem; color: #475569; }
+        .upload-row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+        .upload-row input[type="file"] { flex: 1 1 280px; margin-bottom: 0; background: #ffffff; }
+        .upload-row button { width: auto; margin: 0; }
+        .document-list { display: grid; gap: 8px; margin-bottom: 14px; }
+        .document-item { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; background: #f8fafc; }
+        .document-item strong { display: block; color: #0f172a; font-size: 0.9rem; margin-bottom: 4px; }
+        .document-meta-note { font-size: 0.8rem; color: #64748b; line-height: 1.45; }
+        .document-item button { width: auto; margin: 0; }
         
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
@@ -202,16 +210,32 @@
             <div class="modal-header">
                 <div>
                     <h3>Pengaturan Proposal</h3>
-                    <p class="small-note">Simpan portofolio internal dan blanko template agar proposal berikutnya terasa lebih konkret dan tetap mengikuti styling perusahaan.</p>
+                    <p class="small-note">Simpan ringkasan internal, unggah file pendukung portofolio/sertifikasi, dan aktifkan blanko template agar proposal berikutnya terasa lebih konkret serta tetap mengikuti styling perusahaan.</p>
                 </div>
                 <button type="button" id="btn-close-settings" class="secondary">Tutup</button>
             </div>
 
             <label for="settings-portfolio">Portofolio Internal / Pengalaman Serupa</label>
             <textarea id="settings-portfolio" class="rich-editor-source" placeholder="Gunakan satu baris per pengalaman. Format yang disarankan: Area | Relevansi | Bukti | Nilai tambah"></textarea>
+            <label for="settings-portfolio-files">File Pendukung Portofolio</label>
+            <div class="upload-row">
+                <input type="file" id="settings-portfolio-files" accept=".docx,.pdf,.txt,.md" multiple />
+                <button type="button" id="btn-upload-portfolio-files" class="secondary">Upload File Portofolio</button>
+            </div>
+            <div id="portfolio-doc-list" class="document-list">
+                <div class="template-status">Belum ada file pendukung portofolio yang diunggah.</div>
+            </div>
 
             <label for="settings-credentials">Kapabilitas & Sertifikasi Internal</label>
             <textarea id="settings-credentials" class="rich-editor-source" placeholder="Contoh: ISO 27001 | COBIT | IT Governance | Change Management | Enterprise Architecture"></textarea>
+            <label for="settings-credential-files">File Pendukung Kapabilitas & Sertifikasi</label>
+            <div class="upload-row">
+                <input type="file" id="settings-credential-files" accept=".docx,.pdf,.txt,.md" multiple />
+                <button type="button" id="btn-upload-credential-files" class="secondary">Upload File Kapabilitas</button>
+            </div>
+            <div id="credential-doc-list" class="document-list">
+                <div class="template-status">Belum ada file pendukung kapabilitas yang diunggah.</div>
+            </div>
 
             <label for="settings-template-file">Blanko / Template Proposal (.docx)</label>
             <input type="file" id="settings-template-file" accept=".docx" />
@@ -263,7 +287,13 @@
             btnCloseSettings: document.getElementById('btn-close-settings'),
             historyList: document.getElementById('history-list'),
             settingsPortfolio: document.getElementById('settings-portfolio'),
+            settingsPortfolioFiles: document.getElementById('settings-portfolio-files'),
+            btnUploadPortfolioFiles: document.getElementById('btn-upload-portfolio-files'),
+            portfolioDocList: document.getElementById('portfolio-doc-list'),
             settingsCredentials: document.getElementById('settings-credentials'),
+            settingsCredentialFiles: document.getElementById('settings-credential-files'),
+            btnUploadCredentialFiles: document.getElementById('btn-upload-credential-files'),
+            credentialDocList: document.getElementById('credential-doc-list'),
             settingsTemplateFile: document.getElementById('settings-template-file'),
             templateStatus: document.getElementById('template-status'),
             btnSaveSettings: document.getElementById('btn-save-settings'),
@@ -645,17 +675,92 @@
             }
         }
 
+        function formatFileSize(bytes) {
+            const value = Number(bytes || 0);
+            if (!value) return 'ukuran file belum tercatat';
+            if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+            return `${Math.max(1, Math.round(value / 1024))} KB`;
+        }
+
+        function renderSupportingDocuments(target, items, emptyMessage) {
+            const docs = Array.isArray(items) ? items : [];
+            if (!docs.length) {
+                target.innerHTML = `<div class="template-status">${emptyMessage}</div>`;
+                return;
+            }
+            target.innerHTML = docs.map(item => `
+                <div class="document-item">
+                    <div>
+                        <strong>${escapeHtml(item.original_name || 'Dokumen pendukung')}</strong>
+                        <div class="document-meta-note">
+                            Diunggah ${escapeHtml(item.uploaded_at_label || '-')} · ${escapeHtml(formatFileSize(item.byte_size))}
+                            ${item.has_text ? ' · teks berhasil dibaca' : ' · teks belum berhasil diekstrak'}
+                        </div>
+                    </div>
+                    <button type="button" class="secondary" onclick="removeSupportingDocument('${item.id}')">Hapus</button>
+                </div>
+            `).join('');
+        }
+
         async function loadSettings() {
             try {
                 const res = await fetch('/api/settings');
                 const data = await res.json();
                 setRichEditorValue(ui.settingsPortfolio, data.internal_portfolio || '');
                 setRichEditorValue(ui.settingsCredentials, data.internal_credentials || '');
+                renderSupportingDocuments(
+                    ui.portfolioDocList,
+                    data.portfolio_documents || [],
+                    'Belum ada file pendukung portofolio yang diunggah.'
+                );
+                renderSupportingDocuments(
+                    ui.credentialDocList,
+                    data.credential_documents || [],
+                    'Belum ada file pendukung kapabilitas yang diunggah.'
+                );
                 ui.templateStatus.textContent = data.has_active_template
                     ? `Template aktif: ${data.active_template_name || 'blanko proposal'}`
                     : 'Belum ada template blanko aktif.';
             } catch (_) {
+                ui.portfolioDocList.innerHTML = '<div class="template-status">File pendukung portofolio belum bisa dimuat.</div>';
+                ui.credentialDocList.innerHTML = '<div class="template-status">File pendukung kapabilitas belum bisa dimuat.</div>';
                 ui.templateStatus.textContent = 'Pengaturan belum bisa dimuat.';
+            }
+        }
+
+        async function uploadSupportingDocuments(documentType, inputEl) {
+            const files = Array.from((inputEl && inputEl.files) || []);
+            if (!files.length) {
+                return alert('Pilih minimal satu file pendukung terlebih dahulu.');
+            }
+            const formData = new FormData();
+            formData.append('document_type', documentType);
+            files.forEach(file => formData.append('files', file));
+            try {
+                const res = await fetch('/api/settings/documents', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'File pendukung belum berhasil diunggah.');
+                inputEl.value = '';
+                await loadSettings();
+                alert('File pendukung berhasil diunggah.');
+            } catch (err) {
+                alert(err.message || 'File pendukung belum berhasil diunggah.');
+            }
+        }
+
+        async function removeSupportingDocument(documentId) {
+            try {
+                const res = await fetch(`/api/settings/documents/${encodeURIComponent(documentId)}`, {
+                    method: 'DELETE'
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'File pendukung belum berhasil dihapus.');
+                await loadSettings();
+            } catch (err) {
+                alert(err.message || 'File pendukung belum berhasil dihapus.');
             }
         }
 
@@ -677,6 +782,7 @@
 
         window.reuseHistory = reuseHistory;
         window.downloadHistory = downloadHistory;
+        window.removeSupportingDocument = removeSupportingDocument;
 
         ui.selPerusahaan.addEventListener('change', () => {
             ui.containerDynamic.classList.remove('hidden');
@@ -719,6 +825,14 @@
             } catch (err) {
                 alert(err.message || 'Pengaturan belum berhasil disimpan.');
             }
+        });
+
+        ui.btnUploadPortfolioFiles.addEventListener('click', async () => {
+            await uploadSupportingDocuments('portfolio', ui.settingsPortfolioFiles);
+        });
+
+        ui.btnUploadCredentialFiles.addEventListener('click', async () => {
+            await uploadSupportingDocuments('credentials', ui.settingsCredentialFiles);
         });
 
         ui.btnUploadTemplate.addEventListener('click', async () => {

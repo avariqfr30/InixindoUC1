@@ -1590,8 +1590,13 @@ class AppStateStore:
         self.asset_root = Path(asset_root or APP_ASSET_ROOT)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.templates_dir = self.asset_root / "templates"
+        self.supporting_docs_dir = self.asset_root / "supporting_documents"
+        self.portfolio_docs_dir = self.supporting_docs_dir / "portfolio"
+        self.credentials_docs_dir = self.supporting_docs_dir / "credentials"
         self.generated_dir = Path(GENERATED_OUTPUT_DIR)
         self.templates_dir.mkdir(parents=True, exist_ok=True)
+        self.portfolio_docs_dir.mkdir(parents=True, exist_ok=True)
+        self.credentials_docs_dir.mkdir(parents=True, exist_ok=True)
         self.generated_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self._bootstrap_generated_history()
@@ -1631,6 +1636,20 @@ class AppStateStore:
                     filename TEXT NOT NULL,
                     filepath TEXT NOT NULL,
                     payload_json TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS supporting_documents (
+                    id TEXT PRIMARY KEY,
+                    document_type TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    original_name TEXT NOT NULL,
+                    stored_name TEXT NOT NULL,
+                    filepath TEXT NOT NULL,
+                    extracted_text TEXT NOT NULL DEFAULT '',
+                    byte_size INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -1730,6 +1749,232 @@ class AppStateStore:
             )
             conn.commit()
 
+    @staticmethod
+    def _normalize_document_type(value: str) -> str:
+        normalized = SchemaMapper.normalize_key(value)
+        aliases = {
+            "portfolio": "portfolio",
+            "portofolio": "portfolio",
+            "credential": "credentials",
+            "credentials": "credentials",
+            "sertifikasi": "credentials",
+            "kapabilitas": "credentials",
+        }
+        if normalized not in aliases:
+            raise ValueError("Jenis dokumen pendukung tidak dikenal.")
+        return aliases[normalized]
+
+    def _supporting_dir_for_type(self, document_type: str) -> Path:
+        normalized = self._normalize_document_type(document_type)
+        return self.portfolio_docs_dir if normalized == "portfolio" else self.credentials_docs_dir
+
+    @staticmethod
+    def _read_text_bytes(raw_bytes: bytes) -> str:
+        for encoding in ("utf-8", "utf-8-sig", "latin-1"):
+            try:
+                return raw_bytes.decode(encoding)
+            except Exception:
+                continue
+        return raw_bytes.decode("utf-8", errors="ignore")
+
+    @staticmethod
+    def _extract_docx_text(raw_bytes: bytes) -> str:
+        try:
+            doc = Document(io.BytesIO(raw_bytes))
+        except Exception:
+            return ""
+
+        blocks: List[str] = []
+        for paragraph in doc.paragraphs:
+            text = re.sub(r"\s+", " ", str(paragraph.text or "")).strip()
+            if text:
+                blocks.append(text)
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [
+                    re.sub(r"\s+", " ", str(cell.text or "")).strip()
+                    for cell in row.cells
+                ]
+                cells = [cell for cell in cells if cell]
+                if cells:
+                    blocks.append(" | ".join(cells))
+        return "\n".join(blocks).strip()
+
+    @staticmethod
+    def _normalize_extracted_text(text: str) -> str:
+        lines: List[str] = []
+        for raw_line in str(text or "").replace("\r\n", "\n").split("\n"):
+            line = re.sub(r"[ \t]+", " ", raw_line).strip()
+            if not line:
+                continue
+            lines.append(line)
+        cleaned = "\n".join(lines)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
+    @classmethod
+    def _extract_supporting_document_text(cls, filename: str, raw_bytes: bytes) -> str:
+        suffix = Path(str(filename or "")).suffix.lower()
+        if suffix == ".docx":
+            return cls._normalize_extracted_text(cls._extract_docx_text(raw_bytes))
+        if suffix in {".txt", ".md"}:
+            return cls._normalize_extracted_text(cls._read_text_bytes(raw_bytes))
+        if suffix == ".pdf" and PdfReader is not None:
+            try:
+                reader = PdfReader(io.BytesIO(raw_bytes))
+                extracted = "\n".join((page.extract_text() or "") for page in reader.pages)
+                return cls._normalize_extracted_text(extracted)
+            except Exception:
+                return ""
+        return ""
+
+    @staticmethod
+    def _trim_supporting_text(text: str, max_words: int = 220) -> str:
+        words = str(text or "").split()
+        if len(words) <= max_words:
+            return str(text or "").strip()
+        return " ".join(words[:max_words]).strip()
+
+    def _serialize_document_row(self, row: sqlite3.Row) -> Dict[str, Any]:
+        filepath = str(row["filepath"] or "")
+        extracted_text = str(row["extracted_text"] or "")
+        return {
+            "id": row["id"],
+            "document_type": row["document_type"],
+            "original_name": row["original_name"],
+            "stored_name": row["stored_name"],
+            "filepath": filepath,
+            "uploaded_at": float(row["created_at"] or 0.0),
+            "uploaded_at_label": self._format_timestamp(float(row["created_at"] or 0.0)),
+            "byte_size": int(row["byte_size"] or 0),
+            "has_text": bool(extracted_text.strip()),
+            "exists": bool(filepath and Path(filepath).exists()),
+        }
+
+    def list_supporting_documents(self, document_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        query = """
+            SELECT id, document_type, created_at, original_name, stored_name, filepath, extracted_text, byte_size
+            FROM supporting_documents
+        """
+        params: Tuple[Any, ...] = ()
+        if document_type:
+            normalized = self._normalize_document_type(document_type)
+            query += " WHERE document_type = ?"
+            params = (normalized,)
+        query += " ORDER BY created_at DESC, original_name ASC"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._serialize_document_row(row) for row in rows]
+
+    def save_supporting_documents(self, document_type: str, uploads: List[Tuple[str, bytes]]) -> Dict[str, Any]:
+        normalized = self._normalize_document_type(document_type)
+        target_dir = self._supporting_dir_for_type(normalized)
+        saved_any = False
+        with self._connect() as conn:
+            for filename, raw_bytes in uploads:
+                if not filename or not raw_bytes:
+                    continue
+                safe_name = self._sanitize_filename(filename, fallback=f"{normalized}_supporting_document")
+                suffix = Path(safe_name).suffix.lower()
+                if suffix not in {".docx", ".pdf", ".txt", ".md"}:
+                    continue
+                stored_name = f"{uuid.uuid4().hex}_{safe_name}"
+                target_path = target_dir / stored_name
+                target_path.write_bytes(raw_bytes)
+                extracted_text = self._extract_supporting_document_text(filename, raw_bytes)
+                conn.execute(
+                    """
+                    INSERT INTO supporting_documents(
+                        id, document_type, created_at, original_name, stored_name, filepath, extracted_text, byte_size
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        uuid.uuid4().hex,
+                        normalized,
+                        time.time(),
+                        str(filename),
+                        stored_name,
+                        str(target_path),
+                        extracted_text,
+                        int(len(raw_bytes)),
+                    ),
+                )
+                saved_any = True
+            conn.commit()
+        if not saved_any:
+            raise ValueError("Belum ada file pendukung yang valid untuk diunggah.")
+        return self.get_settings()
+
+    def delete_supporting_document(self, document_id: str) -> Dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT filepath
+                FROM supporting_documents
+                WHERE id = ?
+                """,
+                (str(document_id or ""),),
+            ).fetchone()
+            if not row:
+                raise KeyError("Dokumen pendukung tidak ditemukan.")
+            filepath = Path(str(row["filepath"] or ""))
+            conn.execute("DELETE FROM supporting_documents WHERE id = ?", (str(document_id or ""),))
+            conn.commit()
+        if filepath.exists():
+            try:
+                filepath.unlink()
+            except OSError:
+                pass
+        return self.get_settings()
+
+    def _collect_supporting_document_text(self, document_type: str, max_documents: int = 4, max_words: int = 220) -> str:
+        normalized = self._normalize_document_type(document_type)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT extracted_text
+                FROM supporting_documents
+                WHERE document_type = ? AND extracted_text <> ''
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (normalized, int(max_documents)),
+            ).fetchall()
+        chunks = [self._trim_supporting_text(str(row["extracted_text"] or ""), max_words=max_words) for row in rows]
+        chunks = [chunk for chunk in chunks if chunk]
+        return "\n".join(chunks).strip()
+
+    @classmethod
+    def _fallback_portfolio_rows_from_text(cls, text: str) -> List[Dict[str, str]]:
+        rows: List[Dict[str, str]] = []
+        seen: Set[str] = set()
+        for raw_line in str(text or "").splitlines():
+            line = re.sub(r"^\s*[-*•\d.]+\s*", "", raw_line).strip()
+            line = re.sub(r"\s+", " ", line)
+            if len(line.split()) < 4:
+                continue
+            normalized = SchemaMapper.normalize_key(line)
+            if not normalized or normalized in seen:
+                continue
+            if normalized in {
+                "profil_perusahaan", "profile_perusahaan", "kapabilitas", "sertifikasi",
+                "pengalaman", "project_experience", "portofolio", "portfolio"
+            }:
+                continue
+            seen.add(normalized)
+            rows.append(
+                {
+                    "area": line[:160],
+                    "relevansi": "relevan untuk menunjukkan pengalaman serupa dan kesiapan pelaksanaan pekerjaan",
+                    "bukti": "dokumen portofolio internal perusahaan penyusun",
+                    "nilai_tambah": "memperkuat kredibilitas proposal dan membantu klien melihat bukti kemampuan secara lebih konkret",
+                }
+            )
+            if len(rows) >= 4:
+                break
+        return rows
+
     def get_settings(self) -> Dict[str, Any]:
         template_path = self.get_template_path()
         return {
@@ -1737,6 +1982,8 @@ class AppStateStore:
             "internal_credentials": self._get_setting("internal_credentials"),
             "active_template_name": self._get_setting("active_template_name"),
             "has_active_template": bool(template_path and Path(template_path).exists()),
+            "portfolio_documents": self.list_supporting_documents("portfolio"),
+            "credential_documents": self.list_supporting_documents("credentials"),
         }
 
     def save_settings(self, internal_portfolio: str = "", internal_credentials: str = "") -> Dict[str, Any]:
@@ -1814,13 +2061,40 @@ class AppStateStore:
         profile = dict(firm_profile or {})
         internal_portfolio = self._get_setting("internal_portfolio", "")
         internal_credentials = self._get_setting("internal_credentials", "")
-        portfolio_bits = [str(profile.get("portfolio_highlights") or "").strip(), internal_portfolio.strip()]
+        portfolio_docs_text = self._collect_supporting_document_text("portfolio", max_documents=4, max_words=180)
+        credential_docs_text = self._collect_supporting_document_text("credentials", max_documents=4, max_words=160)
+        portfolio_bits = [
+            str(profile.get("portfolio_highlights") or "").strip(),
+            internal_portfolio.strip(),
+            portfolio_docs_text.strip(),
+        ]
         portfolio_text = " ; ".join([item for item in portfolio_bits if item])
         if portfolio_text:
             profile["portfolio_highlights"] = portfolio_text
-        if internal_credentials.strip():
-            profile["credential_highlights"] = internal_credentials.strip()
-        profile["internal_portfolio_rows"] = self._parse_structured_portfolio_rows(internal_portfolio)
+        credential_bits = [
+            str(profile.get("credential_highlights") or "").strip(),
+            internal_credentials.strip(),
+            credential_docs_text.strip(),
+        ]
+        credential_text = " ; ".join([item for item in credential_bits if item])
+        if credential_text:
+            profile["credential_highlights"] = credential_text
+        structured_rows = self._parse_structured_portfolio_rows(internal_portfolio)
+        if not structured_rows and "|" in portfolio_docs_text:
+            structured_rows = self._parse_structured_portfolio_rows(portfolio_docs_text)
+        if not structured_rows:
+            structured_rows = self._fallback_portfolio_rows_from_text(portfolio_docs_text)
+        profile["internal_portfolio_rows"] = structured_rows
+        profile["portfolio_document_names"] = [
+            item.get("original_name", "")
+            for item in self.list_supporting_documents("portfolio")
+            if str(item.get("original_name") or "").strip()
+        ]
+        profile["credential_document_names"] = [
+            item.get("original_name", "")
+            for item in self.list_supporting_documents("credentials")
+            if str(item.get("original_name") or "").strip()
+        ]
         return profile
 
     def persist_generated_file(self, suggested_name: str, content: bytes) -> Path:

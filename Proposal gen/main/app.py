@@ -338,6 +338,7 @@ def ready():
             app_state_store.db_path.exists()
             and app_state_store.generated_dir.exists()
             and app_state_store.templates_dir.exists()
+            and app_state_store.supporting_docs_dir.exists()
         )
     except Exception as exc:
         app_state_error = str(exc)
@@ -346,6 +347,7 @@ def ready():
         "db_path": str(app_state_store.db_path),
         "generated_dir": str(app_state_store.generated_dir),
         "templates_dir": str(app_state_store.templates_dir),
+        "supporting_docs_dir": str(app_state_store.supporting_docs_dir),
         "error": app_state_error,
     }
 
@@ -573,6 +575,33 @@ def proposal_template_settings():
     if not uploaded.filename.lower().endswith('.docx'):
         return jsonify({"error": "Template harus berformat .docx."}), 400
     settings = app_state_store.save_template(uploaded.filename, uploaded.read())
+    return jsonify(settings)
+
+
+@app.route('/api/settings/documents', methods=['POST'])
+def proposal_supporting_documents():
+    document_type = str(request.form.get('document_type') or "").strip()
+    uploaded_files = request.files.getlist('files')
+    uploads: list[tuple[str, bytes]] = []
+    for item in uploaded_files:
+        if not item or not item.filename:
+            continue
+        uploads.append((str(item.filename), item.read()))
+    if not uploads:
+        return jsonify({"error": "Pilih minimal satu file pendukung untuk diunggah."}), 400
+    try:
+        settings = app_state_store.save_supporting_documents(document_type, uploads)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(settings)
+
+
+@app.route('/api/settings/documents/<document_id>', methods=['DELETE'])
+def delete_proposal_supporting_document(document_id: str):
+    try:
+        settings = app_state_store.delete_supporting_document(document_id)
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
     return jsonify(settings)
 
 
