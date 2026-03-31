@@ -183,7 +183,17 @@ class FirmAPIClient:
         base_profile["office_address"] = base_profile.get("office_address") or WRITER_FIRM_OFFICE_ADDRESS
         base_profile["email"] = base_profile.get("email") or WRITER_FIRM_EMAIL
         base_profile["phone"] = base_profile.get("phone") or WRITER_FIRM_PHONE
+        base_profile["whatsapp"] = base_profile.get("whatsapp") or WRITER_FIRM_WHATSAPP
         base_profile["website"] = base_profile.get("website") or WRITER_FIRM_WEBSITE
+        base_profile["legal_name"] = base_profile.get("legal_name") or WRITER_FIRM_LEGAL_NAME
+        base_profile["operating_hours"] = base_profile.get("operating_hours") or WRITER_FIRM_OPERATING_HOURS
+        base_profile["profile_summary"] = base_profile.get("profile_summary") or WRITER_FIRM_PROFILE_SUMMARY
+        base_profile["credential_highlights"] = (
+            base_profile.get("credential_highlights") or WRITER_FIRM_CREDENTIAL_HIGHLIGHTS
+        )
+        base_profile["official_source_urls"] = (
+            base_profile.get("official_source_urls") or WRITER_FIRM_SOURCE_URLS
+        )
         return cls._normalize_firm_profile(base_profile)
 
     def get_firm_profile(self) -> Dict[str, str]:
@@ -279,10 +289,16 @@ class FirmAPIClient:
     def _extract_contact_fields(cls, text: str) -> Dict[str, str]:
         office_candidates = cls._extract_address_candidates(text)
         website = cls._extract_first(r"(?:https?://|www\.)[A-Za-z0-9./_%#?=&-]+\.[A-Za-z]{2,}", text)
+        whatsapp_match = re.search(
+            r"(?:whatsapp|wa)\s*[:\-]?\s*((?:\+62|62|0)\d[\d\-\s()]{7,}\d)",
+            text or "",
+            flags=re.IGNORECASE
+        )
         return {
             "office_address": office_candidates[0] if office_candidates else "",
             "email": cls._extract_first(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text),
             "phone": cls._extract_first(r"(?:\+62|62|0)\d[\d\-\s()]{7,}\d", text),
+            "whatsapp": whatsapp_match.group(1).strip() if whatsapp_match else "",
             "website": website.rstrip(".,;)"),
         }
 
@@ -293,7 +309,9 @@ class FirmAPIClient:
         office_address = cls._clean_contact_value(str(profile.get("office_address") or ""))
         email = cls._clean_contact_value(str(profile.get("email") or ""))
         phone = cls._clean_contact_value(str(profile.get("phone") or ""))
+        whatsapp = cls._clean_contact_value(str(profile.get("whatsapp") or ""))
         website = cls._clean_contact_value(str(profile.get("website") or ""))
+        operating_hours = cls._clean_contact_value(str(profile.get("operating_hours") or ""))
 
         if office_address:
             lines.append(f"Alamat kantor: {office_address}")
@@ -301,10 +319,14 @@ class FirmAPIClient:
             lines.append(f"Email: {email}")
         if phone:
             lines.append(f"Telp: {phone}")
+        if whatsapp and whatsapp != phone:
+            lines.append(f"WhatsApp: {whatsapp}")
         if website:
             if not re.match(r"^https?://", website, flags=re.IGNORECASE):
                 website = f"https://{website.lstrip('/')}"
             lines.append(f"Website: {website}")
+        if operating_hours:
+            lines.append(f"Jam operasional: {operating_hours}")
         return lines
 
     @classmethod
@@ -335,6 +357,12 @@ class FirmAPIClient:
             or parsed.get("phone")
             or ""
         ))
+        whatsapp = cls._clean_contact_value(str(
+            source.get("whatsapp")
+            or source.get("wa")
+            or parsed.get("whatsapp")
+            or ""
+        ))
         website = cls._clean_contact_value(str(
             source.get("website")
             or source.get("url")
@@ -342,12 +370,43 @@ class FirmAPIClient:
             or ""
         ))
         portfolio = cls._clean_contact_value(str(source.get("portfolio_highlights") or ""))
+        legal_name = cls._clean_contact_value(str(
+            source.get("legal_name")
+            or source.get("company_legal_name")
+            or WRITER_FIRM_LEGAL_NAME
+        ))
+        operating_hours = cls._clean_contact_value(str(
+            source.get("operating_hours")
+            or source.get("business_hours")
+            or WRITER_FIRM_OPERATING_HOURS
+        ))
+        profile_summary = cls._clean_contact_value(str(
+            source.get("profile_summary")
+            or source.get("company_summary")
+            or source.get("summary")
+            or WRITER_FIRM_PROFILE_SUMMARY
+        ))
+        credential_highlights = cls._clean_contact_value(str(
+            source.get("credential_highlights")
+            or source.get("credentials")
+            or source.get("capabilities")
+            or WRITER_FIRM_CREDENTIAL_HIGHLIGHTS
+        ))
+        official_source_urls = source.get("official_source_urls") or WRITER_FIRM_SOURCE_URLS
+        if isinstance(official_source_urls, str):
+            official_source_urls = [item.strip() for item in official_source_urls.split(",") if item.strip()]
+        elif isinstance(official_source_urls, list):
+            official_source_urls = [str(item).strip() for item in official_source_urls if str(item).strip()]
+        else:
+            official_source_urls = list(WRITER_FIRM_SOURCE_URLS)
         contact_lines = cls.build_contact_lines(
             {
                 "office_address": office_address,
                 "email": email,
                 "phone": phone,
+                "whatsapp": whatsapp,
                 "website": website,
+                "operating_hours": operating_hours,
             }
         )
 
@@ -355,7 +414,13 @@ class FirmAPIClient:
             "office_address": office_address,
             "email": email,
             "phone": phone,
+            "whatsapp": whatsapp,
             "website": website,
+            "legal_name": legal_name,
+            "operating_hours": operating_hours,
+            "profile_summary": profile_summary,
+            "credential_highlights": credential_highlights,
+            "official_source_urls": official_source_urls,
             "contact_info": "\n".join(contact_lines),
             "portfolio_highlights": portfolio or "Kapabilitas layanan menyesuaikan kebutuhan proyek klien.",
         }
@@ -422,11 +487,17 @@ class FirmAPIClient:
 
         return self._normalize_firm_profile(
             {
-                "office_address": parsed.get("office_address", ""),
-                "email": parsed.get("email", ""),
-                "phone": parsed.get("phone", ""),
-                "website": parsed.get("website", ""),
-                "portfolio_highlights": "Kapabilitas layanan menyesuaikan kebutuhan proyek klien.",
+                "office_address": parsed.get("office_address", "") or WRITER_FIRM_OFFICE_ADDRESS,
+                "email": parsed.get("email", "") or WRITER_FIRM_EMAIL,
+                "phone": parsed.get("phone", "") or WRITER_FIRM_PHONE,
+                "whatsapp": parsed.get("whatsapp", "") or WRITER_FIRM_WHATSAPP,
+                "website": parsed.get("website", "") or WRITER_FIRM_WEBSITE,
+                "legal_name": WRITER_FIRM_LEGAL_NAME,
+                "operating_hours": WRITER_FIRM_OPERATING_HOURS,
+                "profile_summary": WRITER_FIRM_PROFILE_SUMMARY,
+                "credential_highlights": WRITER_FIRM_CREDENTIAL_HIGHLIGHTS,
+                "official_source_urls": WRITER_FIRM_SOURCE_URLS,
+                "portfolio_highlights": WRITER_FIRM_PORTFOLIO,
             }
         )
 
@@ -2880,6 +2951,254 @@ class DocumentBuilder:
                 continue
             body.remove(child)
         return doc, True
+
+    @staticmethod
+    def _coerce_theme_color(theme_color: Tuple[int, int, int]) -> Tuple[int, int, int]:
+        if not isinstance(theme_color, tuple) or len(theme_color) != 3:
+            return DEFAULT_COLOR
+        channels = []
+        for channel in theme_color:
+            try:
+                value = int(channel)
+            except Exception:
+                value = 0
+            channels.append(max(0, min(255, value)))
+        return tuple(channels)
+
+    @staticmethod
+    def _muted_theme_color(theme_color: Tuple[int, int, int]) -> Tuple[int, int, int]:
+        base = DocumentBuilder._coerce_theme_color(theme_color)
+        return tuple(max(25, min(235, int((channel * 0.72) + 24))) for channel in base)
+
+    @staticmethod
+    def _set_cell_text(cell, text: str, bold: bool = False) -> None:
+        cell.text = ""
+        paragraph = cell.paragraphs[0]
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        paragraph.paragraph_format.space_after = Pt(0)
+        run = paragraph.add_run(str(text or "").strip())
+        run.bold = bold
+
+    @staticmethod
+    def add_reference_cover_page(
+        doc: Document,
+        client: str,
+        project: str,
+        service_type: str,
+        project_type: str,
+        timeline: str,
+        budget: str,
+        firm_profile: Optional[Dict[str, Any]],
+        theme_color: Tuple[int, int, int],
+        logo_stream: Optional[io.BytesIO] = None,
+    ) -> None:
+        muted_color = DocumentBuilder._muted_theme_color(theme_color)
+        for _ in range(3):
+            doc.add_paragraph()
+
+        if logo_stream:
+            try:
+                logo_stream.seek(0)
+                cover_logo = doc.add_paragraph()
+                cover_logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                cover_logo.add_run().add_picture(logo_stream, width=Inches(3.0))
+            except (UnrecognizedImageError, OSError, ValueError) as exc:
+                logger.warning("Logo skipped due to unsupported image format: %s", exc)
+
+        doc.add_paragraph()
+
+        title = doc.add_paragraph()
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title.paragraph_format.space_after = Pt(4)
+        title_run = title.add_run("PROPOSAL STRATEGIS")
+        title_run.bold = True
+        title_run.font.size = Pt(18)
+        title_run.font.name = "Arial"
+
+        client_name = doc.add_paragraph()
+        client_name.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        client_name.paragraph_format.space_after = Pt(10)
+        client_run = client_name.add_run((client or "Klien").upper())
+        client_run.bold = True
+        client_run.font.size = Pt(28)
+        client_run.font.name = "Arial"
+        client_run.font.color.rgb = RGBColor(*muted_color)
+
+        initiative = doc.add_paragraph()
+        initiative.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        initiative.paragraph_format.space_after = Pt(6)
+        initiative_run = initiative.add_run(project or f"{service_type} - {project_type}")
+        initiative_run.italic = True
+        initiative_run.font.size = Pt(15)
+
+        meta_bits = [bit for bit in [service_type, project_type] if str(bit or "").strip()]
+        if timeline:
+            meta_bits.append(f"Durasi {timeline}")
+        if meta_bits:
+            meta_line = doc.add_paragraph(" | ".join(meta_bits))
+            meta_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            meta_line.paragraph_format.space_after = Pt(2)
+            for run in meta_line.runs:
+                run.font.size = Pt(10)
+                run.font.color.rgb = RGBColor(110, 118, 128)
+
+        if budget:
+            budget_line = doc.add_paragraph(f"Estimasi investasi: {budget}")
+            budget_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            budget_line.paragraph_format.space_after = Pt(0)
+            for run in budget_line.runs:
+                run.font.size = Pt(10)
+                run.font.color.rgb = RGBColor(110, 118, 128)
+
+        for _ in range(5):
+            doc.add_paragraph()
+
+        signature = doc.add_paragraph()
+        signature.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        signature.paragraph_format.space_before = Pt(8)
+        signature_run = signature.add_run("Disusun Oleh:")
+        signature_run.font.size = Pt(11)
+        signature_run.font.name = "Arial"
+        signature.add_run().add_break()
+
+        firm_run = signature.add_run(WRITER_FIRM_NAME)
+        firm_run.bold = True
+        firm_run.font.size = Pt(14)
+        firm_run.font.name = "Arial"
+
+        legal_name = str((firm_profile or {}).get("legal_name") or "").strip()
+        if legal_name and legal_name.lower() != WRITER_FIRM_NAME.lower():
+            signature.add_run().add_break()
+            legal_run = signature.add_run(legal_name)
+            legal_run.font.size = Pt(9)
+            legal_run.font.color.rgb = RGBColor(110, 118, 128)
+
+        doc.add_page_break()
+
+    @staticmethod
+    def add_reference_chapter_heading(
+        doc: Document,
+        chapter_title: str,
+        theme_color: Tuple[int, int, int],
+    ) -> None:
+        muted_color = DocumentBuilder._muted_theme_color(theme_color)
+        try:
+            heading = doc.add_paragraph(style="Heading 1")
+        except KeyError:
+            heading = doc.add_paragraph()
+        heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        heading.paragraph_format.space_before = Pt(0)
+        heading.paragraph_format.space_after = Pt(16)
+        run = heading.add_run(chapter_title)
+        run.bold = True
+        run.font.name = "Arial"
+        run.font.size = Pt(16)
+        run.font.color.rgb = RGBColor(*muted_color)
+
+    @staticmethod
+    def add_writer_firm_profile_section(
+        doc: Document,
+        firm_profile: Optional[Dict[str, Any]],
+        theme_color: Tuple[int, int, int],
+    ) -> None:
+        profile = firm_profile or {}
+        summary = str(profile.get("profile_summary") or "").strip()
+        portfolio = str(profile.get("portfolio_highlights") or "").strip()
+        credentials = str(profile.get("credential_highlights") or "").strip()
+        legal_name = str(profile.get("legal_name") or "").strip()
+
+        contact_rows = [
+            ("Alamat kantor", profile.get("office_address", "")),
+            ("Email", profile.get("email", "")),
+            ("Telp", profile.get("phone", "")),
+            ("WhatsApp", profile.get("whatsapp", "")),
+            ("Website", profile.get("website", "")),
+            ("Jam operasional", profile.get("operating_hours", "")),
+        ]
+        detail_rows = [
+            ("Entitas hukum", legal_name),
+            ("Fokus layanan", "Pelatihan IT, sertifikasi, dan konsultasi IT."),
+            ("Portofolio", portfolio),
+            ("Kapabilitas", credentials),
+        ]
+        visible_detail_rows = [(label, str(value or "").strip()) for label, value in detail_rows if str(value or "").strip()]
+        visible_contact_rows = [(label, str(value or "").strip()) for label, value in contact_rows if str(value or "").strip()]
+
+        if not summary and not visible_detail_rows and not visible_contact_rows:
+            return
+
+        StyleEngine.add_horizontal_line(doc, color=(214, 220, 228))
+
+        muted_color = DocumentBuilder._muted_theme_color(theme_color)
+        try:
+            heading = doc.add_paragraph(style="Heading 2")
+        except KeyError:
+            heading = doc.add_paragraph()
+        heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        heading.paragraph_format.space_before = Pt(8)
+        heading.paragraph_format.space_after = Pt(8)
+        heading_run = heading.add_run("Profil Penulis Proposal")
+        heading_run.bold = True
+        heading_run.font.name = "Arial"
+        heading_run.font.size = Pt(12)
+        heading_run.font.color.rgb = RGBColor(*muted_color)
+
+        if summary:
+            summary_paragraph = doc.add_paragraph(summary)
+            summary_paragraph.paragraph_format.space_after = Pt(8)
+
+        if visible_detail_rows:
+            details_table = doc.add_table(rows=1, cols=2)
+            details_table.style = "Table Grid"
+            DocumentBuilder._set_cell_text(details_table.rows[0].cells[0], "Aspek", bold=True)
+            DocumentBuilder._set_cell_text(details_table.rows[0].cells[1], "Keterangan", bold=True)
+            for label, value in visible_detail_rows:
+                row = details_table.add_row().cells
+                DocumentBuilder._set_cell_text(row[0], label, bold=True)
+                DocumentBuilder._set_cell_text(row[1], value)
+
+        if visible_contact_rows:
+            doc.add_paragraph()
+            contact_title = doc.add_paragraph()
+            contact_title.paragraph_format.space_after = Pt(6)
+            run = contact_title.add_run("Kontak Resmi")
+            run.bold = True
+            run.font.name = "Arial"
+            run.font.size = Pt(11)
+            run.font.color.rgb = RGBColor(*muted_color)
+
+            contact_table = doc.add_table(rows=1, cols=2)
+            contact_table.style = "Table Grid"
+            DocumentBuilder._set_cell_text(contact_table.rows[0].cells[0], "Kanal", bold=True)
+            DocumentBuilder._set_cell_text(contact_table.rows[0].cells[1], "Detail", bold=True)
+            for label, value in visible_contact_rows:
+                row = contact_table.add_row().cells
+                DocumentBuilder._set_cell_text(row[0], label, bold=True)
+                DocumentBuilder._set_cell_text(row[1], value)
+
+        source_urls = profile.get("official_source_urls") or []
+        if isinstance(source_urls, str):
+            source_urls = [item.strip() for item in source_urls.split(",") if item.strip()]
+        domains = []
+        seen_domains = set()
+        for url in source_urls:
+            host = urlparse(str(url or "")).netloc.replace("www.", "").strip()
+            if not host or host in seen_domains:
+                continue
+            seen_domains.add(host)
+            domains.append(host)
+        if domains:
+            note = doc.add_paragraph()
+            note.paragraph_format.space_before = Pt(6)
+            note.paragraph_format.space_after = Pt(0)
+            note_run = note.add_run(
+                "Profil dan kontak pada bagian ini dirangkum dari kanal resmi yang terverifikasi: "
+                + ", ".join(domains)
+                + "."
+            )
+            note_run.italic = True
+            note_run.font.size = Pt(9)
+            note_run.font.color.rgb = RGBColor(110, 118, 128)
 
     @staticmethod
     def _append_text_run(paragraph, text: str, bold: bool = False, italic: bool = False) -> None:

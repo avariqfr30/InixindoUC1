@@ -49,12 +49,71 @@ PAGE_SAFETY_BUFFER = 1
 # Writer identity.
 WRITER_FIRM_NAME = "Inixindo Jogja"
 DEFAULT_COLOR = (0, 51, 102)
-WRITER_FIRM_OFFICE_ADDRESS = os.getenv("WRITER_FIRM_OFFICE_ADDRESS", "").strip()
-WRITER_FIRM_EMAIL = os.getenv("WRITER_FIRM_EMAIL", "").strip()
-WRITER_FIRM_PHONE = os.getenv("WRITER_FIRM_PHONE", "").strip()
-WRITER_FIRM_WEBSITE = os.getenv("WRITER_FIRM_WEBSITE", "").strip()
+WRITER_FIRM_OFFICE_ADDRESS = os.getenv(
+    "WRITER_FIRM_OFFICE_ADDRESS",
+    "Jalan Kenari 69, Yogyakarta, D.I. Yogyakarta"
+).strip()
+WRITER_FIRM_EMAIL = os.getenv(
+    "WRITER_FIRM_EMAIL",
+    "marketing@inixindojogja.co.id"
+).strip()
+WRITER_FIRM_PHONE = os.getenv(
+    "WRITER_FIRM_PHONE",
+    "(0274) 515448, 554419"
+).strip()
+WRITER_FIRM_WHATSAPP = os.getenv(
+    "WRITER_FIRM_WHATSAPP",
+    "+62 823-2549-0909"
+).strip()
+WRITER_FIRM_WEBSITE = os.getenv(
+    "WRITER_FIRM_WEBSITE",
+    "https://inixindojogja.co.id/"
+).strip()
+WRITER_FIRM_LEGAL_NAME = os.getenv(
+    "WRITER_FIRM_LEGAL_NAME",
+    "PT Inixindo Widya Iswara Nusantara"
+).strip()
+WRITER_FIRM_OPERATING_HOURS = os.getenv(
+    "WRITER_FIRM_OPERATING_HOURS",
+    "Senin-Jumat, 08.00-17.00 WIB"
+).strip()
 WRITER_FIRM_CONTACT_INFO = os.getenv("WRITER_FIRM_CONTACT_INFO", "").strip()
-WRITER_FIRM_PORTFOLIO = os.getenv("WRITER_FIRM_PORTFOLIO", "").strip()
+WRITER_FIRM_PORTFOLIO = os.getenv(
+    "WRITER_FIRM_PORTFOLIO",
+    (
+        "Dipercaya oleh ribuan perusahaan, menyediakan layanan pelatihan, sertifikasi, dan "
+        "IT consulting, serta bekerja sama dengan vendor global seperti Microsoft, AWS, dan EC-Council."
+    )
+).strip()
+WRITER_FIRM_PROFILE_SUMMARY = os.getenv(
+    "WRITER_FIRM_PROFILE_SUMMARY",
+    (
+        "Inixindo Jogja adalah mitra pelatihan, sertifikasi, dan konsultasi IT yang membantu individu "
+        "dan perusahaan mempercepat kapabilitas digital melalui kurikulum standar internasional, instruktur praktisi, "
+        "dan layanan konsultasi yang berorientasi pada implementasi."
+    )
+).strip()
+WRITER_FIRM_CREDENTIAL_HIGHLIGHTS = os.getenv(
+    "WRITER_FIRM_CREDENTIAL_HIGHLIGHTS",
+    (
+        "Instruktur bersertifikasi internasional, kurikulum terbarukan, dan kolaborasi dengan vendor global "
+        "di area cloud, cyber security, jaringan, data center, dan enterprise systems."
+    )
+).strip()
+WRITER_FIRM_SOURCE_URLS = [
+    url.strip()
+    for url in os.getenv(
+        "WRITER_FIRM_SOURCE_URLS",
+        ",".join(
+            [
+                "https://inixindojogja.co.id/",
+                "https://inixindojogja.co.id/performers/",
+                "https://www.inixindo.id/training/it-risk-management/",
+            ]
+        ),
+    ).split(",")
+    if url.strip()
+]
 
 COMPANY_DNA = {
     "positioning": (
@@ -369,7 +428,13 @@ MOCK_FIRM_PROFILE = {
     "office_address": WRITER_FIRM_OFFICE_ADDRESS,
     "email": WRITER_FIRM_EMAIL,
     "phone": WRITER_FIRM_PHONE,
+    "whatsapp": WRITER_FIRM_WHATSAPP,
     "website": WRITER_FIRM_WEBSITE,
+    "legal_name": WRITER_FIRM_LEGAL_NAME,
+    "operating_hours": WRITER_FIRM_OPERATING_HOURS,
+    "profile_summary": WRITER_FIRM_PROFILE_SUMMARY,
+    "credential_highlights": WRITER_FIRM_CREDENTIAL_HIGHLIGHTS,
+    "official_source_urls": WRITER_FIRM_SOURCE_URLS,
     "contact_info": WRITER_FIRM_CONTACT_INFO,
     "portfolio_highlights": WRITER_FIRM_PORTFOLIO
 }

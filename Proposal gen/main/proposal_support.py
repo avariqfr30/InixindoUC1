@@ -3947,31 +3947,21 @@ class ProposalSupportMixin:
         firm_profile: Optional[Dict[str, Any]] = None,
         office_location: str = ""
     ) -> str:
-        """Enhance existing closing content with comprehensive firm information."""
-        if not closing_content:
-            closing_content = ""
-        
-        # Build firm information section
-        firm_section = ProposalSupportMixin._build_firm_information_section(firm_name, office_location)
-        
-        if not firm_section:
-            return closing_content
-        
-        # Combine existing content with firm information
-        result = closing_content.strip()
-        
-        # Add separator if content exists
+        """Keep closing content concise; the structured firm profile is rendered in DOCX assembly."""
+        result = (closing_content or "").strip()
         if result:
-            result += "\n\n---\n\n"
-        
-        result += firm_section
-        
-        # Add footer with contact information if available
-        if firm_profile:
-            contact_lines = FirmAPIClient.build_contact_lines(firm_profile)
-            if contact_lines:
-                result += "\n\n**Kontak Resmi:**\n"
-                for line in contact_lines:
-                    result += f"- {line}\n"
-        
-        return result
+            return result
+
+        profile = firm_profile or {}
+        summary = str(profile.get("profile_summary") or "").strip()
+        contact_lines = FirmAPIClient.build_contact_lines(profile)
+
+        if not summary and not contact_lines:
+            return ""
+
+        parts = []
+        if summary:
+            parts.append(summary)
+        if contact_lines:
+            parts.append("## Informasi Kontak dan Langkah Lanjutan\n\n" + "\n".join(f"- {line}" for line in contact_lines))
+        return "\n\n".join(parts)

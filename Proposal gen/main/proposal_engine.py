@@ -742,69 +742,32 @@ class ProposalEngineMixin:
         template_path = app_state_store.get_template_path() if app_state_store else ""
         doc, using_template = DocumentBuilder.create_base_document(template_path)
         StyleEngine.apply_document_styles(doc, preserve_existing=using_template)
-        
-        # Cover page.
-        for _ in range(2):
-            doc.add_paragraph()
 
-        if logo_stream:
-            try:
-                logo_stream.seek(0)
-                cover_logo = doc.add_paragraph()
-                cover_logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                cover_logo.add_run().add_picture(logo_stream, width=Inches(1.8))
-            except (UnrecognizedImageError, OSError, ValueError) as e:
-                logger.warning(f"Logo skipped due to unsupported image format: {e}")
-
-        title = doc.add_paragraph("ARSITEKTUR PROPOSAL")
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        title_run = title.runs[0]
-        title_run.bold = True
-        title_run.font.size = Pt(30)
-        title_run.font.color.rgb = RGBColor(*theme_color)
-
-        if len(selected_chapters) == 1:
-            subtitle_text = f"{selected_chapters[0]['title']} ({service_type} – {project_type})"
-        else:
-            subtitle_text = f"{service_type} – {project_type}"
-
-        subtitle = doc.add_paragraph(subtitle_text)
-        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        subtitle.runs[0].font.size = Pt(14)
-
-        doc.add_paragraph()
-        client_line = doc.add_paragraph(f"Untuk: {client}")
-        client_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        client_line.runs[0].bold = True
-        client_line.runs[0].font.size = Pt(16)
-
-        project_line = doc.add_paragraph(f"Inisiatif: {project}")
-        project_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        meta = doc.add_paragraph(
-            f"Durasi: {timeline} | Estimasi Investasi: {budget or 'Menyesuaikan ruang lingkup'} | Tanggal: {datetime.now().strftime('%d %B %Y')}"
+        DocumentBuilder.add_reference_cover_page(
+            doc=doc,
+            client=client,
+            project=project,
+            service_type=service_type,
+            project_type=project_type,
+            timeline=timeline,
+            budget=budget,
+            firm_profile=firm_profile,
+            theme_color=theme_color,
+            logo_stream=logo_stream,
         )
-        meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        firm_contact_lines = FirmAPIClient.build_contact_lines(firm_profile)
-        contact_text = f"Disusun oleh {WRITER_FIRM_NAME}"
-        if firm_contact_lines:
-            contact_text += "\n" + "\n".join(firm_contact_lines)
-        contact = doc.add_paragraph(contact_text)
-        contact.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        doc.add_page_break()
 
         rendered_any = False
+        rendered_firm_profile = False
         for i, chapter in enumerate(selected_chapters):
             content = chapter_outputs.get(chapter['id'], '').strip()
             if not content:
                 continue
             rendered_any = True
-            h = doc.add_heading(chapter['title'], level=1)
-            h.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            h.runs[0].font.color.rgb = RGBColor(*theme_color)
+            DocumentBuilder.add_reference_chapter_heading(doc, chapter['title'], theme_color)
             DocumentBuilder.process_content(doc, content, theme_color, chapter['title'])
+            if chapter['id'] == "c_closing" and not rendered_firm_profile:
+                DocumentBuilder.add_writer_firm_profile_section(doc, firm_profile, theme_color)
+                rendered_firm_profile = True
 
             has_next = any(
                 chapter_outputs.get(next_chapter['id'], '').strip()
