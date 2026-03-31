@@ -70,11 +70,11 @@ class ProposalSupportMixin:
             match = re.search(pattern, line)
             if not match:
                 continue
-            fact = re.sub(r"\s+", " ", (match.group("fact") or "")).strip()
+            fact = ProposalSupportMixin._sanitize_anchor_fact(match.group("fact") or "")
             title = re.sub(r"\s+", " ", (match.group("title") or "")).strip()
             url = (match.group("url") or "").strip()
             citation = (match.group("citation") or "").strip()
-            if not fact:
+            if not fact or ProposalSupportMixin._is_low_signal_anchor_url(url):
                 continue
             facts.append({
                 "fact": fact[:240],
@@ -130,6 +130,69 @@ class ProposalSupportMixin:
                 if len(keywords) >= 10:
                     return keywords
         return keywords
+
+    @staticmethod
+    def _human_join(values: Any, fallback: str = "", max_items: int = 3, conjunction: str = "dan") -> str:
+        raw_items = values if isinstance(values, list) else [values]
+        cleaned: List[str] = []
+        seen: Set[str] = set()
+        for raw in raw_items:
+            text = re.sub(r"\s+", " ", str(raw or "").strip())
+            if not text:
+                continue
+            parts = re.split(r"\s*[|\n;]+\s*", text)
+            for part in parts:
+                value = re.sub(r"^\d+\.\s*", "", part or "").strip(" ,;:-")
+                if not value:
+                    continue
+                key = value.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                cleaned.append(value)
+                if len(cleaned) >= max_items:
+                    break
+            if len(cleaned) >= max_items:
+                break
+
+        if not cleaned:
+            return fallback
+        if len(cleaned) == 1:
+            return cleaned[0]
+        if len(cleaned) == 2:
+            return f"{cleaned[0]} {conjunction} {cleaned[1]}"
+        return f"{', '.join(cleaned[:-1])}, {conjunction} {cleaned[-1]}"
+
+    @staticmethod
+    def _is_low_signal_anchor_url(url: str) -> bool:
+        domain = Researcher._source_name(url)
+        blocked = (
+            "instagram.com",
+            "facebook.com",
+            "x.com",
+            "twitter.com",
+            "tiktok.com",
+            "linkedin.com",
+            "youtube.com",
+            "youtu.be",
+        )
+        return any(domain == item or domain.endswith(f".{item}") for item in blocked)
+
+    @staticmethod
+    def _sanitize_anchor_fact(raw_text: str) -> str:
+        text = str(raw_text or "").strip()
+        if not text:
+            return ""
+        text = re.sub(r"https?://\S+|www\.\S+", "", text, flags=re.IGNORECASE)
+        text = re.sub(
+            r"\((?:[A-Za-z0-9.-]+\.[A-Za-z]{2,}|Data Internal),\s*(?:\d{4}|n\.d\.)\)",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(r"\b(?:instagram|facebook|linkedin|twitter|tiktok|youtube|x)\.com\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip(" ,;:-.")
 
     @staticmethod
     def _extract_anchor_keywords(facts: List[Dict[str, str]], max_terms: int = 10) -> List[str]:
@@ -662,7 +725,7 @@ class ProposalSupportMixin:
             f"Industry Drivers: {', '.join(data.get('industry_drivers', []) or []) or '-'}",
             f"Differentiators: {', '.join(data.get('differentiators', []) or []) or '-'}",
             f"Proof Points: {', '.join(data.get('proof_points', []) or []) or '-'}",
-            f"KPI Bridge: {' | '.join(data.get('kpi_bridge', []) or []) or '-'}",
+            f"KPI Bridge: {ProposalSupportMixin._human_join(data.get('kpi_bridge', []) or [], fallback='-')}",
             f"Human Review: {', '.join(data.get('human_touch_points', []) or []) or '-'}",
             f"AI Summary: {data.get('ai_summary', '-')}",
             f"Review Note: {data.get('review_note', '-')}",
@@ -694,17 +757,15 @@ class ProposalSupportMixin:
 
     @classmethod
     def _clean_external_citations(cls, content: str, allowed_external_citations: Set[str]) -> str:
-        allowed = set(allowed_external_citations or set())
         pattern = r"\(([A-Za-z0-9.-]+\.[A-Za-z]{2,}),\s*(\d{4}|n\.d\.)\)"
+        internal_pattern = r"\((Data Internal),\s*(\d{4}|n\.d\.)\)"
 
-        def replace_invalid(match: re.Match) -> str:
-            citation = cls._normalize_external_citation(match.group(1), match.group(2))
-            return match.group(0) if citation in allowed else ""
-
-        cleaned = re.sub(pattern, replace_invalid, content or "", flags=re.IGNORECASE)
+        cleaned = re.sub(pattern, "", content or "", flags=re.IGNORECASE)
+        cleaned = re.sub(internal_pattern, "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
         cleaned = re.sub(r"\(\s*\)", "", cleaned)
         cleaned = re.sub(r"\s+([,.;:])", r"\1", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
         return cleaned
 
     @staticmethod
@@ -769,9 +830,25 @@ class ProposalSupportMixin:
         def current_text() -> str:
             return "\n".join(lines).strip()
 
+        def line_kind(raw_line: str) -> str:
+            line = raw_line.strip()
+            if not line:
+                return "blank"
+            if line.startswith("## ") or line.startswith("### "):
+                return "heading"
+            if line.startswith("|"):
+                return "table"
+            if line.startswith("[["):
+                return "visual"
+            if re.match(r"^\d+\.\s+", line):
+                return "numbered"
+            if re.match(r"^[-*]\s+", line):
+                return "bullet"
+            return "plain"
+
         for idx in range(len(lines) - 1, -1, -1):
             line = lines[idx].strip()
-            if not line.startswith("- "):
+            if line_kind(line) != "plain":
                 continue
             if any(token in line for token in protected_contact_tokens):
                 continue
@@ -781,14 +858,38 @@ class ProposalSupportMixin:
 
         for idx in range(len(lines) - 1, -1, -1):
             line = lines[idx].strip()
-            if not line or line.startswith("## ") or line.startswith("|") or line.startswith("[[GANTT:"):
+            if line_kind(line) != "plain":
                 continue
-            if re.match(r"^\d+\.\s+", line):
+            if any(token in line for token in protected_contact_tokens):
                 continue
             sentences = re.split(r"(?<=[.!?])\s+", line)
             if len(sentences) < 3:
                 continue
             lines[idx] = " ".join(sentences[:2]).strip()
+            if self._word_count(current_text()) <= target_words:
+                return current_text()
+
+        def count_lines(kind: str) -> int:
+            return sum(1 for item in lines if line_kind(item) == kind)
+
+        for idx in range(len(lines) - 1, -1, -1):
+            line = lines[idx].strip()
+            if line_kind(line) != "bullet":
+                continue
+            if count_lines("bullet") <= 1:
+                break
+            if any(token in line for token in protected_contact_tokens):
+                continue
+            lines.pop(idx)
+            if self._word_count(current_text()) <= target_words:
+                return current_text()
+
+        for idx in range(len(lines) - 1, -1, -1):
+            if line_kind(lines[idx]) != "numbered":
+                continue
+            if count_lines("numbered") <= 1:
+                break
+            lines.pop(idx)
             if self._word_count(current_text()) <= target_words:
                 return current_text()
 
@@ -801,7 +902,7 @@ class ProposalSupportMixin:
             return []
         matches = re.findall(r"(?:^|\n)\s*(?:\d+\.|[-*])\s*(.+)", text)
         if not matches:
-            matches = re.split(r"[;\n]+", text)
+            matches = re.split(r"[;|\n]+", text)
         cleaned: List[str] = []
         for item in matches:
             value = re.sub(r"\s+", " ", str(item or "")).strip(" -.;:")
@@ -829,6 +930,13 @@ class ProposalSupportMixin:
             return ""
 
         text = text.replace("\r", "\n")
+        text = re.sub(
+            r"\((?:[A-Za-z0-9.-]+\.[A-Za-z]{2,}|Data Internal),\s*(?:\d{4}|n\.d\.)\)",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(r"https?://\S+|www\.\S+", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s*\n+\s*", " ", text)
         text = re.sub(r"[•▪◦●]+", ", ", text)
         text = re.sub(r"(?:(?<=^)|(?<=[\s,;:]))\d+\.\s+", ", ", text)
@@ -864,7 +972,7 @@ class ProposalSupportMixin:
         if not facts:
             return "", ""
         first = facts[0] or {}
-        fact = re.sub(r"\s+", " ", str(first.get("fact", "") or "")).strip()
+        fact = ProposalSupportMixin._sanitize_anchor_fact(first.get("fact", "") or "")
         citation = str(first.get("citation", "") or "").strip()
         return fact, citation
 
@@ -877,10 +985,31 @@ class ProposalSupportMixin:
     ) -> str:
         if chapter_id not in cls._anchor_required_chapters():
             return ""
-        fact, citation = cls._extract_first_external_anchor(personalization_pack)
-        if not fact or not citation:
+        fact, _ = cls._extract_first_external_anchor(personalization_pack)
+        if not fact:
             return ""
-        return f"{prefix}, {fact} {citation}."
+        return f"{prefix}, {fact}."
+
+    def _has_anchor_signal(self, content: str, personalization_pack: Optional[Dict[str, Any]]) -> bool:
+        data = personalization_pack or {}
+        citations = [item for item in (data.get("anchor_citations", []) or []) if item]
+        if citations and any(citation in (content or "") for citation in citations):
+            return True
+
+        anchor_keywords = [item for item in (data.get("anchor_keywords", []) or []) if item]
+        if anchor_keywords:
+            required_hits = 1 if len(anchor_keywords) < 2 else 2
+            if self._count_signal_hits(content or "", anchor_keywords, max_hits=required_hits) >= required_hits:
+                return True
+
+        for item in (data.get("initiative_facts", []) or [])[:2]:
+            fact = self._sanitize_anchor_fact(item.get("fact", "") or "")
+            tokens = fact.split()
+            fragment = " ".join(tokens[: min(8, len(tokens))]).strip()
+            if fragment and re.search(re.escape(fragment), content or "", re.IGNORECASE):
+                return True
+
+        return not bool(citations or anchor_keywords or data.get("initiative_facts"))
 
     @staticmethod
     def _normalize_proposal_mode(proposal_mode: str) -> str:
@@ -1514,7 +1643,7 @@ class ProposalSupportMixin:
         terminology = personalization_pack.get("terminology", []) or []
         kpi_blueprint = personalization_pack.get("kpi_blueprint", []) or []
         term_line = ", ".join(terminology[:3]) if terminology else "tata kelola, pelaksanaan, pengendalian risiko"
-        kpi_line = " | ".join(kpi_blueprint[:3]) if kpi_blueprint else f"hasil bisnis utama {client}"
+        kpi_line = self._human_join(kpi_blueprint[:3], fallback=f"hasil bisnis utama {client}")
         short_notes = self._summarize_phrase(notes, "risiko delivery dan kesiapan stakeholder")
         short_project = self._summarize_phrase(project, "inisiatif prioritas klien")
         short_goal = self._summarize_phrase(project_goal, "kebutuhan inti klien")
@@ -1540,9 +1669,15 @@ class ProposalSupportMixin:
             if self._summarize_phrase(point, "", max_words=10)
         ) if proof_points else "kapabilitas internal, metodologi pelaksanaan, dan kontrol mutu"
         client_gains = value_map.get("client_gains", []) or []
-        gains_line = ", ".join(client_gains[:3]) if client_gains else "kejelasan keputusan, kontrol risiko, dan hasil bisnis yang lebih terukur"
+        gains_line = self._human_join(
+            client_gains[:3],
+            fallback="kejelasan keputusan, kontrol risiko, dan hasil bisnis yang lebih terukur",
+        )
         differentiators = value_map.get("differentiators", []) or []
-        differentiator_line = ", ".join(differentiators[:2]) if differentiators else "pendekatan pelaksanaan yang rapi dan tetap relevan dengan kebutuhan sponsor"
+        differentiator_line = self._human_join(
+            differentiators[:2],
+            fallback="pendekatan pelaksanaan yang rapi dan tetap relevan dengan kebutuhan sponsor",
+        )
         standard_method = self._summarize_phrase(firm_data.get("methodology", ""), "metodologi pelaksanaan internal")
         value_hook_line = self._summarize_phrase(
             value_map.get("value_hook", ""),
@@ -1550,7 +1685,11 @@ class ProposalSupportMixin:
             max_words=14,
         )
         team_points = self._split_plain_points(firm_data.get("team", ""), max_items=5)
-        team_summary = ", ".join(team_points) if team_points else "tim pelaksana inti, peninjau mutu, dan pendukung substansi"
+        team_summary = self._human_join(
+            team_points,
+            fallback="tim pelaksana inti, peninjau mutu, dan pendukung substansi",
+            max_items=5,
+        )
         commercial_summary = self._summarize_phrase(firm_data.get("commercial", ""), "mekanisme komersial mengikuti baseline internal")
         payment_plan = self._build_ai_payment_plan() if ai_mode else self._build_payment_plan(project_type, budget)
         phase_plan = self._build_ai_phase_plan(timeline) if ai_mode else self._build_phase_plan(project_type, timeline)
@@ -1848,18 +1987,17 @@ class ProposalSupportMixin:
                 f"Tekanan yang paling menonjol dapat dibaca dari {self._summarize_phrase(notes, 'kebutuhan menjaga hasil bisnis, kontrol pelaksanaan, dan koordinasi eksekusi', max_words=24).lower()}. "
                 f"Karena itu, konteks organisasi perlu dibaca bukan hanya dari profil umum klien, tetapi dari tuntutan agar target seperti {kpi_line} tetap bergerak dalam horizon {timeline or 'proyek'}.\n"
                 f"1. Prioritas pertama adalah memastikan keputusan sponsor tetap terhubung ke kebutuhan inti {short_goal.lower()}.\n"
-                f"2. Prioritas kedua adalah menjaga bahasa kerja {term_line} agar forum bisnis, pelaksanaan, dan tata kelola membaca arah yang sama.\n"
-                f"3. Prioritas ketiga adalah menyiapkan pola kerja yang memungkinkan {client} bergerak lebih terukur tanpa kehilangan kontrol terhadap risiko dan ketergantungan lintas fungsi.\n"
+                f"2. Prioritas kedua adalah menjaga bahasa kerja {term_line} agar forum bisnis dan pelaksana membaca arah yang sama.\n"
                 f"- Konteks ini menunjukkan bahwa tantangan klien bukan hanya pada aktivitas operasional, tetapi pada bagaimana keputusan, kontrol, dan pelaksanaan dipertemukan dalam satu ritme kerja.\n"
                 f"- Outcome awal yang perlu dijaga mencakup {gains_line}.\n"
-                f"- Fokus keputusan sejak awal perlu tetap berada pada prioritas inti agar ruang lingkup tidak melebar ke area yang belum mendesak.\n\n"
+                f"- Fokus keputusan sejak awal perlu tetap berada pada prioritas inti.\n\n"
                 "## 1.2 Alasan Permintaan Jasa Konsultasi\n"
                 f"Permintaan jasa konsultasi muncul karena {client} membutuhkan mitra yang mampu menerjemahkan tekanan bisnis menjadi arah kerja, metode, dan keluaran yang lebih siap dijalankan. "
                 f"Dalam konteks ini, {WRITER_FIRM_NAME} diposisikan sebagai mitra yang membantu {client} {value_hook_line.lower()} melalui metodologi yang terstruktur, dukungan tim inti yang relevan, dan kontrol delivery yang jelas. "
-                f"Artinya, konsultasi dibutuhkan bukan untuk menambah lapisan presentasi, tetapi untuk membantu sponsor mengubah kebutuhan yang masih tersebar menjadi program kerja yang lebih rapi, dapat dipertanggungjawabkan, dan dapat diawasi.\n"
+                f"Artinya, konsultasi dibutuhkan untuk membantu sponsor mengubah kebutuhan yang masih tersebar menjadi program kerja yang lebih rapi, dapat dipertanggungjawabkan, dan dapat diawasi.\n"
                 f"- Dukungan konsultasi diperlukan agar keputusan tentang ruang lingkup, prioritas, dan kontrol kerja tidak berubah-ubah ketika program mulai berjalan.\n"
                 f"- Perusahaan penyusun juga diharapkan membantu menjaga kualitas terjemahan dari kebutuhan bisnis ke langkah pelaksanaan, terutama pada tema {win_theme.lower()}.\n"
-                f"- Dengan keterlibatan yang tepat, {client} memperoleh mitra yang membantu menjaga konsistensi dari konteks awal, rumusan masalah, pendekatan, sampai bentuk keluaran yang benar-benar dapat dipakai.\n"
+                f"- Dengan keterlibatan yang tepat, {client} memperoleh mitra yang menjaga konsistensi dari konteks awal sampai bentuk keluaran yang benar-benar dapat dipakai.\n"
                 f"Pada akhirnya, alasan permintaan jasa konsultasi adalah kebutuhan untuk memastikan bahwa inisiatif {short_project.lower()} tidak hanya terlihat baik di atas kertas, "
                 f"tetapi sungguh mempunyai jalur kerja yang rapi untuk diwujudkan. Tujuan akhirnya adalah memberi sponsor {client} dasar keputusan yang lebih kuat sebelum organisasi bergerak lebih jauh."
             )
@@ -1912,7 +2050,11 @@ class ProposalSupportMixin:
 
         if chapter["id"] == "c_3":
             primary_need, secondary_needs = self._resolve_primary_need(project_goal, notes, regulations)
-            secondary_line = ", ".join(secondary_needs) if secondary_needs else "Tidak ada kebutuhan sekunder yang perlu diprioritaskan pada tahap awal."
+            secondary_line = self._human_join(
+                secondary_needs,
+                fallback="Tidak ada kebutuhan sekunder yang perlu diprioritaskan pada tahap awal.",
+                max_items=3,
+            )
             mode_line = (
                 "Bab ini ditulis sebagai respons formal terhadap kebutuhan kerja yang perlu dijawab secara eksplisit."
                 if normalized_mode == "kak_response"
@@ -1943,8 +2085,9 @@ class ProposalSupportMixin:
                 f"| Opportunity | {'Fokus utama' if primary_need == 'Opportunity' else 'Konteks pendukung'} | Menangkap peluang peningkatan nilai, efisiensi, atau pertumbuhan yang relevan. |\n"
                 f"| Directive | {'Fokus utama' if primary_need == 'Directive' else 'Konteks pendukung'} | Menjawab mandat, regulasi, atau kebutuhan kepatuhan yang tidak bisa diabaikan. |\n\n"
                 f"{need_chart}\n\n"
-                f"Fokus utama yang dipilih adalah **{primary_need}**, sedangkan kebutuhan lain diposisikan sebagai konteks pendukung agar arah kerja tetap terkendali. "
-                f"Bagi {client}, penajaman ini penting supaya scope, metode kerja, dan bentuk keluaran tidak tersebar ke terlalu banyak sasaran sejak awal.\n"
+                f"1. Fokus utama yang dipilih adalah **{primary_need}** agar arah kerja tetap terkendali sejak awal.\n"
+                f"2. Kebutuhan sekunder yang masih diperhatikan adalah {secondary_line.lower()}.\n"
+                f"3. Penajaman ini membantu {client} menjaga scope, metode kerja, dan bentuk keluaran tetap relevan terhadap outcome seperti {kpi_line}.\n"
                 f"- Kebutuhan sekunder yang tetap diperhatikan: {secondary_line}.\n"
                 f"- Penetapan fokus utama juga harus tetap membaca risiko seperti {short_notes.lower()} dan kaitannya dengan target bisnis {kpi_line}.\n\n"
                 "## 3.2 Tujuan Utama dan Jenis Proyek\n"
@@ -1990,8 +2133,7 @@ class ProposalSupportMixin:
             )
             return (
                 f"Metodologi untuk {client} perlu menjawab dua hal sekaligus: mengapa cara kerja tertentu dipilih, dan bagaimana cara kerja itu menjaga hasil tetap dapat diuji dari fase ke fase. "
-                f"Itulah sebabnya bab ini tidak ditulis sebagai uraian langkah yang generik, tetapi sebagai jalur pelaksanaan yang menghubungkan konteks masalah, pendekatan, dan bentuk keluaran secara utuh. "
-                f"Metodologi yang baik harus cukup rinci untuk dijalankan, namun tetap cukup ringkas agar sponsor dapat memahami logika pelaksanaan tanpa tenggelam pada detail yang tidak perlu.{ai_method_note} (Data Internal, {year}).\n\n"
+                f"Itulah sebabnya bab ini ditulis sebagai jalur pelaksanaan yang menghubungkan konteks masalah, pendekatan, dan bentuk keluaran secara utuh.{ai_method_note} (Data Internal, {year}).\n\n"
                 "## 5.1 Alasan Pemilihan Metodologi\n"
                 f"Metodologi dipilih dengan mempertimbangkan tipe proyek **{project_type}**, jenis layanan **{service_type}**, horizon **{timeline}**, serta kebutuhan {client} untuk menjaga {gains_line}. "
                 f"Baseline internal yang digunakan adalah {standard_method.lower()}, namun penerapannya disesuaikan agar tetap relevan dengan konteks {short_project.lower()} dan tekanan seperti {short_notes.lower()}. "
@@ -1999,17 +2141,15 @@ class ProposalSupportMixin:
                 f"1. Metodologi ini menjaga agar tiap fase punya tujuan yang jelas, bukan sekadar daftar aktivitas.\n"
                 f"2. Metodologi ini memudahkan sponsor membaca hubungan antara ruang lingkup, keluaran, dan gerbang mutu sebelum program bergerak terlalu jauh.\n"
                 f"3. Metodologi ini cukup fleksibel untuk merespons perubahan prioritas, tetapi tetap disiplin terhadap akuntabilitas hasil.\n"
-                f"4. Metodologi ini paling sesuai untuk memastikan nilai bisnis yang dijanjikan turun menjadi jalur kerja yang dapat dioperasionalkan.\n"
                 f"- Dengan metodologi seperti ini, forum kerja {client} bisa fokus pada keputusan penting, bukan menghabiskan energi untuk merapikan ulang arah kerja setiap saat.\n"
-                f"- Bagi perusahaan penyusun, metodologi ini juga memudahkan penempatan peninjau mutu, penerimaan keluaran, dan kontrol perubahan sejak awal.\n\n"
+                f"- Metodologi ini juga memudahkan penempatan peninjau mutu, penerimaan keluaran, dan kontrol perubahan sejak awal.\n\n"
                 "## 5.2 Langkah Kerja dengan Kerangka Acuan Terpilih\n"
                 f"Langkah kerja berikut dipakai untuk menerjemahkan pendekatan ke ritme pelaksanaan yang lebih konkret:\n\n"
                 "| Fase | Periode | Tujuan Kerja | Keluaran Utama | Gerbang Mutu |\n"
                 "| --- | --- | --- | --- | --- |\n"
                 f"{methodology_rows}\n\n"
                 f"Struktur fase di atas memastikan bahwa {client} selalu memiliki titik evaluasi yang jelas sebelum bergerak ke tahap berikutnya. "
-                f"Artinya, setiap keluaran bukan hanya artefak administratif, melainkan bahan keputusan yang dipakai untuk menguji apakah program masih berada pada jalur yang mendukung KPI seperti {kpi_line}. "
-                f"Dengan demikian, metodologi tidak sekadar menjelaskan urutan kerja, tetapi juga menjaga disiplin transisi dari satu fase ke fase berikutnya.\n"
+                f"Artinya, setiap keluaran menjadi bahan keputusan yang dipakai untuk menguji apakah program masih berada pada jalur yang mendukung KPI seperti {kpi_line}.\n"
                 f"- Setiap fase diikat oleh gerbang mutu agar keputusan tentang lanjut, koreksi arah, atau penyesuaian ruang lingkup tidak dilakukan secara informal.\n"
                 f"- Ritme kerja ini membantu {client} menjaga kesinambungan antara forum sponsor, tim inti, dan pelaksana kerja.\n"
                 f"- Dengan pola ini, bab desain solusi setelahnya dapat langsung menjelaskan bentuk keluaran dan manfaat praktis tanpa harus mengulang dasar cara kerjanya."
@@ -2031,6 +2171,9 @@ class ProposalSupportMixin:
                 "## 6.1 Solusi/Output Metodologi yang Dibangun\n"
                 f"Solusi yang ditawarkan diarahkan untuk membantu {client} bergerak dari kebutuhan {short_goal.lower()} menuju kondisi target yang lebih terukur. "
                 f"Karena itu, desain solusi tidak ditulis sebagai konsep yang berdiri sendiri, tetapi sebagai rangkaian output kerja yang diturunkan dari metodologi {standard_method}.\n"
+                f"1. Output utama diterjemahkan dari kebutuhan bisnis ke bentuk kerja yang dapat diputuskan sponsor.\n"
+                f"2. Bentuk keluaran dipilih agar mudah dipakai oleh tim inti, bukan berhenti sebagai dokumen presentasi.\n"
+                f"3. Setiap output harus terhubung ke quality gate, keputusan fase, dan manfaat seperti {gains_line}.\n"
                 f"- Output utama dirancang agar keputusan sponsor, kontrol delivery, dan koordinasi stakeholder tetap bergerak dengan istilah kerja {term_line}.\n"
                 f"- Target state yang dibangun harus tetap selaras dengan manfaat yang dijanjikan, terutama {gains_line}.\n"
                 f"- Tiap output harus bisa diterjemahkan menjadi deliverable, quality gate, dan bahan keputusan pada fase berikutnya.{ai_solution_note}\n\n"
@@ -2056,7 +2199,10 @@ class ProposalSupportMixin:
                 "| --- | --- | --- | --- |\n"
                 f"{scope_rows}\n\n"
                 f"Ruang lingkup di atas dirancang agar tetap fokus pada kebutuhan {short_goal.lower()} dan tidak melebar ke area yang belum menjadi prioritas keputusan {client}. "
-                f"Karena itu, setiap lingkup kerja selalu dikaitkan ke bentuk keluaran yang nyata, bukan sekadar aktivitas generik.\n\n"
+                f"Karena itu, setiap lingkup kerja selalu dikaitkan ke bentuk keluaran yang nyata, bukan sekadar aktivitas generik.\n"
+                f"1. Lingkup kerja dibatasi pada area yang langsung mendukung keputusan dan delivery.\n"
+                f"2. Setiap area lingkup harus menghasilkan output yang bisa diuji dan ditinjau sponsor.\n"
+                f"3. Area di luar baseline hanya dibahas jika ada keputusan perubahan scope.\n\n"
                 "## 7.2 Batasan Pekerjaan dan Asumsi\n"
                 f"- Proposal ini mengasumsikan adanya sponsor, PIC inti, dan akses kerja yang cukup dari pihak {client} selama engagement berjalan.\n"
                 "- Pekerjaan di luar ruang lingkup utama, termasuk perluasan objek review atau implementasi penuh, hanya dilakukan jika disepakati sebagai perubahan scope.\n"
@@ -2173,6 +2319,9 @@ class ProposalSupportMixin:
                 f"{WRITER_FIRM_NAME} diposisikan sebagai {self._summarize_phrase(value_map.get('positioning', ''), 'mitra delivery dan konsultasi yang terstruktur', max_words=24)}. "
                 f"Posisi ini diperkuat oleh kemampuan untuk menghubungkan metodologi, governance, dan quality control ke kebutuhan nyata klien, terutama pada konteks {term_line}. "
                 f"Bagi {client}, kapabilitas semacam ini penting karena proposal yang baik harus bisa berubah menjadi keputusan dan pekerjaan yang sungguh berjalan, bukan berhenti pada narasi.\n"
+                f"1. Relevansi utama kami terletak pada kemampuan menerjemahkan kebutuhan bisnis ke model delivery yang rapi.\n"
+                f"2. Kapabilitas perusahaan diarahkan untuk menjaga keputusan sponsor, kualitas hasil, dan kontrol perubahan tetap selaras.\n"
+                f"3. Profil perusahaan pada bab ini diposisikan sebagai bukti kesiapan kerja, bukan materi promosi umum.\n"
                 f"- Modal kapabilitas yang ditonjolkan meliputi {proof_line}.\n"
                 f"- Portofolio internal dan bahan pengalaman perusahaan penyusun dirangkum untuk menunjukkan bukti kerja yang lebih nyata terhadap kebutuhan {client}.\n"
                 f"- Kapabilitas dan sertifikasi inti yang relevan: {credential_highlights}.\n"
@@ -2286,23 +2435,21 @@ class ProposalSupportMixin:
             )
             return (
                 f"{mode_opening}"
-                f"Kami memandang inisiatif {short_project.lower()} bukan hanya sebagai pekerjaan delivery, tetapi sebagai fondasi kemitraan profesional yang harus terasa rapi, hangat, dan dapat dipertanggungjawabkan. "
-                f"Komitmen kami adalah membantu {client} bergerak dari kebutuhan {short_goal.lower()} menuju hasil yang konkret, terukur, dan dapat dijalankan secara disiplin. "
-                f"Di atas itu, kami ingin memastikan bahwa manfaat yang dijanjikan dalam proposal ini benar-benar terasa, terutama {gains_line} (Data Internal, {year}).\n\n"
+                f"Kami memandang inisiatif {short_project.lower()} sebagai fondasi kemitraan profesional yang harus terasa rapi dan dapat dipertanggungjawabkan. "
+                f"Komitmen kami adalah membantu {client} bergerak dari kebutuhan {short_goal.lower()} menuju hasil yang konkret, terukur, dan dapat dijalankan secara disiplin (Data Internal, {year}).\n\n"
                 "## Apresiasi dan Komitmen Kemitraan\n"
                 f"1. Kami mengapresiasi keterbukaan {client} dalam mengangkat konteks, tantangan, dan target bisnis yang menjadi dasar proposal ini.\n"
                 f"2. Kami berkomitmen menjaga kualitas kolaborasi melalui cara kerja yang jelas, komunikasi yang responsif, dan deliverable yang dapat ditindaklanjuti, sejalan dengan positioning {WRITER_FIRM_NAME} sebagai {self._summarize_phrase(value_map.get('positioning', ''), 'mitra delivery dan konsultasi yang terstruktur', max_words=24)}.\n"
                 f"3. Fokus awal kemitraan diarahkan pada prioritas seperti {kpi_line}, dengan tata kelola dan ritme eksekusi yang stabil sejak kickoff.\n"
                 f"4. {aspiration_line}\n"
-                f"- Nilai kemitraan yang ingin dibangun adalah kombinasi antara kecepatan delivery, {term_line}, disiplin kualitas, dan manfaat seperti {gains_line}.\n"
-                "- Setiap langkah lanjutan akan dibuka secara transparan agar sponsor dan tim inti memiliki ekspektasi yang sama sejak awal.\n"
+                f"- Nilai kemitraan yang ingin dibangun adalah kombinasi antara kecepatan delivery, {term_line}, dan manfaat seperti {gains_line}.\n"
                 f"- Bila proposal ini disetujui, tahap berikutnya adalah finalisasi scope, konfirmasi tim inti, dan penetapan agenda kickoff bersama {client}.\n\n"
                 "## Informasi Kontak dan Langkah Lanjutan\n"
                 f"Untuk melanjutkan pembahasan, {WRITER_FIRM_NAME} siap menindaklanjuti review proposal, penajaman ruang lingkup, dan penyesuaian komersial yang diperlukan.\n"
                 f"{closing_contact}\n"
                 f"- {visit_line}\n"
                 "- Agenda lanjutan yang disarankan: review scope final, konfirmasi sponsor dan PIC, lalu penjadwalan workshop kickoff.\n"
-                "- Dengan fondasi ini, kemitraan dapat dimulai secara profesional sekaligus tetap terasa personal dan well-hearted."
+                "- Dengan fondasi ini, kemitraan dapat dimulai secara profesional dan siap dijalankan."
             )
 
         return ""
@@ -2692,10 +2839,10 @@ class ProposalSupportMixin:
             ai_guidance = str((ai_profile.get("chapter_guidance") or {}).get(chapter.get("id", ""), "")).strip()
             initiative_facts = personalization_pack.get("initiative_facts", []) or []
             if initiative_facts:
-                anchors_text = " | ".join([
-                    f"{item.get('fact', '')} {item.get('citation', '')}".strip()
+                anchors_text = self._human_join([
+                    self._sanitize_anchor_fact(item.get('fact', '') or "")
                     for item in initiative_facts[:3]
-                ])
+                ], fallback="Data inisiatif publik terbatas; jangan membuat klaim inisiatif tanpa bukti.", max_items=3)
             else:
                 anchors_text = "Data inisiatif publik terbatas; jangan membuat klaim inisiatif tanpa bukti."
 
@@ -2725,7 +2872,7 @@ class ProposalSupportMixin:
             extra += f" [RELATIONSHIP_MODE] {relationship_mode}. {relationship_guidance}"
             extra += (
                 f" [KPI_TAILORING] Gunakan KPI blueprint berikut sebagai baseline tailoring: "
-                f"{' | '.join(kpi_blueprint) if kpi_blueprint else 'KPI belum spesifik, gunakan KPI operasional dan outcome bisnis yang terukur.'}"
+                f"{self._human_join(kpi_blueprint, fallback='KPI belum spesifik, gunakan KPI operasional dan outcome bisnis yang terukur.', max_items=4)}"
             )
             extra += (
                 f" [VALUE_PRIORITY] Nilai yang harus terasa bagi klien: {value_map.get('value_statement', '')}. "
@@ -2736,7 +2883,8 @@ class ProposalSupportMixin:
                 f"{', '.join(terminology_list) if terminology_list else 'operational excellence, governance, risk control'}."
             )
             extra += (
-                f" [INITIATIVE_ANCHORS] Wajib menyisipkan minimal satu anchor inisiatif klien dari daftar berikut: {anchors_text}"
+                f" [INITIATIVE_ANCHORS] Wajib menyisipkan minimal satu anchor inisiatif klien dari daftar berikut: {anchors_text}. "
+                "Gunakan faktanya secara natural tanpa menyebut nama domain, URL, atau label sumber di tubuh paragraf."
             )
             if ai_mode:
                 extra += (
@@ -2834,17 +2982,19 @@ class ProposalSupportMixin:
                 allowed_list = ", ".join(sorted(allowed_external_citations))
                 extra += (
                     f" [CITATION] Sitasi eksternal hanya boleh memakai daftar ini: {allowed_list}. "
-                    f"Untuk klaim dari data internal, gunakan (Data Internal, {current_year}). "
+                    "Gunakan daftar ini hanya untuk grounding dan pemilihan fakta, bukan untuk ditampilkan sebagai nama domain di paragraf. "
                     "Dilarang membuat domain/sitasi eksternal baru di luar daftar dan dilarang memakai placeholder sitasi."
                 )
             else:
                 extra += (
                     f" [CITATION] Tidak ada sumber eksternal tervalidasi untuk bab ini. "
-                    f"Dilarang menulis sitasi domain eksternal apa pun. Gunakan (Data Internal, {current_year}) "
-                    "untuk klaim yang berasal dari data internal."
+                    "Dilarang menulis sitasi domain eksternal apa pun dan dilarang menampilkan label sumber internal di tubuh paragraf."
                 )
 
-            internal_citation_note = f"Gunakan sitasi internal: (Data Internal, {current_year})."
+            internal_citation_note = (
+                "Gunakan data internal hanya sebagai grounding. Jangan tampilkan label sumber seperti "
+                f"(Data Internal, {current_year}) di tubuh paragraf."
+            )
             structured_row_data_with_note = (
                 f"{structured_row_data}\n{internal_citation_note}" if structured_row_data else internal_citation_note
             )
@@ -2949,8 +3099,7 @@ class ProposalSupportMixin:
                 missing_personalization_signals.append("kpi")
 
             if chapter.get("id", "") in self._anchor_required_chapters():
-                anchor_citations = personalization_pack.get("anchor_citations", []) or []
-                anchor_hit = any(citation in content for citation in anchor_citations) if anchor_citations else True
+                anchor_hit = self._has_anchor_signal(content, personalization_pack)
                 if not anchor_hit:
                     missing_personalization_signals.append("initiative_anchor")
 
@@ -3004,7 +3153,10 @@ class ProposalSupportMixin:
         if self._use_structured_chapter(str(chapter.get("id", "")).strip()):
             return patched
         personalization_pack = personalization_pack or {}
-        kpi_line = " | ".join((personalization_pack.get("kpi_blueprint", []) or [])[:2]) or f"outcome utama {client}"
+        kpi_line = self._human_join(
+            (personalization_pack.get("kpi_blueprint", []) or [])[:2],
+            fallback=f"outcome utama {client}",
+        )
         term_line = ", ".join((personalization_pack.get("terminology", []) or [])[:2]) or "governance, risk control"
 
         if not re.search(r"(?m)^\s*\d+\.\s+\S+", patched):
@@ -3084,13 +3236,16 @@ class ProposalSupportMixin:
             return patched
 
         data = personalization_pack or {}
-        kpi_line = " | ".join((data.get("kpi_blueprint", []) or [])[:2]) or f"outcome utama {client}"
+        kpi_line = self._human_join(
+            (data.get("kpi_blueprint", []) or [])[:2],
+            fallback=f"outcome utama {client}",
+        )
         term_line = ", ".join((data.get("terminology", []) or [])[:2]) or "tata kelola, pengendalian risiko"
         anchor_line = ""
         if chapter.get("id", "") in self._anchor_required_chapters():
-            fact, citation = self._extract_first_external_anchor(data)
-            if fact and citation:
-                anchor_line = f" Acuan konteks yang tetap dipakai adalah {fact} {citation}."
+            fact, _ = self._extract_first_external_anchor(data)
+            if fact:
+                anchor_line = f" Acuan konteks yang tetap dipakai adalah {fact}."
 
         section_templates = {
             "2.2 Konteks Bisnis": (
@@ -3172,18 +3327,17 @@ class ProposalSupportMixin:
             kpi_keywords = data.get("kpi_keywords", []) or []
             kpi_hits = self._count_signal_hits(patched, kpis + kpi_keywords, max_hits=3)
             if kpi_hits < 2:
-                additions.append(f"- KPI acuan yang tetap dijaga pada bab ini adalah {' | '.join(kpis[:2])}.")
+                kpi_reference = self._human_join(kpis[:2], fallback=f"outcome utama {client}")
+                additions.append(f"- KPI acuan yang tetap dijaga pada bab ini adalah {kpi_reference}.")
 
         if chapter_id in self._anchor_required_chapters():
             anchors = data.get("initiative_facts", []) or []
-            anchor_citations = data.get("anchor_citations", []) or []
-            anchor_hit = any(citation in patched for citation in anchor_citations) if anchor_citations else True
+            anchor_hit = self._has_anchor_signal(patched, data)
             if anchors and not anchor_hit:
                 anchor = anchors[0]
-                anchor_fact = str(anchor.get("fact", "") or "").strip()
-                anchor_citation = str(anchor.get("citation", "") or "").strip()
-                if anchor_fact and anchor_citation:
-                    additions.append(f"- Anchor inisiatif yang tetap dirujuk adalah {anchor_fact} {anchor_citation}.")
+                anchor_fact = self._sanitize_anchor_fact(anchor.get("fact", "") or "")
+                if anchor_fact:
+                    additions.append(f"- Anchor inisiatif yang tetap dirujuk adalah {anchor_fact}.")
 
         if not additions:
             return patched
@@ -3206,13 +3360,16 @@ class ProposalSupportMixin:
             return patched
 
         data = personalization_pack or {}
-        kpi_line = " | ".join((data.get("kpi_blueprint", []) or [])[:2]) or f"outcome utama {client}"
+        kpi_line = self._human_join(
+            (data.get("kpi_blueprint", []) or [])[:2],
+            fallback=f"outcome utama {client}",
+        )
         term_line = ", ".join((data.get("terminology", []) or [])[:2]) or "governance, risk control"
         anchor_line = ""
         if chapter.get("id", "") in self._anchor_required_chapters():
-            fact, citation = self._extract_first_external_anchor(data)
-            if fact and citation:
-                anchor_line = f" Rujukan konteks yang tetap dipakai adalah {fact} {citation}."
+            fact, _ = self._extract_first_external_anchor(data)
+            if fact:
+                anchor_line = f" Rujukan konteks yang tetap dipakai adalah {fact}."
 
         chapter_specific_blocks = {
             "c_2": [
@@ -3548,7 +3705,7 @@ class ProposalSupportMixin:
         ai_profile = personalization_pack.get("ai_adoption_profile", {}) or {}
         ai_mode = bool(ai_profile.get("enabled"))
         pressure_terms = self._semantic_terms([project, notes, value_map.get("customer_pressure", "")], max_terms=12)
-        anchor_terms = personalization_pack.get("anchor_citations", []) or []
+        anchor_terms = personalization_pack.get("anchor_keywords", []) or []
         if not anchor_terms:
             anchor_terms = self._semantic_terms(
                 [item.get("fact", "") for item in personalization_pack.get("initiative_facts", []) or []],
@@ -3899,7 +4056,10 @@ class ProposalSupportMixin:
         finding = acceptance_report.get("chapter_findings", {}).get(chapter["id"], {})
         weaknesses = finding.get("weaknesses", []) or ["personalization", "business_value", "actionability"]
         focus_terms = ", ".join(personalization_pack.get("terminology", [])[:3]) or "governance, delivery, risk control"
-        kpi_line = " | ".join(personalization_pack.get("kpi_blueprint", [])[:3]) or f"hasil bisnis terukur untuk {client}"
+        kpi_line = self._human_join(
+            personalization_pack.get("kpi_blueprint", [])[:3],
+            fallback=f"hasil bisnis terukur untuk {client}",
+        )
         proof_line = ", ".join(value_map.get("proof_points", [])[:3]) or "kapabilitas delivery dan kontrol mutu yang tersedia"
         ai_profile = personalization_pack.get("ai_adoption_profile", {}) or {}
         ai_guidance = str((ai_profile.get("chapter_guidance") or {}).get(chapter["id"], "")).strip()
@@ -3924,6 +4084,7 @@ class ProposalSupportMixin:
                         f"- lebih actionable untuk sponsor, decision maker, dan delivery team\n"
                         f"- tetap faktual, jangan menambah klaim baru di luar draft/sumber yang sudah ada\n"
                         f"- pertahankan H2 wajib, numbering, bullet, dan disiplin panjang sekitar {target_words} kata\n"
+                        "- jangan sebut nama domain, URL, atau label sumber seperti Data Internal di tubuh paragraf\n"
                         f"- gunakan istilah domain secara natural: {focus_terms}\n"
                         f"{ai_extra}\n"
                         f"DRAFT SAAT INI:\n{content}"

@@ -447,26 +447,29 @@ class ProposalEngineMixin:
         chapter_outputs: Dict[str, str] = {}
         for chapter in selected_chapters:
             if chapter['id'] in structured_ids:
-                chapter_outputs[chapter['id']] = self._clean_external_citations(
-                    self._render_structured_chapter(
-                        chapter=chapter,
-                        client=client,
-                        project=project,
-                        budget=budget,
-                        service_type=service_type,
-                        project_goal=project_goal,
-                        project_type=project_type,
-                        timeline=timeline,
-                        notes=notes,
-                        regulations=regulations,
-                        firm_data=firm_data,
-                        firm_profile=firm_profile,
-                        personalization_pack=personalization_pack,
-                        value_map=value_map,
-                        proposal_mode=proposal_mode,
-                    ),
-                    allowed_external_citations
+                rendered = self._render_structured_chapter(
+                    chapter=chapter,
+                    client=client,
+                    project=project,
+                    budget=budget,
+                    service_type=service_type,
+                    project_goal=project_goal,
+                    project_type=project_type,
+                    timeline=timeline,
+                    notes=notes,
+                    regulations=regulations,
+                    firm_data=firm_data,
+                    firm_profile=firm_profile,
+                    personalization_pack=personalization_pack,
+                    value_map=value_map,
+                    proposal_mode=proposal_mode,
                 )
+                rendered = self._tighten_structured_chapter(
+                    chapter=chapter,
+                    content=rendered,
+                    target_words=chapter_targets.get(chapter['id'], self._target_words(chapter)),
+                )
+                chapter_outputs[chapter['id']] = self._clean_external_citations(rendered, allowed_external_citations)
                 continue
             ctx = context_futures[chapter['id']].result()
             if not ctx['success']:
