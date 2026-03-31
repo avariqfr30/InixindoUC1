@@ -910,6 +910,268 @@ class Researcher:
             fallback=f"Data regulasi untuk {regulations_string} terbatas; nyatakan asumsi dan batasan data secara eksplisit."
         )
 
+    # ========== FIRM OSINT METHODS ==========
+    # Enhanced firm information gathering via OSINT for professional proposal closings
+    
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def get_firm_certifications(firm_name: str) -> str:
+        """Search for ISO, professional certifications, and credentials."""
+        query = (
+            f'"{firm_name}" ISO OR sertifikasi OR akreditasi OR certification '
+            'OR qualified OR licensed OR registered'
+        )
+        res = Researcher.search(query, limit=10, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(
+            res,
+            entity_name=firm_name,
+            max_age_years=5,
+            strict_entity=False
+        )
+        
+        if not filtered:
+            return f"Kredensial perusahaan {firm_name} belum terverifikasi via sumber publik."
+        
+        certifications = []
+        for item in filtered[:4]:
+            title = item.get('title', '')
+            snippet = (item.get('snippet', '') or '').strip()
+            
+            # Extract common certification patterns
+            certs = re.findall(r'ISO[\s\-]?\d{4,5}|[A-Z]{2,4}\s+\d{3,5}', title + ' ' + snippet)
+            for cert in set(certs):
+                if cert not in certifications:
+                    certifications.append(cert)
+        
+        if certifications:
+            return f"Sertifikasi: {', '.join(certifications[:6])}. Lihat website resmi untuk daftar lengkap kredensial."
+        
+        return f"Kredensial dan sertifikasi {firm_name} tersedia di saluran publik resmi perusahaan."
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def get_firm_team_expertise(firm_name: str) -> str:
+        """Search for team expertise, thought leaders, and key personnel."""
+        query = (
+            f'"{firm_name}" kepemimpinan OR tim OR expert OR consultant OR principal '
+            'OR director OR founder OR expertise'
+        )
+        res = Researcher.search(query, limit=12, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(
+            res,
+            entity_name=firm_name,
+            max_age_years=4,
+            strict_entity=False
+        )
+        
+        if not filtered:
+            return f"Tim ahli profesional {firm_name} berfokus pada delivery berkualitas tinggi dan inovasi berkelanjutan."
+        
+        expertise_areas = []
+        snippets = []
+        for item in filtered[:5]:
+            snippet = (item.get('snippet', '') or '').strip()
+            if snippet and len(snippet) > 50:
+                snippets.append(snippet[:120])
+                # Extract domain keywords
+                domains = re.findall(r'(transformasi|digital|konsultasi|teknologi|strategi|audit|keamanan|sistem)', 
+                                   snippet, re.IGNORECASE)
+                expertise_areas.extend(set(domains))
+        
+        result = f"Tim profesional {firm_name} memiliki pengalaman terakumulasi di berbagai domain strategis."
+        if expertise_areas:
+            unique_areas = list(set(expertise_areas))[:6]
+            result += f" Area keahlian utama: {', '.join(unique_areas).lower()}."
+        
+        return result
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def get_firm_portfolio_scale(firm_name: str) -> str:
+        """Search for company scale, client portfolio, and project volume."""
+        query = (
+            f'"{firm_name}" klien OR portfolio OR proyek OR kontrak OR revenue '
+            'OR skala OR ukuran OR enterprise OR tier-1'
+        )
+        res = Researcher.search(query, limit=12, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(
+            res,
+            entity_name=firm_name,
+            max_age_years=3,
+            strict_entity=False
+        )
+        
+        if not filtered:
+            return f"Portofolio {firm_name} mencakup berbagai klien enterprise dan organisasi mid-market."
+        
+        # Look for scale indicators
+        scale_indicators = []
+        for item in filtered[:6]:
+            snippet = (item.get('snippet', '') or '').strip()
+            
+            # Search for numbers and scale terms
+            numbers = re.findall(r'\d+\s*(?:klien|client|proyek|project|program|tahun|year|bulan|month)', snippet, re.IGNORECASE)
+            scale_terms = re.findall(r'(enterprise|tier-?1|institutional|multinational|global|nasional|indonesia)', snippet, re.IGNORECASE)
+            
+            if numbers:
+                scale_indicators.extend(numbers)
+            if scale_terms:
+                scale_indicators.extend(scale_terms)
+        
+        result = f"Pengalaman {firm_name} meliputi multipel proyek strategis di sektor kunci ekonomi nasional."
+        if scale_indicators:
+            unique_indicators = list(set(scale_indicators))[:4]
+            result += f" Jangkauan: {', '.join(unique_indicators).lower()}."
+        
+        return result
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def get_firm_values_approach(firm_name: str) -> str:
+        """Search for company mission, values, and working approach."""
+        query = (
+            f'"{firm_name}" misi OR visi OR nilai OR pendekatan OR metodologi '
+            'OR komitmen OR prinsip OR filosofi'
+        )
+        res = Researcher.search(query, limit=10, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(
+            res,
+            entity_name=firm_name,
+            max_age_years=5,
+            strict_entity=False
+        )
+        
+        values_found = []
+        for item in filtered[:4]:
+            title = item.get('title', '')
+            snippet = (item.get('snippet', '') or '').strip()
+            
+            # Extract value keywords
+            values = re.findall(
+                r'(integritas|excellence|innovation|kolaborasi|partnership|'
+                r'kepercayaan|transparansi|keberlanjutan|quality|delivery)',
+                title + ' ' + snippet,
+                re.IGNORECASE
+            )
+            values_found.extend(values)
+        
+        core_approach = (
+            f"Pendekatan {firm_name} menekankan delivery berkualitas tinggi, "
+            "kolaborasi erat dengan klien, dan hasil bisnis yang terukur."
+        )
+        
+        if values_found:
+            unique_values = list(set(v.lower() for v in values_found))[:4]
+            core_approach += f" Nilai inti: {', '.join(unique_values)}."
+        
+        return core_approach
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def get_firm_key_contacts(firm_name: str, office_location: str = "") -> str:
+        """Search for office locations and contact information."""
+        location_context = f" {office_location}" if office_location else " Yogyakarta"
+        query = (
+            f'"{firm_name}" kantor{location_context} OR alamat OR kontak '
+            'OR telephone OR email OR website resmi'
+        )
+        res = Researcher.search(query, limit=10, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(
+            res,
+            entity_name=firm_name,
+            max_age_years=5,
+            strict_entity=False
+        )
+        
+        contact_items = []
+        websites = set()
+        for item in filtered[:5]:
+            snippet = (item.get('snippet', '') or '').strip()
+            link = item.get('link', '')
+            
+            # Extract domain from link
+            domain_match = re.search(r'https?://([^/]+)', link)
+            if domain_match:
+                domain = domain_match.group(1).replace('www.', '')
+                websites.add(domain)
+            
+            # Look for location indicators
+            locations = re.findall(r'(Yogyakarta|Jakarta|Bandung|Surabaya|Indonesia)', snippet)
+            if locations:
+                contact_items.append(f"Lokasi: {locations[0]}")
+        
+        result = f"Hubungi {firm_name} melalui saluran resmi untuk koordinasi detail implementasi."
+        
+        if websites:
+            unique_websites = list(websites)[:2]
+            result += f" Website resmi: {', '.join(unique_websites)}."
+        
+        if contact_items:
+            result += f" {' | '.join(set(contact_items[:2]))}."
+        
+        return result
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def get_firm_accolades_recognition(firm_name: str) -> str:
+        """Search for awards, recognitions, and industry accolades."""
+        query = (
+            f'"{firm_name}" penghargaan OR award OR recognition OR terbaik '
+            'OR excellence OR leader OR top OR finalist'
+        )
+        res = Researcher.search(query, limit=10, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(
+            res,
+            entity_name=firm_name,
+            max_age_years=4,
+            strict_entity=False
+        )
+        
+        accolades = []
+        for item in filtered[:5]:
+            title = item.get('title', '')
+            snippet = (item.get('snippet', '') or '').strip()
+            
+            # Look for award indicators
+            award_patterns = re.findall(
+                r'(penghargaan|award|finalist|top \d+|best|terbaik|leader)',
+                title + ' ' + snippet,
+                re.IGNORECASE
+            )
+            
+            if award_patterns:
+                # Extract year if present
+                year = Researcher._extract_year(snippet)
+                year_str = f" ({year})" if year else ""
+                accolades.append(f"{title}{year_str}")
+        
+        if accolades:
+            unique_accolades = list(set(accolades))[:3]
+            return (
+                f"Pengakuan industri terhadap {firm_name} mencerminkan komitmen terhadap keunggulan: "
+                f"{' | '.join(unique_accolades)}. Lihat website resmi untuk daftar penghargaan lengkap."
+            )
+        
+        return (
+            f"{firm_name} terus membangun reputasi melalui proyek-proyek tepat guna "
+            "dan kepuasan klien berkelanjutan."
+        )
+
+    @staticmethod
+    def build_comprehensive_firm_profile(firm_name: str, office_location: str = "") -> Dict[str, str]:
+        """
+        Build a comprehensive firm profile with all OSINT-gathered information.
+        Returns a dictionary with multiple firm profile sections.
+        """
+        return {
+            "values_approach": Researcher.get_firm_values_approach(firm_name),
+            "team_expertise": Researcher.get_firm_team_expertise(firm_name),
+            "certifications": Researcher.get_firm_certifications(firm_name),
+            "portfolio_scale": Researcher.get_firm_portfolio_scale(firm_name),
+            "key_contacts": Researcher.get_firm_key_contacts(firm_name, office_location),
+            "accolades": Researcher.get_firm_accolades_recognition(firm_name),
+        }
+
 
 # Budget estimator from public financial context.
 class FinancialAnalyzer:
@@ -2339,6 +2601,222 @@ class StyleEngine:
             section.bottom_margin = Cm(2.54)
             section.left_margin = Cm(2.54)
             section.right_margin = Cm(2.54)
+
+    # ========== ENHANCED STYLING METHODS ==========
+    # Enhanced document styling and formatting for professional proposals
+    
+    @staticmethod
+    def apply_enhanced_styles(doc: Document, theme_color: Tuple[int, int, int] = (30, 58, 138)) -> None:
+        """Apply enhanced document styles with improved typography and spacing."""
+        StyleEngine._apply_base_enhanced_styles(doc)
+        StyleEngine._apply_enhanced_heading_styles(doc, theme_color)
+        StyleEngine._apply_enhanced_list_styles(doc)
+        StyleEngine._apply_enhanced_table_styles(doc, theme_color)
+    
+    @staticmethod
+    def _apply_base_enhanced_styles(doc: Document) -> None:
+        """Apply base document styles."""
+        try:
+            style = doc.styles['Normal']
+            style.font.name = 'Calibri'
+            style.font.size = Pt(11)
+            
+            pf = style.paragraph_format
+            pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+            pf.line_spacing = 1.15
+            pf.space_after = Pt(8)
+            pf.space_before = Pt(0)
+            pf.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        except Exception as e:
+            logger.warning(f"Could not apply base styles: {e}")
+        
+        # Set margins
+        for section in doc.sections:
+            section.top_margin = Cm(2.54)
+            section.bottom_margin = Cm(2.54)
+            section.left_margin = Cm(2.54)
+            section.right_margin = Cm(2.54)
+    
+    @staticmethod
+    def _apply_enhanced_heading_styles(doc: Document, theme_color: Tuple[int, int, int]) -> None:
+        """Apply enhanced heading styles with color and spacing."""
+        try:
+            # Heading 1
+            style = doc.styles['Heading 1']
+            style.font.name = 'Arial'
+            style.font.size = Pt(14)
+            style.font.bold = True
+            style.font.color.rgb = RGBColor(*theme_color)
+            
+            pf = style.paragraph_format
+            pf.space_before = Pt(12)
+            pf.space_after = Pt(6)
+            pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+            pf.line_spacing = 1.15
+        except Exception as e:
+            logger.warning(f"Could not apply Heading 1 style: {e}")
+        
+        try:
+            # Heading 2
+            style = doc.styles['Heading 2']
+            style.font.name = 'Arial'
+            style.font.size = Pt(12)
+            style.font.bold = True
+            style.font.color.rgb = RGBColor(*theme_color)
+            
+            pf = style.paragraph_format
+            pf.space_before = Pt(10)
+            pf.space_after = Pt(4)
+            pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+            pf.line_spacing = 1.15
+        except Exception as e:
+            logger.warning(f"Could not apply Heading 2 style: {e}")
+        
+        try:
+            # Heading 3
+            style = doc.styles['Heading 3']
+            style.font.name = 'Arial'
+            style.font.size = Pt(11)
+            style.font.bold = True
+            style.font.color.rgb = RGBColor(
+                max(0, theme_color[0] - 30),
+                max(0, theme_color[1] - 30),
+                max(0, theme_color[2] - 30)
+            )
+            
+            pf = style.paragraph_format
+            pf.space_before = Pt(8)
+            pf.space_after = Pt(3)
+        except Exception as e:
+            logger.warning(f"Could not apply Heading 3 style: {e}")
+    
+    @staticmethod
+    def _apply_enhanced_list_styles(doc: Document) -> None:
+        """Apply enhanced list item styles."""
+        try:
+            # List Bullet
+            style = doc.styles['List Bullet']
+            pf = style.paragraph_format
+            pf.space_after = Pt(4)
+            pf.space_before = Pt(0)
+            pf.left_indent = Inches(0.25)
+            pf.first_line_indent = Inches(-0.25)
+        except Exception as e:
+            logger.warning(f"Could not apply List Bullet style: {e}")
+        
+        try:
+            # List Number
+            style = doc.styles['List Number']
+            pf = style.paragraph_format
+            pf.space_after = Pt(4)
+            pf.space_before = Pt(0)
+            pf.left_indent = Inches(0.25)
+            pf.first_line_indent = Inches(-0.25)
+        except Exception as e:
+            logger.warning(f"Could not apply List Number style: {e}")
+    
+    @staticmethod
+    def _apply_enhanced_table_styles(doc: Document, theme_color: Tuple[int, int, int]) -> None:
+        """Apply enhanced table styles."""
+        try:
+            # Table Grid
+            style = doc.styles['Table Grid']
+            style.font.size = Pt(10)
+        except Exception as e:
+            logger.warning(f"Could not apply Table Grid style: {e}")
+    
+    @staticmethod
+    def add_colored_heading(doc: Document, text: str, level: int = 1, 
+                           theme_color: Tuple[int, int, int] = (30, 58, 138)) -> None:
+        """Add a colored heading with enhanced formatting."""
+        heading = doc.add_heading(text, level=level)
+        heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+        for run in heading.runs:
+            run.font.color.rgb = RGBColor(*theme_color)
+            if level == 1:
+                run.font.size = Pt(14)
+                run.font.bold = True
+            elif level == 2:
+                run.font.size = Pt(12)
+                run.font.bold = True
+            else:
+                run.font.size = Pt(11)
+                run.font.bold = True
+    
+    @staticmethod
+    def add_horizontal_line(doc: Document, color: Tuple[int, int, int] = (200, 200, 200)) -> None:
+        """Add a horizontal line (visual separator) to the document."""
+        try:
+            paragraph = doc.add_paragraph()
+            pPr = paragraph._element.get_or_add_pPr()
+            pBdr = OxmlElement('w:pBdr')
+            
+            bottom = OxmlElement('w:bottom')
+            bottom.set(qn('w:val'), 'single')
+            bottom.set(qn('w:sz'), '12')
+            bottom.set(qn('w:space'), '1')
+            bottom.set(qn('w:color'), '%02x%02x%02x' % color)
+            
+            pBdr.append(bottom)
+            pPr.append(pBdr)
+            
+            paragraph.paragraph_format.space_after = Pt(6)
+            paragraph.paragraph_format.space_before = Pt(6)
+        except Exception as e:
+            logger.warning(f"Could not add horizontal line: {e}")
+    
+    @staticmethod
+    def add_info_box(doc: Document, title: str, content: str, 
+                    theme_color: Tuple[int, int, int] = (30, 58, 138)) -> None:
+        """Add a styled information box with title and content."""
+        # Title
+        p = doc.add_paragraph()
+        run = p.add_run(title)
+        run.font.bold = True
+        run.font.size = Pt(11)
+        run.font.color.rgb = RGBColor(*theme_color)
+        
+        # Content
+        p = doc.add_paragraph(content)
+        p.paragraph_format.left_indent = Inches(0.25)
+        p.paragraph_format.space_before = Pt(3)
+        p.paragraph_format.space_after = Pt(6)
+    
+    @staticmethod
+    def format_contact_block(doc: Document, contact_lines: list, 
+                           theme_color: Tuple[int, int, int] = (30, 58, 138)) -> None:
+        """Format a professional contact information block."""
+        # Header
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(6)
+        p.paragraph_format.space_after = Pt(4)
+        
+        run = p.add_run("📱 Kontak Resmi")
+        run.font.bold = True
+        run.font.size = Pt(11)
+        run.font.color.rgb = RGBColor(*theme_color)
+        
+        # Contact details
+        for line in contact_lines:
+            p = doc.add_paragraph()
+            p.paragraph_format.left_indent = Inches(0.25)
+            p.paragraph_format.space_before = Pt(2)
+            p.paragraph_format.space_after = Pt(2)
+            
+            # Extract icon or use bullet
+            if "email" in line.lower():
+                prefix = "✉️  "
+            elif "phone" in line.lower() or "telp" in line.lower():
+                prefix = "📞  "
+            elif "website" in line.lower() or "web" in line.lower():
+                prefix = "🌐  "
+            elif "alamat" in line.lower() or "address" in line.lower():
+                prefix = "📍  "
+            else:
+                prefix = "•   "
+            
+            p.add_run(prefix + line)
 
 class ChartEngine:
     @staticmethod

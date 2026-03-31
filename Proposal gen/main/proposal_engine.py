@@ -1,7 +1,8 @@
 """Proposal orchestration logic: drafting, tightening, compression, and document assembly."""
 
 from .proposal_shared import *
-from .runtime_components import ChartEngine, DocumentBuilder, FinancialAnalyzer, FirmAPIClient, LogoManager, StyleEngine
+from .runtime_components import ChartEngine, DocumentBuilder, FinancialAnalyzer, FirmAPIClient, LogoManager, StyleEngine, Researcher
+from .proposal_support import ProposalSupportMixin
 
 
 class ProposalEngineMixin:
@@ -45,6 +46,35 @@ class ProposalEngineMixin:
             return json.loads(match.group(0))
         except Exception:
             return None
+
+    @staticmethod
+    def _enhance_closing_with_firm_osint(
+        closing_content: str,
+        firm_profile: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Enhance closing chapter with comprehensive firm information via OSINT.
+        Appends firm details such as team expertise, certifications, and accolades
+        to the closing chapter.
+        
+        Args:
+            closing_content: Existing closing chapter content
+            firm_profile: Optional firm profile dictionary
+        
+        Returns:
+            Enhanced closing content with firm information
+        """
+        try:
+            # Use consolidated ProposalSupportMixin method
+            return ProposalSupportMixin._enhance_closing_with_firm_details(
+                closing_content,
+                WRITER_FIRM_NAME,
+                firm_profile,
+                firm_profile.get("office_address", "") if firm_profile else ""
+            )
+        except Exception as e:
+            logger.warning(f"Error enhancing closing with firm OSINT: {e}")
+            return closing_content
 
     @staticmethod
     def _chapter_excerpt(text: str, max_words: int = 170) -> str:
@@ -595,6 +625,14 @@ class ProposalEngineMixin:
                 chapter_outputs["c_closing"],
                 firm_profile
             )
+            # Enhance closing with comprehensive firm information via OSINT
+            try:
+                chapter_outputs["c_closing"] = self._enhance_closing_with_firm_osint(
+                    chapter_outputs["c_closing"],
+                    firm_profile
+                )
+            except Exception as e:
+                logger.warning(f"Could not enhance closing with OSINT firm information: {e}")
 
         acceptance_report = self._evaluate_proposal_acceptance(
             chapter_outputs=chapter_outputs,
@@ -656,6 +694,14 @@ class ProposalEngineMixin:
                         chapter_outputs["c_closing"],
                         firm_profile
                     )
+                    # Enhance closing with comprehensive firm information via OSINT
+                    try:
+                        chapter_outputs["c_closing"] = self._enhance_closing_with_firm_osint(
+                            chapter_outputs["c_closing"],
+                            firm_profile
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not enhance closing with OSINT firm information: {e}")
                 acceptance_report = self._evaluate_proposal_acceptance(
                     chapter_outputs=chapter_outputs,
                     selected_chapters=selected_chapters,

@@ -3880,3 +3880,98 @@ class ProposalSupportMixin:
                 timeline=timeline,
             )
         return stabilized
+
+    # ========== ENHANCED CLOSING CHAPTER METHODS ==========
+    # Helper methods for enhancing closing chapters with OSINT firm information
+    
+    @staticmethod
+    def _build_firm_information_section(firm_name: str, office_location: str = "") -> str:
+        """Build comprehensive firm information section using OSINT."""
+        try:
+            firm_profile = Researcher.build_comprehensive_firm_profile(firm_name, office_location)
+            return ProposalSupportMixin._format_firm_section(firm_name=firm_name, firm_profile=firm_profile)
+        except Exception as e:
+            logger.error(f"Error building enhanced firm information: {e}")
+            return ""
+    
+    @staticmethod
+    def _format_firm_section(firm_name: str, firm_profile: Dict[str, str]) -> str:
+        """Format firm information into proposal closing text."""
+        sections = []
+        sections.append("## Tentang Penulis Proposal")
+        sections.append("")
+        
+        # Opening paragraph about the firm
+        sections.append(
+            f"{firm_name} adalah mitra konsultasi dan delivery yang fokus pada solusi "
+            "strategis, transformasi terstruktur, dan hasil bisnis yang terukur."
+        )
+        sections.append("")
+        
+        # Values and approach
+        if firm_profile.get("values_approach"):
+            sections.append(f"**Pendekatan Kami:** {firm_profile['values_approach']}")
+            sections.append("")
+        
+        # Team expertise
+        if firm_profile.get("team_expertise"):
+            sections.append(f"**Keahlian Tim:** {firm_profile['team_expertise']}")
+            sections.append("")
+        
+        # Portfolio and scale
+        if firm_profile.get("portfolio_scale"):
+            sections.append(f"**Portofolio & Pengalaman:** {firm_profile['portfolio_scale']}")
+            sections.append("")
+        
+        # Certifications and credentials
+        if firm_profile.get("certifications"):
+            sections.append(f"**Sertifikasi & Kredensial:** {firm_profile['certifications']}")
+            sections.append("")
+        
+        # Recognition and accolades
+        if firm_profile.get("accolades"):
+            sections.append(f"**Pengakuan Industri:** {firm_profile['accolades']}")
+            sections.append("")
+        
+        # How to reach out
+        if firm_profile.get("key_contacts"):
+            sections.append(f"**Hubungi Kami:** {firm_profile['key_contacts']}")
+            sections.append("")
+        
+        return "\n".join(sections)
+    
+    @staticmethod
+    def _enhance_closing_with_firm_details(
+        closing_content: str,
+        firm_name: str,
+        firm_profile: Optional[Dict[str, Any]] = None,
+        office_location: str = ""
+    ) -> str:
+        """Enhance existing closing content with comprehensive firm information."""
+        if not closing_content:
+            closing_content = ""
+        
+        # Build firm information section
+        firm_section = ProposalSupportMixin._build_firm_information_section(firm_name, office_location)
+        
+        if not firm_section:
+            return closing_content
+        
+        # Combine existing content with firm information
+        result = closing_content.strip()
+        
+        # Add separator if content exists
+        if result:
+            result += "\n\n---\n\n"
+        
+        result += firm_section
+        
+        # Add footer with contact information if available
+        if firm_profile:
+            contact_lines = FirmAPIClient.build_contact_lines(firm_profile)
+            if contact_lines:
+                result += "\n\n**Kontak Resmi:**\n"
+                for line in contact_lines:
+                    result += f"- {line}\n"
+        
+        return result
