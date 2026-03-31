@@ -92,82 +92,7 @@ class ProposalEngineMixin:
         client: str,
         project: str
     ) -> Dict[str, str]:
-        if len(chapter_outputs) < 2:
-            return chapter_outputs
-
-        snippets = []
-        for chapter in selected_chapters:
-            content = chapter_outputs.get(chapter['id'])
-            if content:
-                snippets.append(f"[{chapter['id']}] {chapter['title']} :: {self._chapter_excerpt(content)}")
-        if len(snippets) < 2:
-            return chapter_outputs
-
-        snippets_text = "\n".join(snippets)
-        prompt = f"""
-        Audit koherensi proposal lintas bab untuk klien {client} dan inisiatif {project}.
-        Ringkasan bab:
-        {snippets_text}
-
-        Keluarkan JSON murni tanpa markdown:
-        {{
-          "canonical_terms": [
-            {{"preferred": "target state", "variants": ["kondisi target", "sasaran akhir"]}}
-          ],
-          "bridge_sentences": [
-            {{"chapter_id": "c_2", "sentence": "Rumusan masalah ini menjadi dasar klasifikasi kebutuhan pada bab berikutnya."}}
-          ]
-        }}
-
-        Aturan:
-        - Maksimal 6 canonical_terms.
-        - Maksimal 6 bridge_sentences.
-        - sentence <= 25 kata.
-        """
-        try:
-            res = self.ollama.chat(
-                model=LLM_MODEL,
-                messages=[
-                    {'role': 'system', 'content': 'You output strictly valid JSON.'},
-                    {'role': 'user', 'content': prompt}
-                ],
-                options={'num_ctx': 16384, 'num_predict': 900, 'temperature': 0.1}
-            )
-            directives = self._extract_json_object(res.get('message', {}).get('content', ''))
-        except Exception:
-            directives = None
-
-        if not directives:
-            return chapter_outputs
-
-        canonical_terms = directives.get("canonical_terms", [])
-        bridge_sentences = directives.get("bridge_sentences", [])
-        revised = dict(chapter_outputs)
-
-        for chap_id, text in revised.items():
-            updated = text
-            for item in canonical_terms:
-                preferred = str(item.get("preferred", "")).strip()
-                variants = item.get("variants", []) or []
-                if not preferred:
-                    continue
-                for variant in variants:
-                    variant_text = str(variant).strip()
-                    if not variant_text or variant_text.lower() == preferred.lower():
-                        continue
-                    updated = re.sub(rf"(?i)\b{re.escape(variant_text)}\b", preferred, updated)
-            revised[chap_id] = updated
-
-        for item in bridge_sentences:
-            chap_id = str(item.get("chapter_id", "")).strip()
-            sentence = str(item.get("sentence", "")).strip()
-            if not chap_id or chap_id not in revised or not sentence:
-                continue
-            if sentence in revised[chap_id]:
-                continue
-            revised[chap_id] = revised[chap_id].rstrip() + f"\n\n- {sentence}"
-
-        return revised
+        return chapter_outputs
 
     def _draft_chapter(
         self,
@@ -763,6 +688,14 @@ class ProposalEngineMixin:
             if not content:
                 continue
             rendered_any = True
+            if chapter['id'] == "c_closing":
+                # The rendered DOCX appends a structured firm profile/contact block,
+                # so keep the closing narrative clean by stripping the inline contact section.
+                content = re.split(
+                    r'(?im)^\s*##\s*Informasi Kontak dan Langkah Lanjutan\s*$',
+                    content,
+                    maxsplit=1,
+                )[0].rstrip()
             DocumentBuilder.add_reference_chapter_heading(doc, chapter['title'], theme_color)
             DocumentBuilder.process_content(doc, content, theme_color, chapter['title'])
             if chapter['id'] == "c_closing" and not rendered_firm_profile:
@@ -778,6 +711,7 @@ class ProposalEngineMixin:
 
         if not rendered_any:
             doc.add_paragraph("Konten proposal belum berhasil digenerate. Mohon ulangi proses.")
+        DocumentBuilder.compact_layout(doc)
 
         base_name = f"Proposal_{client}_{project}"
         if len(selected_chapters) == 1:

@@ -814,13 +814,49 @@ class ProposalSupportMixin:
 
     @staticmethod
     def _summarize_phrase(raw_text: str, fallback: str, max_words: int = 18) -> str:
-        text = re.sub(r"\s+", " ", (raw_text or "").strip())
+        text = ProposalSupportMixin._normalize_prose_fragment(raw_text)
         if not text:
             return fallback
         words = text.split()
         if len(words) <= max_words:
             return text.rstrip(".")
         return " ".join(words[:max_words]).rstrip(".,;:") + "..."
+
+    @staticmethod
+    def _normalize_prose_fragment(raw_text: str) -> str:
+        text = str(raw_text or "").strip()
+        if not text:
+            return ""
+
+        text = text.replace("\r", "\n")
+        text = re.sub(r"\s*\n+\s*", " ", text)
+        text = re.sub(r"[•▪◦●]+", ", ", text)
+        text = re.sub(r"(?:(?<=^)|(?<=[\s,;:]))\d+\.\s+", ", ", text)
+        text = re.sub(r"(?:(?<=^)|(?<=[\s,;:]))[-*]\s+", ", ", text)
+        text = re.sub(r"\s*[;|]+\s*", ", ", text)
+        text = re.sub(r"(\b[^()]{1,80}\([^()]+\))(?:\s+\1)+", r"\1", text)
+        text = re.sub(
+            r"\b([A-Za-z][A-Za-z0-9/&+\- ]{1,30})\s+\(\1\s+\(([^()]+)\)\)",
+            r"\1 (\2)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"(\b[A-Za-z][A-Za-z0-9/&+\- ]{1,40}\([^()]+\))\s+\1",
+            r"\1",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"(\b[A-Za-z][A-Za-z0-9/&+\- ]{1,40}\([^()]+\))\s+\(\1\)",
+            r"\1",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(r"\s+,", ",", text)
+        text = re.sub(r",\s*,+", ", ", text)
+        text = re.sub(r"\s{2,}", " ", text)
+        return text.strip(" ,;:.")
 
     @staticmethod
     def _extract_first_external_anchor(personalization_pack: Optional[Dict[str, Any]]) -> Tuple[str, str]:
@@ -1435,6 +1471,23 @@ class ProposalSupportMixin:
             ("Controlled rollout & adoption closure", "25%"),
         ]
 
+    @staticmethod
+    def _visual_marker(kind: str, title: str, items: List[Tuple[str, Any]], unit: str = "") -> str:
+        safe_items: List[str] = []
+        for label, value in items:
+            clean_label = re.sub(r"[|;,\n]+", " ", str(label or "")).strip()
+            clean_value = re.sub(r"[^\d.\-]", "", str(value or "")).strip()
+            if not clean_label or not clean_value:
+                continue
+            safe_items.append(f"{clean_label},{clean_value}")
+        if not safe_items:
+            return ""
+        normalized_kind = str(kind or "BAR").strip().upper()
+        if normalized_kind == "DONUT":
+            return f"[[DONUT: {title} | {'; '.join(safe_items)}]]"
+        metric = unit or "Nilai"
+        return f"[[BAR: {title} | {metric} | {'; '.join(safe_items)}]]"
+
     def _render_structured_chapter(
         self,
         chapter: Dict[str, Any],
@@ -1481,12 +1534,21 @@ class ProposalSupportMixin:
             max_words=24
         )
         proof_points = value_map.get("proof_points", []) or []
-        proof_line = ", ".join(proof_points[:3]) if proof_points else "kapabilitas internal, metodologi pelaksanaan, dan kontrol mutu"
+        proof_line = "; ".join(
+            self._summarize_phrase(point, "", max_words=10)
+            for point in proof_points[:3]
+            if self._summarize_phrase(point, "", max_words=10)
+        ) if proof_points else "kapabilitas internal, metodologi pelaksanaan, dan kontrol mutu"
         client_gains = value_map.get("client_gains", []) or []
         gains_line = ", ".join(client_gains[:3]) if client_gains else "kejelasan keputusan, kontrol risiko, dan hasil bisnis yang lebih terukur"
         differentiators = value_map.get("differentiators", []) or []
         differentiator_line = ", ".join(differentiators[:2]) if differentiators else "pendekatan pelaksanaan yang rapi dan tetap relevan dengan kebutuhan sponsor"
         standard_method = self._summarize_phrase(firm_data.get("methodology", ""), "metodologi pelaksanaan internal")
+        value_hook_line = self._summarize_phrase(
+            value_map.get("value_hook", ""),
+            "mengubah kebutuhan bisnis menjadi rencana kerja yang lebih terukur",
+            max_words=14,
+        )
         team_points = self._split_plain_points(firm_data.get("team", ""), max_items=5)
         team_summary = ", ".join(team_points) if team_points else "tim pelaksana inti, peninjau mutu, dan pendukung substansi"
         commercial_summary = self._summarize_phrase(firm_data.get("commercial", ""), "mekanisme komersial mengikuti baseline internal")
@@ -1523,9 +1585,9 @@ class ProposalSupportMixin:
         )
         relationship_mode = str(personalization_pack.get("relationship_mode", "new")).strip().lower()
         partnership_line = (
-            f"{client} sudah memiliki konteks interaksi yang cukup untuk langsung masuk ke pembahasan kebutuhan prioritas dan keputusan kerja."
+            f"{client} sudah memiliki konteks interaksi yang cukup untuk langsung masuk ke penajaman kebutuhan prioritas dan keputusan kerja."
             if relationship_mode == "existing"
-            else f"Proposal ini menjadi momen pembentukan kemitraan kerja yang perlu dimulai dengan pembacaan konteks yang rapi dan tidak berlebihan."
+            else f"Inisiatif ini membutuhkan mitra yang mampu membaca konteks awal secara rapi, proporsional, dan langsung mengarah pada prioritas kerja."
         )
         framework_rows = "\n".join(
             f"| {item['acuan']} | {item['peran']} | {item['relevansi']} |"
@@ -1769,9 +1831,9 @@ class ProposalSupportMixin:
                 prefix="Sebagai konteks eksternal yang sudah tervalidasi"
             )
             request_mode_line = (
-                "Dalam mode tanggapan KAK, konteks ini dipakai untuk menegaskan bahwa solusi yang diajukan memang berangkat dari kebutuhan kerja yang hendak dijawab secara formal."
+                "Bagian ini menegaskan bahwa solusi yang diajukan berangkat dari kebutuhan kerja yang hendak dijawab secara formal."
                 if normalized_mode == "kak_response"
-                else "Dalam mode penawaran, konteks ini dipakai untuk menunjukkan bahwa proposal sejak awal dibangun dari kebutuhan bisnis yang nyata dan bukan dari asumsi generik."
+                else "Penekanan utamanya adalah relevansi bisnis, urgensi, dan arah eksekusi yang realistis."
             )
             ai_context_line = (
                 f" Pada konteks AI/adopsi, pengantar proposal juga harus menunjukkan bahwa {client} membutuhkan jalur adopsi yang menjaga {ai_bridge.lower()}."
@@ -1789,17 +1851,17 @@ class ProposalSupportMixin:
                 f"2. Prioritas kedua adalah menjaga bahasa kerja {term_line} agar forum bisnis, pelaksanaan, dan tata kelola membaca arah yang sama.\n"
                 f"3. Prioritas ketiga adalah menyiapkan pola kerja yang memungkinkan {client} bergerak lebih terukur tanpa kehilangan kontrol terhadap risiko dan ketergantungan lintas fungsi.\n"
                 f"- Konteks ini menunjukkan bahwa tantangan klien bukan hanya pada aktivitas operasional, tetapi pada bagaimana keputusan, kontrol, dan pelaksanaan dipertemukan dalam satu ritme kerja.\n"
-                f"- Nilai yang ingin dijaga sejak awal adalah {gains_line}, sehingga proposal harus berbicara langsung ke hasil yang ingin dirasakan sponsor.\n"
-                f"- Bagi {client}, pembacaan konteks seperti ini penting agar seluruh bab sesudahnya tetap tertaut pada kebutuhan yang sama dan tidak melebar ke narasi yang tidak relevan.\n\n"
+                f"- Outcome awal yang perlu dijaga mencakup {gains_line}.\n"
+                f"- Fokus keputusan sejak awal perlu tetap berada pada prioritas inti agar ruang lingkup tidak melebar ke area yang belum mendesak.\n\n"
                 "## 1.2 Alasan Permintaan Jasa Konsultasi\n"
                 f"Permintaan jasa konsultasi muncul karena {client} membutuhkan mitra yang mampu menerjemahkan tekanan bisnis menjadi arah kerja, metode, dan keluaran yang lebih siap dijalankan. "
-                f"Dalam konteks ini, {WRITER_FIRM_NAME} diposisikan untuk membantu {client} mencapai {short_value.lower()} melalui kombinasi {proof_line}. "
+                f"Dalam konteks ini, {WRITER_FIRM_NAME} diposisikan sebagai mitra yang membantu {client} {value_hook_line.lower()} melalui metodologi yang terstruktur, dukungan tim inti yang relevan, dan kontrol delivery yang jelas. "
                 f"Artinya, konsultasi dibutuhkan bukan untuk menambah lapisan presentasi, tetapi untuk membantu sponsor mengubah kebutuhan yang masih tersebar menjadi program kerja yang lebih rapi, dapat dipertanggungjawabkan, dan dapat diawasi.\n"
                 f"- Dukungan konsultasi diperlukan agar keputusan tentang ruang lingkup, prioritas, dan kontrol kerja tidak berubah-ubah ketika program mulai berjalan.\n"
                 f"- Perusahaan penyusun juga diharapkan membantu menjaga kualitas terjemahan dari kebutuhan bisnis ke langkah pelaksanaan, terutama pada tema {win_theme.lower()}.\n"
                 f"- Dengan keterlibatan yang tepat, {client} memperoleh mitra yang membantu menjaga konsistensi dari konteks awal, rumusan masalah, pendekatan, sampai bentuk keluaran yang benar-benar dapat dipakai.\n"
                 f"Pada akhirnya, alasan permintaan jasa konsultasi adalah kebutuhan untuk memastikan bahwa inisiatif {short_project.lower()} tidak hanya terlihat baik di atas kertas, "
-                f"tetapi sungguh mempunyai jalur kerja yang rapi untuk diwujudkan. Bagi sponsor {client}, itulah fungsi utama proposal ini: memberi dasar keputusan yang lebih kuat sebelum organisasi bergerak lebih jauh."
+                f"tetapi sungguh mempunyai jalur kerja yang rapi untuk diwujudkan. Tujuan akhirnya adalah memberi sponsor {client} dasar keputusan yang lebih kuat sebelum organisasi bergerak lebih jauh."
             )
 
         if chapter["id"] == "c_2":
@@ -1856,6 +1918,20 @@ class ProposalSupportMixin:
                 if normalized_mode == "kak_response"
                 else "Bab ini ditulis sebagai penajaman arah penawaran agar sponsor segera melihat fokus kerja yang paling relevan."
             )
+            need_mix = {
+                "Problem": 20,
+                "Opportunity": 20,
+                "Directive": 20,
+            }
+            need_mix[primary_need] = 55
+            for item in secondary_needs[:1]:
+                if item in need_mix and item != primary_need:
+                    need_mix[item] = 25
+            need_chart = self._visual_marker(
+                "DONUT",
+                "Peta Fokus Kebutuhan Proposal",
+                list(need_mix.items()),
+            )
             return (
                 f"Bab klasifikasi kebutuhan untuk {client} dipakai untuk mengerucutkan berbagai sinyal kebutuhan menjadi fokus kerja yang paling tepat diselesaikan lebih dahulu. "
                 f"Dari kombinasi konteks proyek, pain points, dan tekanan bisnis yang muncul, kebutuhan yang paling tepat diposisikan sebagai **{primary_need}**. "
@@ -1866,6 +1942,7 @@ class ProposalSupportMixin:
                 f"| Problem | {'Fokus utama' if primary_need == 'Problem' else 'Konteks pendukung'} | Menjawab gap, hambatan, dan isu yang mengganggu target bisnis atau delivery. |\n"
                 f"| Opportunity | {'Fokus utama' if primary_need == 'Opportunity' else 'Konteks pendukung'} | Menangkap peluang peningkatan nilai, efisiensi, atau pertumbuhan yang relevan. |\n"
                 f"| Directive | {'Fokus utama' if primary_need == 'Directive' else 'Konteks pendukung'} | Menjawab mandat, regulasi, atau kebutuhan kepatuhan yang tidak bisa diabaikan. |\n\n"
+                f"{need_chart}\n\n"
                 f"Fokus utama yang dipilih adalah **{primary_need}**, sedangkan kebutuhan lain diposisikan sebagai konteks pendukung agar arah kerja tetap terkendali. "
                 f"Bagi {client}, penajaman ini penting supaya scope, metode kerja, dan bentuk keluaran tidak tersebar ke terlalu banyak sasaran sejak awal.\n"
                 f"- Kebutuhan sekunder yang tetap diperhatikan: {secondary_line}.\n"
@@ -1876,7 +1953,7 @@ class ProposalSupportMixin:
                 f"menjadi deliverable, keputusan, dan quality gate yang dapat dijalankan.\n"
                 f"- Tujuan utama proposal adalah mengubah kebutuhan {primary_need.lower()} menjadi program kerja yang lebih terstruktur, terukur, dan mudah dikendalikan.\n"
                 f"- Jenis proyek **{project_type}** dipilih karena paling sesuai untuk menjaga outcome {gains_line} tetap realistis dicapai oleh {client}.\n"
-                f"- Dengan penajaman ini, bab berikutnya dapat langsung berbicara tentang pendekatan, metodologi, dan solution design yang fokus pada kebutuhan yang benar-benar diputuskan untuk ditangani."
+                f"- Dengan penajaman ini, arah pendekatan, metodologi, dan solution design dapat difokuskan pada kebutuhan yang benar-benar diputuskan untuk ditangani."
             )
 
         if chapter["id"] == "c_4":
@@ -1922,7 +1999,7 @@ class ProposalSupportMixin:
                 f"1. Metodologi ini menjaga agar tiap fase punya tujuan yang jelas, bukan sekadar daftar aktivitas.\n"
                 f"2. Metodologi ini memudahkan sponsor membaca hubungan antara ruang lingkup, keluaran, dan gerbang mutu sebelum program bergerak terlalu jauh.\n"
                 f"3. Metodologi ini cukup fleksibel untuk merespons perubahan prioritas, tetapi tetap disiplin terhadap akuntabilitas hasil.\n"
-                f"4. Metodologi ini paling sesuai untuk menjaga agar nilai proposal {short_value.lower()} tidak berhenti sebagai janji, melainkan turun menjadi jalur kerja yang dapat dioperasionalkan.\n"
+                f"4. Metodologi ini paling sesuai untuk memastikan nilai bisnis yang dijanjikan turun menjadi jalur kerja yang dapat dioperasionalkan.\n"
                 f"- Dengan metodologi seperti ini, forum kerja {client} bisa fokus pada keputusan penting, bukan menghabiskan energi untuk merapikan ulang arah kerja setiap saat.\n"
                 f"- Bagi perusahaan penyusun, metodologi ini juga memudahkan penempatan peninjau mutu, penerimaan keluaran, dan kontrol perubahan sejak awal.\n\n"
                 "## 5.2 Langkah Kerja dengan Kerangka Acuan Terpilih\n"
@@ -2038,6 +2115,14 @@ class ProposalSupportMixin:
                 f"\n- Untuk konteks AI, mekanisme kontrol juga harus mencakup {ai_governance.lower()}, sehingga keputusan scale-up selalu memiliki dasar yang dapat dipertanggungjawabkan."
                 if ai_mode else ""
             )
+            governance_rows = "\n".join(
+                [
+                    "| Steering Committee | Bulanan / saat keputusan material | Arah strategis, prioritas, dan keputusan lintas sponsor | keputusan strategis dan approval perubahan utama |",
+                    "| Project Board | Dua mingguan | Review milestone, isu lintas workstream, dan acceptance deliverable | action log, keputusan korektif, dan status mitigasi |",
+                    "| Working Session | Mingguan | Sinkronisasi kebutuhan, dependensi, kesiapan data, dan tindak lanjut harian | notulen kerja, risk update, dan daftar tindakan |",
+                    "| Quality Gate Review | Akhir tiap fase | Validasi mutu hasil kerja sebelum fase berikutnya | sign-off fase, daftar perbaikan, dan readiness status |",
+                ]
+            )
             return (
                 f"Tata kelola proyek untuk {client} dirancang agar keputusan strategis, kontrol eksekusi, dan penanganan risiko berjalan dalam satu sistem kerja yang konsisten. "
                 f"Fokusnya adalah menjaga {short_project.lower()} tetap selaras dengan KPI seperti {kpi_line}, sambil memakai istilah operasional {term_line} "
@@ -2051,6 +2136,9 @@ class ProposalSupportMixin:
                 "- Batas waktu keputusan dan owner tindak lanjut ditetapkan di akhir setiap forum agar tidak muncul keputusan menggantung.\n"
                 f"- Semua notulen dan action log menjadi artefak kontrol yang dapat ditinjau ulang oleh sponsor {client}.\n"
                 f"- Struktur keputusan juga menjaga agar diskusi tentang KPI, risk appetite, dan kepatuhan POJK tidak terpisah dari diskusi delivery harian.\n\n"
+                "| Forum Tata Kelola | Frekuensi | Fokus Keputusan | Output Kontrol |\n"
+                "| --- | --- | --- | --- |\n"
+                f"{governance_rows}\n\n"
                 "## 9.2 Mekanisme Pengendalian Proyek\n"
                 f"Pengendalian proyek dilakukan lewat kombinasi dashboard progres, risk register, issue log, quality gate, dan acceptance deliverable. "
                 f"Model kontrol ini memastikan aktivitas delivery tetap terkunci pada hasil bisnis, bukan sekadar penyelesaian aktivitas administratif.\n"
@@ -2112,6 +2200,17 @@ class ProposalSupportMixin:
             )
             if ai_mode:
                 role_list += "\n5. **Business Translator / AI Lead** menjembatani use case bisnis, integrasi solusi, dan kesiapan adopsi."
+            involvement_chart = self._visual_marker(
+                "BAR",
+                "Intensitas Keterlibatan Tim Inti",
+                [
+                    ("Engagement Lead", 65),
+                    ("PMO Lead", 90),
+                    ("Lead Solusi", 85),
+                    ("Quality Reviewer", 70),
+                ] + ([("AI Lead", 75)] if ai_mode else []),
+                unit="Skor keterlibatan",
+            )
             return (
                 f"Struktur tim proyek untuk {client} dibentuk agar pengambilan keputusan, pengawasan mutu, dan eksekusi lapangan bergerak seirama. "
                 f"Komposisi tim tidak diperlakukan sebagai daftar jabatan semata, tetapi sebagai mekanisme untuk menjaga kualitas output terhadap target {kpi_line} dan kebutuhan {short_goal.lower()} (Data Internal, {year}).\n\n"
@@ -2121,6 +2220,7 @@ class ProposalSupportMixin:
                 f"- Referensi kapabilitas dan sertifikasi internal yang mendukung tim: {credential_highlights}.\n"
                 f"- Counterpart dari pihak {client} idealnya mencakup sponsor bisnis, PIC operasional, PIC teknologi/data, dan reviewer governance.\n"
                 "- Alokasi resource dapat dinaikkan atau disesuaikan mengikuti fase kerja, tingkat risiko, dan kebutuhan keputusan cepat.\n\n"
+                f"{involvement_chart}\n\n"
                 "## 11.2 Tabel Tenaga Ahli dan Kualifikasi\n"
                 "| Peran Tenaga Ahli | Fokus Tanggung Jawab | Kompetensi / Pengalaman Kunci | Keterlibatan |\n"
                 "| --- | --- | --- | --- |\n"
@@ -2141,7 +2241,7 @@ class ProposalSupportMixin:
             return (
                 f"Model pembiayaan untuk {client} disusun agar komitmen biaya, mekanisme pembayaran, dan batas ruang lingkup tetap jelas sejak awal. "
                 f"Tujuannya adalah menjaga proyek {short_project.lower()} tetap dapat dieksekusi tanpa ambiguitas komersial, sambil memberi ruang kontrol terhadap perubahan yang benar-benar material "
-                f"dan memastikan investasi tetap tertaut pada manfaat yang dijanjikan: {short_value}. Struktur ini juga mencerminkan cara {WRITER_FIRM_NAME} menjaga disiplin komersial tetap selaras dengan delivery reality dan outcome klien (Data Internal, {year}).\n\n"
+                f"dan memastikan investasi tetap tertaut pada manfaat yang dijanjikan, terutama {gains_line}. Struktur ini juga mencerminkan cara {WRITER_FIRM_NAME} menjaga disiplin komersial tetap selaras dengan delivery reality dan outcome klien (Data Internal, {year}).\n\n"
                 "## 12.1 Biaya dan Tahapan Pembayaran\n"
                 f"Estimasi investasi awal untuk engagement ini adalah **{budget or 'menyesuaikan scope final'}**, dengan tipe layanan **{service_type}** pada model proyek **{project_type}** selama **{timeline}**. "
                 f"Baseline komersial internal yang menjadi acuan adalah {commercial_summary}. Dengan demikian, pembahasan biaya tidak berdiri sebagai angka semata, tetapi sebagai representasi dari komitmen kerja, quality gate, dan acceptance deliverable yang menjadi standar {WRITER_FIRM_NAME}.\n\n"
@@ -2188,7 +2288,7 @@ class ProposalSupportMixin:
                 f"{mode_opening}"
                 f"Kami memandang inisiatif {short_project.lower()} bukan hanya sebagai pekerjaan delivery, tetapi sebagai fondasi kemitraan profesional yang harus terasa rapi, hangat, dan dapat dipertanggungjawabkan. "
                 f"Komitmen kami adalah membantu {client} bergerak dari kebutuhan {short_goal.lower()} menuju hasil yang konkret, terukur, dan dapat dijalankan secara disiplin. "
-                f"Di atas itu, kami ingin memastikan bahwa nilai yang dijanjikan dalam proposal ini benar-benar terasa: {short_value} (Data Internal, {year}).\n\n"
+                f"Di atas itu, kami ingin memastikan bahwa manfaat yang dijanjikan dalam proposal ini benar-benar terasa, terutama {gains_line} (Data Internal, {year}).\n\n"
                 "## Apresiasi dan Komitmen Kemitraan\n"
                 f"1. Kami mengapresiasi keterbukaan {client} dalam mengangkat konteks, tantangan, dan target bisnis yang menjadi dasar proposal ini.\n"
                 f"2. Kami berkomitmen menjaga kualitas kolaborasi melalui cara kerja yang jelas, komunikasi yang responsif, dan deliverable yang dapat ditindaklanjuti, sejalan dengan positioning {WRITER_FIRM_NAME} sebagai {self._summarize_phrase(value_map.get('positioning', ''), 'mitra delivery dan konsultasi yang terstruktur', max_words=24)}.\n"
@@ -2901,6 +3001,8 @@ class ProposalSupportMixin:
         personalization_pack: Optional[Dict[str, Any]] = None
     ) -> str:
         patched = (content or "").rstrip()
+        if self._use_structured_chapter(str(chapter.get("id", "")).strip()):
+            return patched
         personalization_pack = personalization_pack or {}
         kpi_line = " | ".join((personalization_pack.get("kpi_blueprint", []) or [])[:2]) or f"outcome utama {client}"
         term_line = ", ".join((personalization_pack.get("terminology", []) or [])[:2]) or "governance, risk control"

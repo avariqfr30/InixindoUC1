@@ -2654,17 +2654,33 @@ class LogoManager:
 
 # Document rendering utilities.
 class StyleEngine:
+    PROFESSIONAL_FONT = "Times New Roman"
+    BODY_FONT_SIZE = 12
+    BODY_LINE_SPACING = 1.15
+    BODY_SPACE_AFTER = 6
+    HEADING_1_SIZE = 14
+    HEADING_2_SIZE = 12
+    HEADING_3_SIZE = 11
+    TABLE_FONT_SIZE = 10.5
+    TEXT_COLOR = (0, 0, 0)
+    SUBTLE_TEXT_COLOR = (89, 89, 89)
+    TABLE_HEADER_FILL = "E7E6E6"
+
     @staticmethod
     def apply_document_styles(doc: Document, preserve_existing: bool = False) -> None:
         style = doc.styles['Normal']
         if not preserve_existing:
-            style.font.name = 'Calibri'
-            style.font.size = Pt(11)
+            style.font.name = StyleEngine.PROFESSIONAL_FONT
+            style.font.size = Pt(StyleEngine.BODY_FONT_SIZE)
             pf = style.paragraph_format
             pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-            pf.line_spacing = 1.15
-            pf.space_after = Pt(8)
+            pf.line_spacing = StyleEngine.BODY_LINE_SPACING
+            pf.space_after = Pt(StyleEngine.BODY_SPACE_AFTER)
+            pf.space_before = Pt(0)
             pf.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            StyleEngine._apply_enhanced_heading_styles(doc, StyleEngine.TEXT_COLOR)
+            StyleEngine._apply_enhanced_list_styles(doc)
+            StyleEngine._apply_enhanced_table_styles(doc, StyleEngine.TEXT_COLOR)
         for section in doc.sections:
             if preserve_existing:
                 continue
@@ -2689,13 +2705,13 @@ class StyleEngine:
         """Apply base document styles."""
         try:
             style = doc.styles['Normal']
-            style.font.name = 'Calibri'
-            style.font.size = Pt(11)
+            style.font.name = StyleEngine.PROFESSIONAL_FONT
+            style.font.size = Pt(StyleEngine.BODY_FONT_SIZE)
             
             pf = style.paragraph_format
             pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-            pf.line_spacing = 1.15
-            pf.space_after = Pt(8)
+            pf.line_spacing = StyleEngine.BODY_LINE_SPACING
+            pf.space_after = Pt(StyleEngine.BODY_SPACE_AFTER)
             pf.space_before = Pt(0)
             pf.alignment = WD_ALIGN_PARAGRAPH.LEFT
         except Exception as e:
@@ -2710,54 +2726,52 @@ class StyleEngine:
     
     @staticmethod
     def _apply_enhanced_heading_styles(doc: Document, theme_color: Tuple[int, int, int]) -> None:
-        """Apply enhanced heading styles with color and spacing."""
+        """Apply formal heading styles with neutral color and spacing."""
         try:
-            # Heading 1
             style = doc.styles['Heading 1']
-            style.font.name = 'Arial'
-            style.font.size = Pt(14)
+            style.font.name = StyleEngine.PROFESSIONAL_FONT
+            style.font.size = Pt(StyleEngine.HEADING_1_SIZE)
             style.font.bold = True
-            style.font.color.rgb = RGBColor(*theme_color)
+            style.font.color.rgb = RGBColor(*StyleEngine.TEXT_COLOR)
             
             pf = style.paragraph_format
             pf.space_before = Pt(12)
             pf.space_after = Pt(6)
             pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-            pf.line_spacing = 1.15
+            pf.line_spacing = 1.0
+            pf.keep_with_next = True
         except Exception as e:
             logger.warning(f"Could not apply Heading 1 style: {e}")
         
         try:
-            # Heading 2
             style = doc.styles['Heading 2']
-            style.font.name = 'Arial'
-            style.font.size = Pt(12)
+            style.font.name = StyleEngine.PROFESSIONAL_FONT
+            style.font.size = Pt(StyleEngine.HEADING_2_SIZE)
             style.font.bold = True
-            style.font.color.rgb = RGBColor(*theme_color)
+            style.font.color.rgb = RGBColor(*StyleEngine.TEXT_COLOR)
             
             pf = style.paragraph_format
             pf.space_before = Pt(10)
             pf.space_after = Pt(4)
             pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-            pf.line_spacing = 1.15
+            pf.line_spacing = 1.0
+            pf.keep_with_next = True
         except Exception as e:
             logger.warning(f"Could not apply Heading 2 style: {e}")
         
         try:
-            # Heading 3
             style = doc.styles['Heading 3']
-            style.font.name = 'Arial'
-            style.font.size = Pt(11)
+            style.font.name = StyleEngine.PROFESSIONAL_FONT
+            style.font.size = Pt(StyleEngine.HEADING_3_SIZE)
             style.font.bold = True
-            style.font.color.rgb = RGBColor(
-                max(0, theme_color[0] - 30),
-                max(0, theme_color[1] - 30),
-                max(0, theme_color[2] - 30)
-            )
+            style.font.color.rgb = RGBColor(*StyleEngine.TEXT_COLOR)
             
             pf = style.paragraph_format
             pf.space_before = Pt(8)
             pf.space_after = Pt(3)
+            pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+            pf.line_spacing = 1.0
+            pf.keep_with_next = True
         except Exception as e:
             logger.warning(f"Could not apply Heading 3 style: {e}")
     
@@ -2790,29 +2804,30 @@ class StyleEngine:
     def _apply_enhanced_table_styles(doc: Document, theme_color: Tuple[int, int, int]) -> None:
         """Apply enhanced table styles."""
         try:
-            # Table Grid
             style = doc.styles['Table Grid']
-            style.font.size = Pt(10)
+            style.font.name = StyleEngine.PROFESSIONAL_FONT
+            style.font.size = Pt(StyleEngine.TABLE_FONT_SIZE)
         except Exception as e:
             logger.warning(f"Could not apply Table Grid style: {e}")
     
     @staticmethod
     def add_colored_heading(doc: Document, text: str, level: int = 1, 
                            theme_color: Tuple[int, int, int] = (30, 58, 138)) -> None:
-        """Add a colored heading with enhanced formatting."""
+        """Add a formal heading with neutral styling."""
         heading = doc.add_heading(text, level=level)
         heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
         
         for run in heading.runs:
-            run.font.color.rgb = RGBColor(*theme_color)
+            run.font.color.rgb = RGBColor(*StyleEngine.TEXT_COLOR)
+            run.font.name = StyleEngine.PROFESSIONAL_FONT
             if level == 1:
-                run.font.size = Pt(14)
+                run.font.size = Pt(StyleEngine.HEADING_1_SIZE)
                 run.font.bold = True
             elif level == 2:
-                run.font.size = Pt(12)
+                run.font.size = Pt(StyleEngine.HEADING_2_SIZE)
                 run.font.bold = True
             else:
-                run.font.size = Pt(11)
+                run.font.size = Pt(StyleEngine.HEADING_3_SIZE)
                 run.font.bold = True
     
     @staticmethod
@@ -2846,7 +2861,8 @@ class StyleEngine:
         run = p.add_run(title)
         run.font.bold = True
         run.font.size = Pt(11)
-        run.font.color.rgb = RGBColor(*theme_color)
+        run.font.name = StyleEngine.PROFESSIONAL_FONT
+        run.font.color.rgb = RGBColor(*StyleEngine.TEXT_COLOR)
         
         # Content
         p = doc.add_paragraph(content)
@@ -2863,10 +2879,11 @@ class StyleEngine:
         p.paragraph_format.space_before = Pt(6)
         p.paragraph_format.space_after = Pt(4)
         
-        run = p.add_run("📱 Kontak Resmi")
+        run = p.add_run("Kontak Resmi")
         run.font.bold = True
         run.font.size = Pt(11)
-        run.font.color.rgb = RGBColor(*theme_color)
+        run.font.name = StyleEngine.PROFESSIONAL_FONT
+        run.font.color.rgb = RGBColor(*StyleEngine.TEXT_COLOR)
         
         # Contact details
         for line in contact_lines:
@@ -2874,20 +2891,8 @@ class StyleEngine:
             p.paragraph_format.left_indent = Inches(0.25)
             p.paragraph_format.space_before = Pt(2)
             p.paragraph_format.space_after = Pt(2)
-            
-            # Extract icon or use bullet
-            if "email" in line.lower():
-                prefix = "✉️  "
-            elif "phone" in line.lower() or "telp" in line.lower():
-                prefix = "📞  "
-            elif "website" in line.lower() or "web" in line.lower():
-                prefix = "🌐  "
-            elif "alamat" in line.lower() or "address" in line.lower():
-                prefix = "📍  "
-            else:
-                prefix = "•   "
-            
-            p.add_run(prefix + line)
+            run = p.add_run(line)
+            run.font.name = StyleEngine.PROFESSIONAL_FONT
 
 class ChartEngine:
     @staticmethod
@@ -2936,6 +2941,125 @@ class ChartEngine:
         except Exception:
             return None
 
+    @staticmethod
+    def _professional_palette(theme_color: Tuple[int, int, int]) -> List[str]:
+        base = ChartEngine._to_matplotlib_rgb(theme_color)
+        accent = '#5B9BD5'
+        if sum(theme_color) < 120:
+            accent = '#7F7F7F'
+        return [accent, '#A5A5A5', '#D9D9D9', '#BFBFBF', '#7F7F7F', '#C9DAF8', '#9EADBA', '#EDEDED']
+
+    @staticmethod
+    def _parse_chart_items(raw_data: str) -> List[Tuple[str, float]]:
+        items: List[Tuple[str, float]] = []
+        for part in raw_data.split(';'):
+            tokens = [token.strip() for token in part.split(',')]
+            if len(tokens) < 2:
+                continue
+            label = tokens[0]
+            value = re.sub(r'[^\d.\-]', '', tokens[1])
+            if not label or not value:
+                continue
+            try:
+                numeric = float(value)
+            except ValueError:
+                continue
+            items.append((label, numeric))
+        return items
+
+    @staticmethod
+    def create_bar_chart(data_str: str, theme_color: Tuple[int, int, int]) -> Optional[io.BytesIO]:
+        try:
+            parts = [part.strip() for part in data_str.split('|')]
+            if len(parts) >= 3:
+                title_str, unit_str, raw_data = parts[0], parts[1], "|".join(parts[2:])
+            elif len(parts) == 2:
+                title_str, unit_str, raw_data = parts[0], "Nilai", parts[1]
+            else:
+                title_str, unit_str, raw_data = "Ringkasan", "Nilai", data_str
+            items = ChartEngine._parse_chart_items(raw_data)
+            if not items:
+                return None
+
+            labels = [label for label, _ in items]
+            values = [value for _, value in items]
+            palette = ChartEngine._professional_palette(theme_color)
+            bar_colors = [palette[idx % len(palette)] for idx in range(len(values))]
+
+            fig_height = max(3.6, len(items) * 0.7)
+            fig, ax = plt.subplots(figsize=(8.4, fig_height))
+            y_positions = list(range(len(items)))
+            ax.barh(y_positions, values, color=bar_colors, edgecolor='#666666', linewidth=0.8)
+            ax.set_yticks(y_positions)
+            ax.set_yticklabels(labels, fontsize=10)
+            ax.invert_yaxis()
+            ax.set_title(title_str, fontsize=12, fontweight='bold', pad=14)
+            ax.set_xlabel(unit_str, fontsize=10)
+            ax.grid(axis='x', linestyle='--', alpha=0.35)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['left'].set_visible(False)
+            max_value = max(values) or 1.0
+            ax.set_xlim(0, max_value * 1.18)
+
+            for idx, value in enumerate(values):
+                ax.text(value + (max_value * 0.02), idx, f"{value:g}", va='center', fontsize=9, color='#404040')
+
+            img = io.BytesIO()
+            plt.tight_layout()
+            plt.savefig(img, format='png', bbox_inches='tight', dpi=150)
+            plt.close()
+            img.seek(0)
+            return img
+        except Exception:
+            return None
+
+    @staticmethod
+    def create_donut_chart(data_str: str, theme_color: Tuple[int, int, int]) -> Optional[io.BytesIO]:
+        try:
+            parts = [part.strip() for part in data_str.split('|')]
+            if len(parts) >= 2:
+                title_str, raw_data = parts[0], "|".join(parts[1:])
+            else:
+                title_str, raw_data = "Komposisi", data_str
+            items = ChartEngine._parse_chart_items(raw_data)
+            if not items:
+                return None
+
+            labels = [label for label, _ in items]
+            values = [value for _, value in items]
+            palette = ChartEngine._professional_palette(theme_color)
+            colors = [palette[idx % len(palette)] for idx in range(len(values))]
+
+            fig, ax = plt.subplots(figsize=(6.6, 4.8))
+            wedges, texts, autotexts = ax.pie(
+                values,
+                labels=labels,
+                colors=colors,
+                startangle=90,
+                wedgeprops={'width': 0.45, 'edgecolor': 'white'},
+                autopct=lambda pct: f"{pct:.0f}%" if pct >= 8 else '',
+                pctdistance=0.8,
+                labeldistance=1.05,
+            )
+            for text in texts:
+                text.set_fontsize(9)
+            for text in autotexts:
+                text.set_fontsize(8.5)
+                text.set_color('#404040')
+            ax.text(0, 0, "Focus", ha='center', va='center', fontsize=11, fontweight='bold', color='#404040')
+            ax.set_title(title_str, fontsize=12, fontweight='bold', pad=12)
+            ax.axis('equal')
+
+            img = io.BytesIO()
+            plt.tight_layout()
+            plt.savefig(img, format='png', bbox_inches='tight', dpi=150)
+            plt.close()
+            img.seek(0)
+            return img
+        except Exception:
+            return None
+
 class DocumentBuilder:
     @staticmethod
     def create_base_document(template_path: str = "") -> Tuple[Document, bool]:
@@ -2971,6 +3095,64 @@ class DocumentBuilder:
         return tuple(max(25, min(235, int((channel * 0.72) + 24))) for channel in base)
 
     @staticmethod
+    def _set_run_format(
+        run,
+        size: Optional[float] = None,
+        bold: Optional[bool] = None,
+        italic: Optional[bool] = None,
+        color: Tuple[int, int, int] = StyleEngine.TEXT_COLOR,
+        font_name: str = StyleEngine.PROFESSIONAL_FONT,
+    ) -> None:
+        run.font.name = font_name
+        r_pr = run._element.get_or_add_rPr()
+        r_fonts = r_pr.find(qn('w:rFonts'))
+        if r_fonts is None:
+            r_fonts = OxmlElement('w:rFonts')
+            r_pr.append(r_fonts)
+        r_fonts.set(qn('w:eastAsia'), font_name)
+        r_fonts.set(qn('w:ascii'), font_name)
+        r_fonts.set(qn('w:hAnsi'), font_name)
+        if size is not None:
+            run.font.size = Pt(size)
+        if bold is not None:
+            run.bold = bold
+        if italic is not None:
+            run.italic = italic
+        if color:
+            run.font.color.rgb = RGBColor(*color)
+
+    @staticmethod
+    def _apply_cell_shading(cell, fill_hex: str) -> None:
+        tc_pr = cell._tc.get_or_add_tcPr()
+        shd = tc_pr.find(qn('w:shd'))
+        if shd is None:
+            shd = OxmlElement('w:shd')
+            tc_pr.append(shd)
+        shd.set(qn('w:fill'), fill_hex)
+
+    @staticmethod
+    def _format_table(table) -> None:
+        table.style = 'Table Grid'
+        table.autofit = True
+        if not table.rows:
+            return
+        for row_index, row in enumerate(table.rows):
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    paragraph.paragraph_format.space_before = Pt(0)
+                    paragraph.paragraph_format.space_after = Pt(2)
+                    paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+                    paragraph.paragraph_format.line_spacing = 1.0
+                    for run in paragraph.runs:
+                        DocumentBuilder._set_run_format(
+                            run,
+                            size=StyleEngine.TABLE_FONT_SIZE,
+                            bold=run.bold if row_index != 0 else True,
+                        )
+                if row_index == 0:
+                    DocumentBuilder._apply_cell_shading(cell, StyleEngine.TABLE_HEADER_FILL)
+
+    @staticmethod
     def _set_cell_text(cell, text: str, bold: bool = False) -> None:
         cell.text = ""
         paragraph = cell.paragraphs[0]
@@ -2978,6 +3160,12 @@ class DocumentBuilder:
         paragraph.paragraph_format.space_after = Pt(0)
         run = paragraph.add_run(str(text or "").strip())
         run.bold = bold
+        DocumentBuilder._set_run_format(
+            run,
+            size=StyleEngine.TABLE_FONT_SIZE,
+            bold=bold,
+            color=StyleEngine.TEXT_COLOR,
+        )
 
     @staticmethod
     def add_reference_cover_page(
@@ -2992,44 +3180,35 @@ class DocumentBuilder:
         theme_color: Tuple[int, int, int],
         logo_stream: Optional[io.BytesIO] = None,
     ) -> None:
-        muted_color = DocumentBuilder._muted_theme_color(theme_color)
-        for _ in range(3):
-            doc.add_paragraph()
-
         if logo_stream:
             try:
                 logo_stream.seek(0)
                 cover_logo = doc.add_paragraph()
                 cover_logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                cover_logo.paragraph_format.space_before = Pt(18)
+                cover_logo.paragraph_format.space_after = Pt(18)
                 cover_logo.add_run().add_picture(logo_stream, width=Inches(3.0))
             except (UnrecognizedImageError, OSError, ValueError) as exc:
                 logger.warning("Logo skipped due to unsupported image format: %s", exc)
 
-        doc.add_paragraph()
-
         title = doc.add_paragraph()
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        title.paragraph_format.space_after = Pt(4)
+        title.paragraph_format.space_before = Pt(54 if not logo_stream else 0)
+        title.paragraph_format.space_after = Pt(6)
         title_run = title.add_run("PROPOSAL STRATEGIS")
-        title_run.bold = True
-        title_run.font.size = Pt(18)
-        title_run.font.name = "Arial"
+        DocumentBuilder._set_run_format(title_run, size=16, bold=True)
 
         client_name = doc.add_paragraph()
         client_name.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        client_name.paragraph_format.space_after = Pt(10)
+        client_name.paragraph_format.space_after = Pt(12)
         client_run = client_name.add_run((client or "Klien").upper())
-        client_run.bold = True
-        client_run.font.size = Pt(28)
-        client_run.font.name = "Arial"
-        client_run.font.color.rgb = RGBColor(*muted_color)
+        DocumentBuilder._set_run_format(client_run, size=24, bold=True)
 
         initiative = doc.add_paragraph()
         initiative.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        initiative.paragraph_format.space_after = Pt(6)
+        initiative.paragraph_format.space_after = Pt(8)
         initiative_run = initiative.add_run(project or f"{service_type} - {project_type}")
-        initiative_run.italic = True
-        initiative_run.font.size = Pt(15)
+        DocumentBuilder._set_run_format(initiative_run, size=13, italic=True)
 
         meta_bits = [bit for bit in [service_type, project_type] if str(bit or "").strip()]
         if timeline:
@@ -3039,39 +3218,30 @@ class DocumentBuilder:
             meta_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
             meta_line.paragraph_format.space_after = Pt(2)
             for run in meta_line.runs:
-                run.font.size = Pt(10)
-                run.font.color.rgb = RGBColor(110, 118, 128)
+                DocumentBuilder._set_run_format(run, size=10.5, color=StyleEngine.SUBTLE_TEXT_COLOR)
 
         if budget:
             budget_line = doc.add_paragraph(f"Estimasi investasi: {budget}")
             budget_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
             budget_line.paragraph_format.space_after = Pt(0)
             for run in budget_line.runs:
-                run.font.size = Pt(10)
-                run.font.color.rgb = RGBColor(110, 118, 128)
-
-        for _ in range(5):
-            doc.add_paragraph()
+                DocumentBuilder._set_run_format(run, size=10.5, color=StyleEngine.SUBTLE_TEXT_COLOR)
 
         signature = doc.add_paragraph()
         signature.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        signature.paragraph_format.space_before = Pt(8)
+        signature.paragraph_format.space_before = Pt(92)
         signature_run = signature.add_run("Disusun Oleh:")
-        signature_run.font.size = Pt(11)
-        signature_run.font.name = "Arial"
+        DocumentBuilder._set_run_format(signature_run, size=11)
         signature.add_run().add_break()
 
         firm_run = signature.add_run(WRITER_FIRM_NAME)
-        firm_run.bold = True
-        firm_run.font.size = Pt(14)
-        firm_run.font.name = "Arial"
+        DocumentBuilder._set_run_format(firm_run, size=13, bold=True)
 
         legal_name = str((firm_profile or {}).get("legal_name") or "").strip()
         if legal_name and legal_name.lower() != WRITER_FIRM_NAME.lower():
             signature.add_run().add_break()
             legal_run = signature.add_run(legal_name)
-            legal_run.font.size = Pt(9)
-            legal_run.font.color.rgb = RGBColor(110, 118, 128)
+            DocumentBuilder._set_run_format(legal_run, size=10, color=StyleEngine.SUBTLE_TEXT_COLOR)
 
         doc.add_page_break()
 
@@ -3081,19 +3251,15 @@ class DocumentBuilder:
         chapter_title: str,
         theme_color: Tuple[int, int, int],
     ) -> None:
-        muted_color = DocumentBuilder._muted_theme_color(theme_color)
         try:
             heading = doc.add_paragraph(style="Heading 1")
         except KeyError:
             heading = doc.add_paragraph()
         heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
         heading.paragraph_format.space_before = Pt(0)
-        heading.paragraph_format.space_after = Pt(16)
+        heading.paragraph_format.space_after = Pt(12)
         run = heading.add_run(chapter_title)
-        run.bold = True
-        run.font.name = "Arial"
-        run.font.size = Pt(16)
-        run.font.color.rgb = RGBColor(*muted_color)
+        DocumentBuilder._set_run_format(run, size=14, bold=True)
 
     @staticmethod
     def add_writer_firm_profile_section(
@@ -3129,7 +3295,6 @@ class DocumentBuilder:
 
         StyleEngine.add_horizontal_line(doc, color=(214, 220, 228))
 
-        muted_color = DocumentBuilder._muted_theme_color(theme_color)
         try:
             heading = doc.add_paragraph(style="Heading 2")
         except KeyError:
@@ -3138,10 +3303,7 @@ class DocumentBuilder:
         heading.paragraph_format.space_before = Pt(8)
         heading.paragraph_format.space_after = Pt(8)
         heading_run = heading.add_run("Profil Penulis Proposal")
-        heading_run.bold = True
-        heading_run.font.name = "Arial"
-        heading_run.font.size = Pt(12)
-        heading_run.font.color.rgb = RGBColor(*muted_color)
+        DocumentBuilder._set_run_format(heading_run, size=12, bold=True)
 
         if summary:
             summary_paragraph = doc.add_paragraph(summary)
@@ -3149,32 +3311,29 @@ class DocumentBuilder:
 
         if visible_detail_rows:
             details_table = doc.add_table(rows=1, cols=2)
-            details_table.style = "Table Grid"
             DocumentBuilder._set_cell_text(details_table.rows[0].cells[0], "Aspek", bold=True)
             DocumentBuilder._set_cell_text(details_table.rows[0].cells[1], "Keterangan", bold=True)
             for label, value in visible_detail_rows:
                 row = details_table.add_row().cells
                 DocumentBuilder._set_cell_text(row[0], label, bold=True)
                 DocumentBuilder._set_cell_text(row[1], value)
+            DocumentBuilder._format_table(details_table)
 
         if visible_contact_rows:
-            doc.add_paragraph()
             contact_title = doc.add_paragraph()
+            contact_title.paragraph_format.space_before = Pt(8)
             contact_title.paragraph_format.space_after = Pt(6)
             run = contact_title.add_run("Kontak Resmi")
-            run.bold = True
-            run.font.name = "Arial"
-            run.font.size = Pt(11)
-            run.font.color.rgb = RGBColor(*muted_color)
+            DocumentBuilder._set_run_format(run, size=11, bold=True)
 
             contact_table = doc.add_table(rows=1, cols=2)
-            contact_table.style = "Table Grid"
             DocumentBuilder._set_cell_text(contact_table.rows[0].cells[0], "Kanal", bold=True)
             DocumentBuilder._set_cell_text(contact_table.rows[0].cells[1], "Detail", bold=True)
             for label, value in visible_contact_rows:
                 row = contact_table.add_row().cells
                 DocumentBuilder._set_cell_text(row[0], label, bold=True)
                 DocumentBuilder._set_cell_text(row[1], value)
+            DocumentBuilder._format_table(contact_table)
 
         source_urls = profile.get("official_source_urls") or []
         if isinstance(source_urls, str):
@@ -3196,9 +3355,7 @@ class DocumentBuilder:
                 + ", ".join(domains)
                 + "."
             )
-            note_run.italic = True
-            note_run.font.size = Pt(9)
-            note_run.font.color.rgb = RGBColor(110, 118, 128)
+            DocumentBuilder._set_run_format(note_run, size=9, italic=True, color=StyleEngine.SUBTLE_TEXT_COLOR)
 
     @staticmethod
     def _append_text_run(paragraph, text: str, bold: bool = False, italic: bool = False) -> None:
@@ -3213,8 +3370,7 @@ class DocumentBuilder:
                 cleaned = " " + cleaned
 
         run = paragraph.add_run(cleaned)
-        run.bold = bold
-        run.italic = italic
+        DocumentBuilder._set_run_format(run, size=StyleEngine.BODY_FONT_SIZE, bold=bold, italic=italic)
 
     @staticmethod
     def _style_num_id(doc: Document, style_name: str) -> Optional[int]:
@@ -3309,9 +3465,11 @@ class DocumentBuilder:
                 if level == 1:
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 for run in p.runs:
-                    run.font.color.rgb = RGBColor(*theme_color)
-                    run.font.name = 'Arial'
-                    run.bold = True
+                    DocumentBuilder._set_run_format(
+                        run,
+                        size=StyleEngine.HEADING_1_SIZE if level == 1 else StyleEngine.HEADING_2_SIZE if level == 2 else StyleEngine.HEADING_3_SIZE,
+                        bold=True,
+                    )
             elif element.name == 'p':
                 p = doc.add_paragraph()
                 DocumentBuilder._process_inline_html(p, element)
@@ -3344,7 +3502,6 @@ class DocumentBuilder:
                 if not rows: continue
                 max_cols = max([len(r.find_all(['td', 'th'])) for r in rows])
                 table = doc.add_table(rows=len(rows), cols=max_cols)
-                table.style = 'Table Grid'
                 for i, row in enumerate(rows):
                     cols = row.find_all(['td', 'th'])
                     for j, col in enumerate(cols):
@@ -3353,6 +3510,10 @@ class DocumentBuilder:
                             cell._element.clear_content()
                             p = cell.add_paragraph()
                             DocumentBuilder._process_inline_html(p, col)
+                            if col.name == 'th' or i == 0:
+                                for run in p.runs:
+                                    run.bold = True
+                DocumentBuilder._format_table(table)
 
     @staticmethod
     def _process_inline_html(paragraph, element):
@@ -3369,15 +3530,83 @@ class DocumentBuilder:
                 DocumentBuilder._process_inline_html(paragraph, child)
 
     @staticmethod
+    def _normalize_markdown_blocks(raw_text: str) -> str:
+        normalized: List[str] = []
+        ordered_pattern = re.compile(r'^\d+\.\s+')
+        bullet_pattern = re.compile(r'^[-*]\s+')
+
+        for raw_line in (raw_text or "").split('\n'):
+            stripped = raw_line.strip()
+            previous = normalized[-1].strip() if normalized else ""
+            is_ordered = bool(ordered_pattern.match(stripped))
+            is_bullet = bool(bullet_pattern.match(stripped))
+            is_list = is_ordered or is_bullet
+            previous_is_ordered = bool(ordered_pattern.match(previous))
+            previous_is_bullet = bool(bullet_pattern.match(previous))
+            previous_is_list = previous_is_ordered or previous_is_bullet
+            is_table = stripped.startswith('|')
+            is_heading = stripped.startswith('#')
+            is_visual = stripped.startswith('[[') and stripped.endswith(']]')
+
+            if is_list and previous and (
+                (
+                    not previous_is_list
+                    and not previous.startswith('|')
+                    and not previous.startswith('#')
+                    and not previous.startswith('[[')
+                )
+                or (previous_is_list and (is_ordered != previous_is_ordered or is_bullet != previous_is_bullet))
+            ):
+                normalized.append("")
+            if stripped and previous_is_list and not is_list and not is_table and not is_heading and not is_visual:
+                normalized.append("")
+            normalized.append(stripped)
+
+        compacted: List[str] = []
+        blank_streak = 0
+        for line in normalized:
+            if line:
+                blank_streak = 0
+                compacted.append(line)
+                continue
+            blank_streak += 1
+            if blank_streak <= 1:
+                compacted.append("")
+        return "\n".join(compacted).strip()
+
+    @staticmethod
     def process_content(doc: Document, raw_text: str, theme_color: Tuple[int, int, int], chapter_title: str) -> None:
         clean_lines = []
         in_table = False
-        for line in raw_text.split('\n'):
+        normalized_text = DocumentBuilder._normalize_markdown_blocks(raw_text)
+        for line in normalized_text.split('\n'):
             line = line.strip()
             if line.startswith('[[GANTT:') and line.endswith(']]'):
                 data = line.replace('[[GANTT:', '').replace(']]', '').strip()
                 img = ChartEngine.create_gantt_chart(data, theme_color)
-                if img: doc.add_paragraph().add_run().add_picture(img, width=Inches(6))
+                if img:
+                    paragraph = doc.add_paragraph()
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    paragraph.paragraph_format.space_after = Pt(8)
+                    paragraph.add_run().add_picture(img, width=Inches(6.1))
+                continue
+            if line.startswith('[[BAR:') and line.endswith(']]'):
+                data = line.replace('[[BAR:', '').replace(']]', '').strip()
+                img = ChartEngine.create_bar_chart(data, theme_color)
+                if img:
+                    paragraph = doc.add_paragraph()
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    paragraph.paragraph_format.space_after = Pt(8)
+                    paragraph.add_run().add_picture(img, width=Inches(6.1))
+                continue
+            if line.startswith('[[DONUT:') and line.endswith(']]'):
+                data = line.replace('[[DONUT:', '').replace(']]', '').strip()
+                img = ChartEngine.create_donut_chart(data, theme_color)
+                if img:
+                    paragraph = doc.add_paragraph()
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    paragraph.paragraph_format.space_after = Pt(8)
+                    paragraph.add_run().add_picture(img, width=Inches(5.6))
                 continue
             if line.startswith('|'):
                 if not in_table and clean_lines and clean_lines[-1] != "":
@@ -3389,3 +3618,25 @@ class DocumentBuilder:
             
         html = markdown.markdown("\n".join(clean_lines), extensions=['tables', 'sane_lists'])
         DocumentBuilder.parse_html_to_docx(doc, html, theme_color)
+
+    @staticmethod
+    def _paragraph_is_blank(paragraph_el) -> bool:
+        if paragraph_el.find('.//' + qn('w:drawing')) is not None:
+            return False
+        if paragraph_el.find('.//' + qn('w:pBdr')) is not None:
+            return False
+        for br in paragraph_el.findall('.//' + qn('w:br')):
+            if br.get(qn('w:type')) == 'page':
+                return False
+        texts = [
+            node.text or ""
+            for node in paragraph_el.findall('.//' + qn('w:t'))
+        ]
+        return not "".join(texts).strip()
+
+    @staticmethod
+    def compact_layout(doc: Document) -> None:
+        body = doc._element.body
+        for child in list(body):
+            if child.tag == qn('w:p') and DocumentBuilder._paragraph_is_blank(child):
+                body.remove(child)
