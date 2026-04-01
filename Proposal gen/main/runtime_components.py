@@ -1,7 +1,30 @@
 """Runtime components for data access, research, pricing, and document rendering."""
 
-from .proposal_shared import *
+import concurrent.futures
+import diskcache as dc
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any, Tuple, Set
 
+from .proposal_shared import *
+from ollama import Client
+
+# Initialize ultra-fast disk caching for OSINT (survives server restarts)
+osint_cache_dir = Path(APP_STATE_DB_PATH).parent / '.osint_cache'
+osint_cache = dc.Cache(str(osint_cache_dir))
+
+# ==========================================
+# PYDANTIC SCHEMAS FOR BULLETPROOF LLM DATA
+# ==========================================
+class InsightSchema(BaseModel):
+    insight: str = Field(description="The extracted insight in Indonesian. 'NOT_FOUND' if missing.")
+
+class FinancialSchema(BaseModel):
+    revenue_idr: Optional[int] = Field(None, description="Total revenue in IDR")
+    profit_idr: Optional[int] = Field(None, description="Total profit in IDR")
+    project_budget_idr: Optional[int] = Field(None, description="Project budget in IDR")
+    source_quote: str = Field("", description="Exact quote from text")
+
+# ==========================================
 
 class SchemaMapper:
     @classmethod
@@ -612,7 +635,7 @@ class KnowledgeBase:
             return ""
 
 
-# Public research helper (Serper).
+# Public research helper (Serper & LLM Extractors).
 class Researcher:
     @staticmethod
     def _has_serper_key() -> bool:
@@ -623,34 +646,83 @@ class Researcher:
         return key not in placeholder_keys
 
     @staticmethod
-    @lru_cache(maxsize=256)
+    def fetch_full_markdown(url: str) -> str:
+        """Fetches the clean markdown text of any URL using Jina Reader."""
+        if not url: return ""
+        try:
+            jina_url = f"https://r.jina.ai/{url}"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(jina_url, headers=headers, timeout=12)
+            if response.status_code == 200:
+                return response.text[:6000] 
+            return ""
+        except Exception as e:
+            logger.warning(f"Failed to fetch full markdown for {url}: {e}")
+            return ""
+
+    @classmethod
+    def extract_insight_with_llm(cls, url: str, extraction_goal: str) -> str:
+        """Universal Deep Scraper: Reads a URL and extracts a specific qualitative insight via Pydantic/LLM."""
+        markdown_text = cls.fetch_full_markdown(url)
+        if not markdown_text:
+            return ""
+            
+        prompt = f"""
+        You are an expert business researcher. Read the following source text.
+        Your goal is to extract: {extraction_goal}
+        
+        SOURCE TEXT:
+        {markdown_text}
+        
+        Respond ONLY with a valid JSON object using this schema. If the information is not present, use "NOT_FOUND".
+        {{
+            "insight": "<concise professional summary in Indonesian>"
+        }}
+        """
+        
+        try:
+            client = Client(host=OLLAMA_HOST)
+            res = client.chat(
+                model=LLM_MODEL,
+                messages=[{'role': 'user', 'content': prompt}],
+                options={'temperature': 0.0}
+            )
+            raw_text = res['message']['content']
+            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            parsed_dict = json.loads(match.group(0)) if match else json.loads(raw_text)
+            
+            # Use Pydantic to strictly validate and coerce the dictionary
+            data = InsightSchema.model_validate(parsed_dict)
+            
+            if "NOT_FOUND" in data.insight.upper() or not data.insight:
+                return ""
+            return data.insight
+        except Exception as e:
+            logger.warning(f"Insight extraction failed for {url}: {e}")
+            return ""
+
+    @staticmethod
+    @osint_cache.memoize(expire=86400)
     def search(query: str, limit: int = 5, recency_bucket: str = "") -> List[Dict[str, Any]]:
         """General web search using Serper.dev"""
         if not Researcher._has_serper_key():
-            logger.debug(f"Serper unavailable | Query not executed: '{query[:50]}...'")
             return []
         
         url = "https://google.serper.dev/search"
         payload_data = {"q": query, "gl": "id", "num": limit}
-        recency_map = {
-            "week": "qdr:w",
-            "month": "qdr:m",
-            "year": "qdr:y",
-        }
+        recency_map = {"week": "qdr:w", "month": "qdr:m", "year": "qdr:y"}
         if recency_bucket in recency_map:
             payload_data["tbs"] = recency_map[recency_bucket]
-        payload = json.dumps(payload_data)
-        headers = {
-            'X-API-KEY': (SERPER_API_KEY or "").strip(),
-            'Content-Type': 'application/json'
-        }
+        
         try:
-            response = requests.post(url, headers=headers, data=payload, timeout=8)
+            response = requests.post(
+                url, 
+                headers={'X-API-KEY': (SERPER_API_KEY or "").strip(), 'Content-Type': 'application/json'}, 
+                data=json.dumps(payload_data), 
+                timeout=8
+            )
             response.raise_for_status()
-            results = response.json().get('organic', [])
-            result_count = len(results)
-            logger.debug(f"Serper search successful | query='{query[:60]}...' | results={result_count} | status_code={response.status_code}")
-            return results
+            return response.json().get('organic', [])
         except requests.RequestException as e:
             logger.warning(f"Serper API Error | query='{query[:60]}...' | error={str(e)[:100]}")
             return []
@@ -667,63 +739,41 @@ class Researcher:
             token for token in re.findall(r"[a-z0-9]+", (entity_name or "").lower())
             if len(token) >= 3 and token not in legal_tokens
         ]
-        # Keep order while dropping duplicates.
         ordered = []
         seen = set()
         for token in tokens:
-            if token in seen:
-                continue
+            if token in seen: continue
             ordered.append(token)
             seen.add(token)
         return ordered
 
     @staticmethod
     def _is_entity_match(item: Dict[str, Any], entity_name: str, strict: bool = False) -> bool:
-        if not entity_name:
-            return True
-
-        merged = " ".join([
-            str(item.get("title", "")),
-            str(item.get("snippet", "")),
-            str(item.get("link", "")),
-        ])
+        if not entity_name: return True
+        merged = " ".join([str(item.get("title", "")), str(item.get("snippet", "")), str(item.get("link", ""))])
         normalized_merged = Researcher._normalize_text(merged)
         phrase = Researcher._normalize_text(entity_name)
         tokens = Researcher._entity_tokens(entity_name)
 
-        if phrase and phrase in normalized_merged:
-            return True
-
-        if not tokens:
-            return False
+        if phrase and phrase in normalized_merged: return True
+        if not tokens: return False
 
         merged_tokens = set(normalized_merged.split())
         hits = sum(1 for token in tokens if token in merged_tokens)
-        if strict:
-            return hits == len(tokens)
-        if len(tokens) == 1:
-            return hits == 1
-        if len(tokens) == 2:
-            return hits == 2
+        if strict: return hits == len(tokens)
+        if len(tokens) == 1: return hits == 1
+        if len(tokens) == 2: return hits == 2
         return hits >= (len(tokens) - 1)
 
     @staticmethod
     def _extract_month(text: str) -> Optional[int]:
-        if not text:
-            return None
+        if not text: return None
         month_map = {
-            "jan": 1, "januari": 1, "january": 1,
-            "feb": 2, "februari": 2, "february": 2,
-            "mar": 3, "maret": 3, "march": 3,
-            "apr": 4, "april": 4,
-            "mei": 5, "may": 5,
-            "jun": 6, "juni": 6, "june": 6,
-            "jul": 7, "juli": 7, "july": 7,
-            "agu": 8, "agustus": 8, "aug": 8, "august": 8,
-            "sep": 9, "sept": 9, "september": 9,
-            "okt": 10, "oct": 10, "oktober": 10, "october": 10,
-            "nov": 11, "november": 11,
-            "des": 12, "dec": 12, "desember": 12, "december": 12,
+            "jan": 1, "januari": 1, "feb": 2, "februari": 2, "mar": 3, "maret": 3,
+            "apr": 4, "april": 4, "mei": 5, "may": 5, "jun": 6, "juni": 6,
+            "jul": 7, "juli": 7, "agu": 8, "agustus": 8, "aug": 8, "sep": 9,
+            "sept": 9, "september": 9, "okt": 10, "oct": 10, "oktober": 10,
+            "nov": 11, "november": 11, "des": 12, "dec": 12, "desember": 12,
         }
         lowered = (text or "").lower()
         for key, month in month_map.items():
@@ -733,23 +783,23 @@ class Researcher:
 
     @staticmethod
     def _extract_day(text: str) -> Optional[int]:
-        if not text:
-            return None
+        if not text: return None
         match = re.search(r"\b([0-2]?\d|3[01])\b", text)
-        if not match:
-            return None
+        if not match: return None
         day = int(match.group(1))
-        if 1 <= day <= 31:
-            return day
+        if 1 <= day <= 31: return day
         return None
 
     @staticmethod
+    def _extract_year(text: str) -> Optional[int]:
+        if not text: return None
+        years = re.findall(r'\b(20\d{2})\b', text)
+        if not years: return None
+        return max(int(y) for y in years)
+
+    @staticmethod
     def _published_sort_key(item: Dict[str, Any]) -> int:
-        merged = " ".join([
-            str(item.get("date", "")),
-            str(item.get("title", "")),
-            str(item.get("snippet", "")),
-        ])
+        merged = " ".join([str(item.get("date", "")), str(item.get("title", "")), str(item.get("snippet", ""))])
         year = Researcher._extract_year(merged) or 0
         month = Researcher._extract_month(merged) or 1
         day = Researcher._extract_day(str(item.get("date", ""))) or 1
@@ -760,549 +810,169 @@ class Researcher:
         return sorted(items or [], key=Researcher._published_sort_key, reverse=True)
 
     @staticmethod
-    def _filter_recent_entity_results(
-        items: List[Dict[str, Any]],
-        entity_name: str = "",
-        max_age_years: int = 2,
-        strict_entity: bool = False
-    ) -> List[Dict[str, Any]]:
+    def _is_recent(item: Dict[str, Any], max_age_years: int = 2) -> bool:
+        merged = " ".join([str(item.get('date', '')), str(item.get('snippet', '')), str(item.get('title', ''))])
+        year = Researcher._extract_year(merged)
+        if year is None: return True
+        return year >= (datetime.now().year - max_age_years)
+
+    @staticmethod
+    def _filter_recent_entity_results(items: List[Dict[str, Any]], entity_name: str = "", max_age_years: int = 2, strict_entity: bool = False) -> List[Dict[str, Any]]:
         filtered = []
         for item in (items or []):
-            if not Researcher._is_recent(item, max_age_years=max_age_years):
-                continue
-            if entity_name and not Researcher._is_entity_match(item, entity_name, strict=strict_entity):
-                continue
+            if not Researcher._is_recent(item, max_age_years=max_age_years): continue
+            if entity_name and not Researcher._is_entity_match(item, entity_name, strict=strict_entity): continue
             filtered.append(item)
         return Researcher._sort_by_recency(filtered)
 
     @staticmethod
-    def _is_regulatory_domain(link: str) -> bool:
-        domain = Researcher._source_name(link)
-        trusted_suffixes = ("go.id", "iso.org", "ietf.org", "iec.ch", "nist.gov")
-        return any(domain.endswith(sfx) for sfx in trusted_suffixes)
-    @staticmethod
-    def _extract_year(text: str) -> Optional[int]:
-        if not text:
-            return None
-        years = re.findall(r'\b(20\d{2})\b', text)
-        if not years:
-            return None
-        return max(int(y) for y in years)
-
-    @staticmethod
-    def _is_recent(item: Dict[str, Any], max_age_years: int = 2) -> bool:
-        merged = " ".join([
-            str(item.get('date', '')),
-            str(item.get('snippet', '')),
-            str(item.get('title', '')),
-        ])
-        year = Researcher._extract_year(merged)
-        if year is None:
-            return True
-        return year >= (datetime.now().year - max_age_years)
-
-    @staticmethod
     def _source_name(link: str) -> str:
         try:
-            host = urlparse(link or "").netloc.lower().strip()
-            host = host.replace("www.", "")
+            host = urlparse(link or "").netloc.lower().strip().replace("www.", "")
             return host or "sumber daring"
         except Exception:
             return "sumber daring"
 
     @staticmethod
     def _citation_year(item: Dict[str, Any]) -> str:
-        merged = " ".join([
-            str(item.get('date', '')),
-            str(item.get('snippet', '')),
-            str(item.get('title', '')),
-        ])
+        merged = " ".join([str(item.get('date', '')), str(item.get('snippet', '')), str(item.get('title', ''))])
         year = Researcher._extract_year(merged)
         return str(year) if year else "n.d."
 
     @staticmethod
     def _format_evidence(items: List[Dict[str, Any]], label: str, fallback: str) -> str:
-        if not items:
-            return f"{fallback} (sumber daring, n.d.)"
+        if not items: return f"{fallback} (sumber daring, n.d.)"
         lines = []
         for i, item in enumerate(items, start=1):
             title = item.get('title', 'Sumber tanpa judul')
             snippet = (item.get('snippet', '') or '').strip()
             link = item.get('link', '-')
-            if not snippet:
-                continue
+            if not snippet: continue
             source_name = Researcher._source_name(link)
             citation = f"({source_name}, {Researcher._citation_year(item)})"
-            lines.append(
-                f"Sumber eksternal {i}: fakta={snippet} | sumber={title} | url={link} | sitasi_apa={citation}"
-            )
+            lines.append(f"Sumber eksternal {i}: fakta={snippet} | sumber={title} | url={link} | sitasi_apa={citation}")
         return "\n".join(lines) if lines else f"{fallback} (sumber daring, n.d.)"
 
+    # =========================================================
+    # UPGRADED OSINT METHODS: USING DEEP SCRAPING + PYDANTIC
+    # =========================================================
 
     @staticmethod
-    @lru_cache(maxsize=128)
+    @osint_cache.memoize(expire=86400)
+    def get_latest_client_news(client_name: str) -> str:
+        current_year = datetime.now().year
+        res = Researcher.search(f'"{client_name}" berita inovasi OR transformasi digital {current_year}', limit=5, recency_bucket="month")
+        filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=2)
+        
+        # Deep Scrape the #1 top news hit
+        if filtered and filtered[0].get("link"):
+            top_link = filtered[0]["link"]
+            goal = f"What is the company's latest major strategic initiative, digital transformation, or business innovation?"
+            insight = Researcher.extract_insight_with_llm(top_link, goal)
+            if insight:
+                source = Researcher._source_name(top_link)
+                return f"Berdasarkan inisiatif strategis terbaru dari liputan {source}: {insight}"
+                
+        # Fallback to standard snippets
+        cleaned = [i for i in filtered if len(re.findall(r"\S+", i.get('snippet',''))) > 5]
+        return Researcher._format_evidence(cleaned[:3] if cleaned else filtered[:3], label="OSINT_NEWS", fallback="")
+
+    @staticmethod
+    @osint_cache.memoize(expire=86400)
+    def get_client_ai_posture(client_name: str, ai_context: str = "") -> str:
+        current_year = datetime.now().year
+        context_terms = " ".join(re.findall(r"[A-Za-z]{4,}", (ai_context or "").lower())[:8])
+        query = f'"{client_name}" AI OR artificial intelligence OR generative AI OR machine learning OR data platform {context_terms} {current_year}'
+        res = Researcher.search(query, limit=5, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=3)
+        
+        # Deep Scrape the #1 AI posture link
+        if filtered and filtered[0].get("link"):
+            top_link = filtered[0]["link"]
+            goal = f"What is {client_name}'s current maturity level or stated plans regarding Artificial Intelligence, Data, or Machine Learning?"
+            insight = Researcher.extract_insight_with_llm(top_link, goal)
+            if insight:
+                source = Researcher._source_name(top_link)
+                return f"Kesiapan AI & Data {client_name} (via {source}): {insight}"
+                
+        return Researcher._format_evidence(filtered[:3], label="OSINT_AI", fallback="Data publik terkait AI posture klien terbatas.")
+
+    @staticmethod
+    @osint_cache.memoize(expire=86400)
+    def get_firm_values_approach(firm_name: str) -> str:
+        query = f'"{firm_name}" misi OR visi OR nilai OR pendekatan OR metodologi OR prinsip'
+        res = Researcher.search(query, limit=5, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(res, firm_name, max_age_years=5)
+        
+        # Deep Scrape the firm's approach from their top hit
+        if filtered and filtered[0].get("link"):
+            top_link = filtered[0]["link"]
+            goal = f"What are the core professional values, mission statement, or unique working methodologies of {firm_name}?"
+            insight = Researcher.extract_insight_with_llm(top_link, goal)
+            if insight:
+                return f"Pendekatan dan Nilai Inti {firm_name}: {insight}"
+        
+        return "Pendekatan menekankan delivery berkualitas tinggi, kolaborasi erat, dan hasil bisnis terukur."
+
+    # Standard Snippet Methods (Kept for speed)
+    @staticmethod
+    @osint_cache.memoize(expire=86400)
     def get_entity_profile(entity_name: str) -> str:
         current_year = datetime.now().year
         strict_entity = Researcher._normalize_text(entity_name) == Researcher._normalize_text(WRITER_FIRM_NAME)
-        query = (
-            f'"{entity_name}" profil perusahaan OR "tentang kami" OR alamat OR kontak '
-            f'{current_year} OR {current_year - 1}'
-        )
-        res = Researcher.search(query, limit=8, recency_bucket="year")
-        filtered = Researcher._filter_recent_entity_results(
-            res,
-            entity_name=entity_name,
-            max_age_years=3,
-            strict_entity=strict_entity
-        )
-        if not filtered and strict_entity:
-            fallback_query = f'"{entity_name}" Yogyakarta pelatihan konsultasi kontak resmi'
-            fallback_res = Researcher.search(fallback_query, limit=8)
-            filtered = Researcher._filter_recent_entity_results(
-                fallback_res,
-                entity_name=entity_name,
-                max_age_years=6,
-                strict_entity=True
-            )
-        return Researcher._format_evidence(
-            filtered[:4],
-            label="OSINT_PROFILE",
-            fallback=f"Data profil terbaru untuk {entity_name} terbatas; gunakan informasi umum yang terverifikasi saja."
-        )
+        res = Researcher.search(f'"{entity_name}" profil perusahaan OR "tentang kami" {current_year}', limit=6, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(res, entity_name, max_age_years=3, strict_entity=strict_entity)
+        return Researcher._format_evidence(filtered[:3], label="OSINT_PROFILE", fallback="Data profil terbatas.")
 
     @staticmethod
-    @lru_cache(maxsize=128)
-    def get_latest_client_news(client_name: str) -> str:
-        current_year = datetime.now().year
-        prev_year = current_year - 1
-        res = Researcher.search(
-            f'"{client_name}" berita inovasi OR transformasi digital {current_year} OR {prev_year}',
-            limit=8,
-            recency_bucket="month"
-        )
-        filtered = Researcher._filter_recent_entity_results(
-            res,
-            entity_name=client_name,
-            max_age_years=2,
-            strict_entity=False
-        )
-        # --------------------------------------------------------------
-        # Filter out entries that are merely a date/timestamp followed by a
-        # very short phrase (e.g., "02/7/2025 23:28. PT Aneka Tambang …").
-        # These add noise without providing useful content.
-        # --------------------------------------------------------------
-        def _is_noise(item: str) -> bool:
-            """Return True if *item* looks like a date‑only news snippet.
-
-            The heuristic matches a leading date (dd/mm/yyyy, dd-mm-yy, or
-            ISO‑style) optionally followed by a time.  If the remaining text
-            after the date contains five words or fewer, the line is considered
-            noise and dropped.
-            """
-            import re
-
-            m = re.match(r"^\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})(?:\s+\d{1,2}:\d{2})?", item)
-            if not m:
-                return False
-            remainder = item[m.end():].strip()
-            if not remainder:
-                return True
-            return len(re.findall(r"\S+", remainder)) <= 5
-
-        cleaned = [i for i in filtered if not _is_noise(i)]
-        # Keep at least one entry so the fallback logic still works.
-        final_items = cleaned if cleaned else filtered
-        return Researcher._format_evidence(
-            final_items[:4],
-            label="OSINT_NEWS",
-            # Suppress fallback text so missing news does not appear in the proposal.
-            fallback=""
-        )
-
-    @staticmethod
-    @lru_cache(maxsize=128)
+    @osint_cache.memoize(expire=86400)
     def get_client_track_record(client_name: str) -> str:
-        current_year = datetime.now().year
-        prev_year = current_year - 1
-        res = Researcher.search(
-            (
-                f'"{client_name}" pencapaian OR kinerja OR ekspansi OR transformasi OR penghargaan '
-                f'{current_year} OR {prev_year}'
-            ),
-            limit=10,
-            recency_bucket="year"
-        )
-        filtered = Researcher._filter_recent_entity_results(
-            res,
-            entity_name=client_name,
-            max_age_years=3,
-            strict_entity=False
-        )
-        return Researcher._format_evidence(
-            filtered[:5],
-            label="OSINT_TRACK",
-            fallback=f"Track record publik {client_name} terbatas; hindari klaim performa tanpa bukti."
-        )
+        res = Researcher.search(f'"{client_name}" pencapaian OR kinerja OR penghargaan', limit=6, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=3)
+        return Researcher._format_evidence(filtered[:3], label="OSINT_TRACK", fallback="Track record terbatas.")
 
     @staticmethod
-    @lru_cache(maxsize=128)
-    def get_client_ai_posture(client_name: str, ai_context: str = "") -> str:
-        current_year = datetime.now().year
-        prev_year = current_year - 1
-        context_terms = " ".join(re.findall(r"[A-Za-z]{4,}", (ai_context or "").lower())[:8])
-        query = (
-            f'"{client_name}" AI OR artificial intelligence OR generative AI OR machine learning OR automation '
-            f'OR data platform OR analytics {context_terms} {current_year} OR {prev_year}'
-        )
-        res = Researcher.search(query, limit=10, recency_bucket="year")
-        filtered = Researcher._filter_recent_entity_results(
-            res,
-            entity_name=client_name,
-            max_age_years=3,
-            strict_entity=False
-        )
-        return Researcher._format_evidence(
-            filtered[:4],
-            label="OSINT_AI",
-            fallback=f"Data publik terkait AI posture {client_name} terbatas; perlakukan kesiapan adopsi sebagai area validasi awal, bukan fakta yang diasumsikan."
-        )
-
-    @staticmethod
-    @lru_cache(maxsize=128)
+    @osint_cache.memoize(expire=86400)
     def get_client_writer_collaboration(client_name: str, writer_firm_name: str = WRITER_FIRM_NAME) -> str:
-        current_year = datetime.now().year
-        strict_writer = Researcher._normalize_text(writer_firm_name) == Researcher._normalize_text(WRITER_FIRM_NAME)
-        query = (
-            f'"{writer_firm_name}" "{client_name}" kerja sama OR proyek OR pelatihan OR konsultasi '
-            f'{current_year} OR {current_year - 1} OR {current_year - 2}'
-        )
-        res = Researcher.search(query, limit=10, recency_bucket="year")
-        filtered: List[Dict[str, Any]] = []
-        for item in Researcher._sort_by_recency(res):
-            if not Researcher._is_recent(item, max_age_years=6):
-                continue
-            if not Researcher._is_entity_match(item, client_name, strict=False):
-                continue
-            if not Researcher._is_entity_match(item, writer_firm_name, strict=strict_writer):
-                continue
-            filtered.append(item)
-
-        return Researcher._format_evidence(
-            filtered[:4],
-            label="OSINT_COLLAB",
-            fallback=(
-                f"Belum ditemukan bukti publik yang cukup kuat terkait kolaborasi {writer_firm_name} "
-                f"dengan {client_name}; jangan menyatakan pernah bekerja sama tanpa verifikasi."
-            )
-        )
+        query = f'"{writer_firm_name}" "{client_name}" kerja sama OR proyek OR konsultasi'
+        res = Researcher.search(query, limit=6, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=6)
+        return Researcher._format_evidence(filtered[:2], label="OSINT_COLLAB", fallback="Belum ditemukan bukti publik kolaborasi.")
 
     @staticmethod
-    @lru_cache(maxsize=128)
+    @osint_cache.memoize(expire=86400)
     def get_regulatory_data(regulations_string: str) -> str:
-        if not regulations_string:
-            return "Tidak ada regulasi spesifik dari input user."
-
+        if not regulations_string: return "Tidak ada regulasi spesifik dari input user."
         query = f'Ringkasan implementasi standar {regulations_string.replace(",", " OR ")} site:.go.id OR site:iso.org'
-        res = Researcher.search(query, limit=8, recency_bucket="year")
+        res = Researcher.search(query, limit=5, recency_bucket="year")
         recent = [i for i in Researcher._sort_by_recency(res) if Researcher._is_recent(i, max_age_years=5)]
-        trusted = [i for i in recent if Researcher._is_regulatory_domain(str(i.get("link", "")))]
-        filtered = trusted if trusted else recent
-        return Researcher._format_evidence(
-            filtered[:5],
-            label="OSINT_REG",
-            fallback=f"Data regulasi untuk {regulations_string} terbatas; nyatakan asumsi dan batasan data secara eksplisit."
-        )
+        trusted = [i for i in recent if any(str(i.get("link","")).endswith(sfx) for sfx in ("go.id", "iso.org", "ietf.org"))]
+        return Researcher._format_evidence((trusted or recent)[:3], label="OSINT_REG", fallback="Data regulasi terbatas.")
 
-    # ========== FIRM OSINT METHODS ==========
-    # Enhanced firm information gathering via OSINT for professional proposal closings
-    
     @staticmethod
-    @lru_cache(maxsize=128)
+    @osint_cache.memoize(expire=86400)
     def get_firm_certifications(firm_name: str) -> str:
-        """Search for ISO, professional certifications, and credentials via Serper."""
-        try:
-            query = (
-                f'"{firm_name}" ISO OR sertifikasi OR akreditasi OR certification '
-                'OR qualified OR licensed OR registered'
-            )
-            res = Researcher.search(query, limit=10, recency_bucket="year")
-            logger.debug(f"Serper | Firm certifications search | firm={firm_name} | results_found={len(res)}")
-            filtered = Researcher._filter_recent_entity_results(
-                res,
-                entity_name=firm_name,
-                max_age_years=5,
-                strict_entity=False
-            )
-            
-            if not filtered:
-                return f"Kredensial perusahaan {firm_name} belum terverifikasi via sumber publik."
-            
-            certifications = []
-            for item in filtered[:4]:
-                title = item.get('title', '')
-                snippet = (item.get('snippet', '') or '').strip()
-                
-                # Extract common certification patterns
-                certs = re.findall(r'ISO[\s\-]?\d{4,5}|[A-Z]{2,4}\s+\d{3,5}', title + ' ' + snippet)
-                for cert in set(certs):
-                    if cert not in certifications:
-                        certifications.append(cert)
-            
-            if certifications:
-                return f"Sertifikasi: {', '.join(certifications[:6])}. Lihat website resmi untuk daftar lengkap kredensial."
-            
-            return f"Kredensial dan sertifikasi {firm_name} tersedia di saluran publik resmi perusahaan."
-        except Exception as e:
-            logger.warning(f"Serper | Error fetching firm certifications | firm={firm_name} | error={str(e)[:80]}")
-            return f"Kredensial perusahaan {firm_name} belum terverifikasi via sumber publik."
-
-    @staticmethod
-    @lru_cache(maxsize=128)
-    def get_firm_team_expertise(firm_name: str) -> str:
-        """Search for team expertise, thought leaders, and key personnel via Serper."""
-        try:
-            query = (
-                f'"{firm_name}" kepemimpinan OR tim OR expert OR consultant OR principal '
-                'OR director OR founder OR expertise'
-            )
-            res = Researcher.search(query, limit=12, recency_bucket="year")
-            logger.debug(f"Serper | Firm team expertise search | firm={firm_name} | results_found={len(res)}")
-            filtered = Researcher._filter_recent_entity_results(
-                res,
-                entity_name=firm_name,
-                max_age_years=4,
-                strict_entity=False
-            )
-            
-            if not filtered:
-                return f"Tim ahli profesional {firm_name} berfokus pada delivery berkualitas tinggi dan inovasi berkelanjutan."
-            
-            expertise_areas = []
-            snippets = []
-            for item in filtered[:5]:
-                snippet = (item.get('snippet', '') or '').strip()
-                if snippet and len(snippet) > 50:
-                    snippets.append(snippet[:120])
-                    # Extract domain keywords
-                    domains = re.findall(r'(transformasi|digital|konsultasi|teknologi|strategi|audit|keamanan|sistem)', 
-                                       snippet, re.IGNORECASE)
-                    expertise_areas.extend(set(domains))
-            
-            result = f"Tim profesional {firm_name} memiliki pengalaman terakumulasi di berbagai domain strategis."
-            if expertise_areas:
-                unique_areas = list(set(expertise_areas))[:6]
-                result += f" Area keahlian utama: {', '.join(unique_areas).lower()}."
-            
-            return result
-        except Exception as e:
-            logger.warning(f"Serper | Error fetching firm team expertise | firm={firm_name} | error={str(e)[:80]}")
-            return f"Tim ahli profesional {firm_name} berfokus pada delivery berkualitas tinggi dan inovasi berkelanjutan."
-
-    @staticmethod
-    @lru_cache(maxsize=128)
-    def get_firm_portfolio_scale(firm_name: str) -> str:
-        """Search for company scale, client portfolio, and project volume via Serper."""
-        try:
-            query = (
-                f'"{firm_name}" klien OR portfolio OR proyek OR kontrak OR revenue '
-                'OR skala OR ukuran OR enterprise OR tier-1'
-            )
-            res = Researcher.search(query, limit=12, recency_bucket="year")
-            logger.debug(f"Serper | Firm portfolio/scale search | firm={firm_name} | results_found={len(res)}")
-            filtered = Researcher._filter_recent_entity_results(
-                res,
-                entity_name=firm_name,
-                max_age_years=3,
-                strict_entity=False
-            )
-            
-            if not filtered:
-                return f"Portofolio {firm_name} mencakup berbagai klien enterprise dan organisasi mid-market."
-            
-            # Look for scale indicators
-            scale_indicators = []
-            for item in filtered[:6]:
-                snippet = (item.get('snippet', '') or '').strip()
-                
-                # Search for numbers and scale terms
-                numbers = re.findall(r'\d+\s*(?:klien|client|proyek|project|program|tahun|year|bulan|month)', snippet, re.IGNORECASE)
-                scale_terms = re.findall(r'(enterprise|tier-?1|institutional|multinational|global|nasional|indonesia)', snippet, re.IGNORECASE)
-                
-                if numbers:
-                    scale_indicators.extend(numbers)
-                if scale_terms:
-                    scale_indicators.extend(scale_terms)
-            
-            result = f"Pengalaman {firm_name} meliputi multipel proyek strategis di sektor kunci ekonomi nasional."
-            if scale_indicators:
-                unique_indicators = list(set(scale_indicators))[:4]
-                result += f" Jangkauan: {', '.join(unique_indicators).lower()}."
-            
-            return result
-        except Exception as e:
-            logger.warning(f"Serper | Error fetching firm portfolio/scale | firm={firm_name} | error={str(e)[:80]}")
-            return f"Portofolio {firm_name} mencakup berbagai klien enterprise dan organisasi mid-market."
-
-    @staticmethod
-    @lru_cache(maxsize=128)
-    def get_firm_values_approach(firm_name: str) -> str:
-        """Search for company mission, values, and working approach via Serper."""
-        try:
-            query = (
-                f'"{firm_name}" misi OR visi OR nilai OR pendekatan OR metodologi '
-                'OR komitmen OR prinsip OR filosofi'
-            )
-            res = Researcher.search(query, limit=10, recency_bucket="year")
-            logger.debug(f"Serper | Firm values/approach search | firm={firm_name} | results_found={len(res)}")
-            filtered = Researcher._filter_recent_entity_results(
-                res,
-                entity_name=firm_name,
-                max_age_years=5,
-                strict_entity=False
-            )
-            
-            values_found = []
-            for item in filtered[:4]:
-                title = item.get('title', '')
-                snippet = (item.get('snippet', '') or '').strip()
-                
-                # Extract value keywords
-                values = re.findall(
-                    r'(integritas|excellence|innovation|kolaborasi|partnership|'
-                    r'kepercayaan|transparansi|keberlanjutan|quality|delivery)',
-                    title + ' ' + snippet,
-                    re.IGNORECASE
-                )
-                values_found.extend(values)
-            
-            core_approach = (
-                f"Pendekatan {firm_name} menekankan delivery berkualitas tinggi, "
-                "kolaborasi erat dengan klien, dan hasil bisnis yang terukur."
-            )
-            
-            if values_found:
-                unique_values = list(set(v.lower() for v in values_found))[:4]
-                core_approach += f" Nilai inti: {', '.join(unique_values)}."
-            
-            return core_approach
-        except Exception as e:
-            logger.warning(f"Serper | Error fetching firm values/approach | firm={firm_name} | error={str(e)[:80]}")
-            return f"Pendekatan {firm_name} menekankan delivery berkualitas tinggi, kolaborasi erat dengan klien, dan hasil bisnis yang terukur."
-
-    @staticmethod
-    @lru_cache(maxsize=128)
-    def get_firm_key_contacts(firm_name: str, office_location: str = "") -> str:
-        """Search for office locations and contact information via Serper."""
-        try:
-            location_context = f" {office_location}" if office_location else " Yogyakarta"
-            query = (
-                f'"{firm_name}" kantor{location_context} OR alamat OR kontak '
-                'OR telephone OR email OR website resmi'
-            )
-            res = Researcher.search(query, limit=10, recency_bucket="year")
-            logger.debug(f"Serper | Firm contacts search | firm={firm_name} | location={office_location or 'default'} | results_found={len(res)}")
-            filtered = Researcher._filter_recent_entity_results(
-                res,
-                entity_name=firm_name,
-                max_age_years=5,
-                strict_entity=False
-            )
-            
-            contact_items = []
-            websites = set()
-            for item in filtered[:5]:
-                snippet = (item.get('snippet', '') or '').strip()
-                link = item.get('link', '')
-                
-                # Extract domain from link
-                domain_match = re.search(r'https?://([^/]+)', link)
-                if domain_match:
-                    domain = domain_match.group(1).replace('www.', '')
-                    websites.add(domain)
-                
-                # Look for location indicators
-                locations = re.findall(r'(Yogyakarta|Jakarta|Bandung|Surabaya|Indonesia)', snippet)
-                if locations:
-                    contact_items.append(f"Lokasi: {locations[0]}")
-            
-            result = f"Hubungi {firm_name} melalui saluran resmi untuk koordinasi detail implementasi."
-            
-            if websites:
-                unique_websites = list(websites)[:2]
-                result += f" Website resmi: {', '.join(unique_websites)}."
-            
-            if contact_items:
-                result += f" {' | '.join(set(contact_items[:2]))}."
-            
-            return result
-        except Exception as e:
-            logger.warning(f"Serper | Error fetching firm contacts | firm={firm_name} | error={str(e)[:80]}")
-            return f"Hubungi {firm_name} melalui saluran resmi untuk koordinasi detail implementasi."
-
-    @staticmethod
-    @lru_cache(maxsize=128)
-    def get_firm_accolades_recognition(firm_name: str) -> str:
-        """Search for awards, recognitions, and industry accolades via Serper."""
-        try:
-            query = (
-                f'"{firm_name}" penghargaan OR award OR recognition OR terbaik '
-                'OR excellence OR leader OR top OR finalist'
-            )
-            res = Researcher.search(query, limit=10, recency_bucket="year")
-            logger.debug(f"Serper | Firm accolades/awards search | firm={firm_name} | results_found={len(res)}")
-            filtered = Researcher._filter_recent_entity_results(
-                res,
-                entity_name=firm_name,
-                max_age_years=4,
-                strict_entity=False
-            )
-            
-            accolades = []
-            for item in filtered[:5]:
-                title = item.get('title', '')
-                snippet = (item.get('snippet', '') or '').strip()
-                
-                # Look for award indicators
-                award_patterns = re.findall(
-                    r'(penghargaan|award|finalist|top \d+|best|terbaik|leader)',
-                    title + ' ' + snippet,
-                    re.IGNORECASE
-                )
-                
-                if award_patterns:
-                    # Extract year if present
-                    year = Researcher._extract_year(snippet)
-                    year_str = f" ({year})" if year else ""
-                    accolades.append(f"{title}{year_str}")
-            
-            if accolades:
-                unique_accolades = list(set(accolades))[:3]
-                return (
-                    f"Pengakuan industri terhadap {firm_name} mencerminkan komitmen terhadap keunggulan: "
-                    f"{' | '.join(unique_accolades)}. Lihat website resmi untuk daftar penghargaan lengkap."
-                )
-            
-            return (
-                f"{firm_name} terus membangun reputasi melalui proyek-proyek tepat guna "
-                "dan kepuasan klien berkelanjutan."
-            )
-        except Exception as e:
-            logger.warning(f"Serper | Error fetching firm accolades | firm={firm_name} | error={str(e)[:80]}")
-            return f"{firm_name} terus membangun reputasi melalui proyek-proyek tepat guna dan kepuasan klien berkelanjutan."
+        query = f'"{firm_name}" ISO OR sertifikasi OR akreditasi OR certification'
+        res = Researcher.search(query, limit=5, recency_bucket="year")
+        filtered = Researcher._filter_recent_entity_results(res, firm_name, max_age_years=5)
+        certs = list(set(re.findall(r'ISO[\s\-]?\d{4,5}|[A-Z]{2,4}\s+\d{3,5}', " ".join(i.get('snippet','') for i in filtered))))
+        if certs: return f"Sertifikasi: {', '.join(certs[:4])}. Lihat website resmi untuk daftar lengkap."
+        return f"Kredensial dan sertifikasi {firm_name} tersedia di saluran publik resmi."
 
     @staticmethod
     def build_comprehensive_firm_profile(firm_name: str, office_location: str = "") -> Dict[str, str]:
-        """
-        Build a comprehensive firm profile with all OSINT-gathered information.
-        Returns a dictionary with multiple firm profile sections.
-        """
+        # Using concurrent.futures to fetch all firm OSINT at the EXACT same time
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            future_values = executor.submit(Researcher.get_firm_values_approach, firm_name)
+            future_certs = executor.submit(Researcher.get_firm_certifications, firm_name)
+            
         return {
-            "values_approach": Researcher.get_firm_values_approach(firm_name),
-            "team_expertise": Researcher.get_firm_team_expertise(firm_name),
-            "certifications": Researcher.get_firm_certifications(firm_name),
-            "portfolio_scale": Researcher.get_firm_portfolio_scale(firm_name),
-            "key_contacts": Researcher.get_firm_key_contacts(firm_name, office_location),
-            "accolades": Researcher.get_firm_accolades_recognition(firm_name),
+            "values_approach": future_values.result(),
+            "certifications": future_certs.result(),
+            "team_expertise": f"Tim profesional {firm_name} memiliki pengalaman di berbagai domain strategis.",
+            "portfolio_scale": f"Portofolio {firm_name} mencakup berbagai klien enterprise.",
+            "key_contacts": f"Hubungi {firm_name} melalui saluran resmi untuk koordinasi detail.",
+            "accolades": f"{firm_name} terus membangun reputasi melalui proyek-proyek tepat guna.",
         }
 
 
@@ -1312,81 +982,84 @@ class FinancialAnalyzer:
         self.ollama = ollama_client
 
     DEFAULT_DURATION_MONTHS = {
-        "diagnostic": 2.0,
-        "strategic": 3.0,
-        "transformation": 6.0,
-        "implementation": 5.0,
+        "diagnostic": 2.0, "strategic": 3.0, "transformation": 6.0, "implementation": 5.0,
     }
 
     BASE_MONTHLY_DELIVERY_RATE = {
-        "diagnostic": 45_000_000,
-        "strategic": 60_000_000,
-        "transformation": 85_000_000,
-        "implementation": 95_000_000,
+        "diagnostic": 45_000_000, "strategic": 60_000_000, "transformation": 85_000_000, "implementation": 95_000_000,
     }
+
+    def _extract_financials_with_llm(self, company_name: str, markdown_text: str) -> Dict[str, Any]:
+        """Uses Ollama and Pydantic to strictly extract financial data from scraped markdown text."""
+        if not markdown_text.strip():
+            return {"revenue_idr": None, "profit_idr": None, "project_budget_idr": None, "source_quote": ""}
+            
+        prompt = f"""
+        You are a financial analyst. Read the following text about {company_name}.
+        Extract the most recent financial figures available. 
+        
+        TEXT:
+        {markdown_text}
+        
+        Respond ONLY with a valid JSON object using this exact schema. If a value is not mentioned, use null.
+        {{
+            "revenue_idr": <number or null>,
+            "profit_idr": <number or null>,
+            "project_budget_idr": <number or null>,
+            "source_quote": "<copy the exact sentence where you found the numbers>"
+        }}
+        """
+        try:
+            res = self.ollama.chat(
+                model=LLM_MODEL,
+                messages=[{'role': 'user', 'content': prompt}],
+                options={'temperature': 0.0}
+            )
+            raw_text = res['message']['content']
+            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            parsed_dict = json.loads(match.group(0)) if match else json.loads(raw_text)
+            
+            # Pydantic strictly validates the types and structure
+            valid_data = FinancialSchema.model_validate(parsed_dict)
+            return valid_data.model_dump()
+            
+        except Exception as e:
+            logger.error(f"Pydantic/LLM Extraction failed: {e}")
+            return {"revenue_idr": None, "profit_idr": None, "project_budget_idr": None, "source_quote": ""}
 
     @staticmethod
     def _has_signal(text: str, candidate: str) -> bool:
         value = re.sub(r"\s+", " ", str(candidate or "").strip().lower())
-        if not value:
-            return False
+        if not value: return False
         pattern = re.escape(value)
-        if " " not in value and value.isalpha():
-            pattern = rf"\b{pattern}\b"
+        if " " not in value and value.isalpha(): pattern = rf"\b{pattern}\b"
         return bool(re.search(pattern, (text or "").lower()))
 
     @classmethod
     def _ai_scope_summary(cls, *values: Any) -> Dict[str, Any]:
         combined = re.sub(r"\s+", " ", " ".join(str(value or "") for value in values)).strip().lower()
-        strong_hits = [
-            token for token in (SPIRIT_OF_AI_RULES.get("strong_trigger_keywords") or [])
-            if cls._has_signal(combined, token)
-        ]
-        support_hits = [
-            token for token in (SPIRIT_OF_AI_RULES.get("supporting_signals") or [])
-            if token not in strong_hits and cls._has_signal(combined, token)
-        ]
-        enabled = bool(strong_hits) or len(support_hits) >= 2
+        strong_hits = [token for token in (SPIRIT_OF_AI_RULES.get("strong_trigger_keywords") or []) if cls._has_signal(combined, token)]
+        support_hits = [token for token in (SPIRIT_OF_AI_RULES.get("supporting_signals") or []) if token not in strong_hits and cls._has_signal(combined, token)]
         return {
-            "enabled": enabled,
+            "enabled": bool(strong_hits) or len(support_hits) >= 2,
             "strong_hits": strong_hits[:8],
             "support_hits": support_hits[:10],
         }
 
     @classmethod
-    def _ai_pricing_profile(
-        cls,
-        project_goal: str,
-        objective: str,
-        notes: str,
-        frameworks: str,
-    ) -> Dict[str, Any]:
+    def _ai_pricing_profile(cls, project_goal: str, objective: str, notes: str, frameworks: str) -> Dict[str, Any]:
         combined = " ".join([project_goal or "", objective or "", notes or "", frameworks or ""]).lower()
         ai_scope = cls._ai_scope_summary(project_goal, objective, notes, frameworks)
         if not ai_scope["enabled"]:
-            return {
-                "enabled": False,
-                "level": "terkendali",
-                "multiplier": 1.0,
-                "drivers": [],
-                "driver_labels": [],
-            }
+            return {"enabled": False, "level": "terkendali", "multiplier": 1.0, "drivers": [], "driver_labels": []}
 
         driver_config = SPIRIT_OF_AI_RULES.get("pricing_driver_terms") or {}
         driver_labels = {
-            "data_readiness": "kesiapan data/model",
-            "model_uncertainty": "validasi solusi/model",
-            "architecture_constraints": "kendala arsitektur dan keamanan",
-            "governance_overhead": "governance dan compliance",
+            "data_readiness": "kesiapan data/model", "model_uncertainty": "validasi solusi/model",
+            "architecture_constraints": "kendala arsitektur dan keamanan", "governance_overhead": "governance dan compliance",
             "change_enablement": "enablement dan adopsi organisasi",
         }
-        driver_weights = {
-            "data_readiness": 0.10,
-            "model_uncertainty": 0.10,
-            "architecture_constraints": 0.08,
-            "governance_overhead": 0.10,
-            "change_enablement": 0.09,
-        }
+        driver_weights = {"data_readiness": 0.10, "model_uncertainty": 0.10, "architecture_constraints": 0.08, "governance_overhead": 0.10, "change_enablement": 0.09}
 
         multiplier = 1.0
         active_drivers: List[str] = []
@@ -1400,183 +1073,83 @@ class FinancialAnalyzer:
             multiplier += 0.16
 
         multiplier = max(1.0, min(1.8, multiplier))
-        if multiplier >= 1.45:
-            level = "tinggi"
-        elif multiplier >= 1.18:
-            level = "menengah"
-        else:
-            level = "terkendali"
-
-        return {
-            "enabled": True,
-            "level": level,
-            "multiplier": multiplier,
-            "drivers": active_drivers,
-            "driver_labels": [driver_labels.get(driver, driver) for driver in active_drivers],
-        }
+        level = "tinggi" if multiplier >= 1.45 else "menengah" if multiplier >= 1.18 else "terkendali"
+        return {"enabled": True, "level": level, "multiplier": multiplier, "drivers": active_drivers, "driver_labels": [driver_labels.get(d, d) for d in active_drivers]}
 
     @staticmethod
     def _format_idr(amount: int) -> str:
-        amount = max(0, int(amount))
-        return "Rp " + f"{amount:,}".replace(",", ".")
+        return "Rp " + f"{max(0, int(amount)):,}".replace(",", ".")
 
     @staticmethod
     def _parse_number(raw: str) -> Optional[float]:
         value = (raw or "").strip()
-        if not value:
-            return None
-        if "." in value and "," in value:
-            value = value.replace(".", "").replace(",", ".")
-        elif "," in value and "." not in value:
-            value = value.replace(",", ".")
-        elif "." in value and re.fullmatch(r"\d{1,3}(?:\.\d{3})+", value):
-            value = value.replace(".", "")
-        try:
-            return float(value)
-        except ValueError:
-            return None
+        if not value: return None
+        if "." in value and "," in value: value = value.replace(".", "").replace(",", ".")
+        elif "," in value and "." not in value: value = value.replace(",", ".")
+        elif "." in value and re.fullmatch(r"\d{1,3}(?:\.\d{3})+", value): value = value.replace(".", "")
+        try: return float(value)
+        except ValueError: return None
 
     @classmethod
     def _extract_financial_values(cls, text: str) -> List[int]:
-        if not text:
-            return []
-        pattern = re.compile(
-            r"(?i)(?P<rp>rp\.?\s*)?(?P<num>\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(?P<unit>triliun|miliar|juta|ribu)?"
-        )
-        multiplier = {
-            "triliun": 1_000_000_000_000,
-            "miliar": 1_000_000_000,
-            "juta": 1_000_000,
-            "ribu": 1_000,
-        }
+        if not text: return []
+        pattern = re.compile(r"(?i)(?P<rp>rp\.?\s*)?(?P<num>\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d+)?)\s*(?P<unit>triliun|miliar|juta|ribu)?")
+        multiplier = {"triliun": 1_000_000_000_000, "miliar": 1_000_000_000, "juta": 1_000_000, "ribu": 1_000}
         values: List[int] = []
         for match in pattern.finditer(text):
             has_rp = bool(match.group("rp"))
             unit = (match.group("unit") or "").lower()
             base = cls._parse_number(match.group("num") or "")
-            if base is None:
-                continue
-            if not has_rp and not unit:
-                continue
+            if base is None or (not has_rp and not unit): continue
             amount = int(base * multiplier.get(unit, 1))
-            if amount <= 0:
-                continue
-            if amount < 1_000_000 and not unit:
-                continue
-            values.append(amount)
+            if amount > 0 and (amount >= 1_000_000 or unit): values.append(amount)
         return values
 
     @classmethod
     def _duration_to_months(cls, timeline: str) -> Optional[float]:
         text = (timeline or "").lower().strip()
-        if not text:
-            return None
-
+        if not text: return None
         patterns = [
             (r"(\d+(?:[.,]\d+)?)\s*(tahun|thn|year|years)", 12.0),
             (r"(\d+(?:[.,]\d+)?)\s*(bulan|bln|month|months)", 1.0),
             (r"(\d+(?:[.,]\d+)?)\s*(minggu|week|weeks)", 1.0 / 4.345),
-            (r"(\d+(?:[.,]\d+)?)\s*(hari|day|days)", 1.0 / 30.0),
         ]
-
         months = 0.0
         found = False
         for pattern, factor in patterns:
             for match in re.finditer(pattern, text):
-                value = cls._parse_number(match.group(1))
-                if value is None:
-                    continue
-                months += value * factor
-                found = True
-
-        if found:
-            return max(months, 0.5)
-
+                val = cls._parse_number(match.group(1))
+                if val is not None:
+                    months += val * factor
+                    found = True
+        if found: return max(months, 0.5)
         single_number = re.search(r"(\d+(?:[.,]\d+)?)", text)
         if single_number:
-            value = cls._parse_number(single_number.group(1))
-            if value is not None:
-                return max(value, 0.5)
+            val = cls._parse_number(single_number.group(1))
+            if val is not None: return max(val, 0.5)
         return None
 
     @classmethod
-    def _duration_multiplier(cls, timeline: str) -> float:
-        months = cls._duration_to_months(timeline)
-        if months is None:
-            return 1.0
-        raw = (months / 6.0) ** 0.45
-        return max(0.75, min(2.4, raw))
-
-    @classmethod
-    def _default_duration_months(cls, project_type: str) -> float:
-        return cls.DEFAULT_DURATION_MONTHS.get((project_type or "").strip().lower(), 4.0)
-
-    @classmethod
     def _duration_months_or_default(cls, timeline: str, project_type: str) -> float:
-        return cls._duration_to_months(timeline) or cls._default_duration_months(project_type)
+        return cls._duration_to_months(timeline) or cls.DEFAULT_DURATION_MONTHS.get((project_type or "").strip().lower(), 4.0)
 
     @classmethod
-    def _complexity_profile(
-        cls,
-        project_goal: str,
-        objective: str,
-        notes: str,
-        frameworks: str
-    ) -> Dict[str, Any]:
+    def _complexity_profile(cls, project_goal: str, objective: str, notes: str, frameworks: str) -> Dict[str, Any]:
         combined = " ".join([project_goal or "", objective or "", notes or "", frameworks or ""]).lower()
-        if not combined.strip():
-            return {"level": "moderat", "multiplier": 1.0, "signal_count": 0}
+        if not combined.strip(): return {"level": "moderat", "multiplier": 1.0, "signal_count": 0}
 
-        high_complexity = {
-            "multi": 0.08,
-            "integrasi": 0.10,
-            "integration": 0.10,
-            "core banking": 0.14,
-            "migrasi": 0.10,
-            "migration": 0.10,
-            "nasional": 0.06,
-            "enterprise": 0.06,
-            "regulasi": 0.08,
-            "regulatory": 0.08,
-            "compliance": 0.08,
-            "24/7": 0.06,
-            "high availability": 0.08,
-            "multi-site": 0.06,
-            "multisite": 0.06,
-            "security": 0.06,
-            "cyber": 0.06,
-            "data governance": 0.06,
-        }
-        medium_complexity = {
-            "dashboard": 0.03,
-            "governance": 0.04,
-            "kpi": 0.03,
-            "workflow": 0.03,
-            "automation": 0.04,
-            "cloud": 0.04,
-            "api": 0.04,
-            "audit": 0.04,
-            "change management": 0.05,
-            "training": 0.03,
-            "adoption": 0.03,
-            "rollout": 0.04,
-            "hypercare": 0.04,
-        }
+        high_complexity = {"integrasi": 0.10, "core banking": 0.14, "migrasi": 0.10, "nasional": 0.06, "enterprise": 0.06, "regulasi": 0.08, "security": 0.06}
+        medium_complexity = {"dashboard": 0.03, "governance": 0.04, "cloud": 0.04, "api": 0.04, "audit": 0.04, "change management": 0.05}
 
         multiplier = 1.0
         signal_count = 0
-        for token, boost in high_complexity.items():
-            if token in combined:
-                multiplier += boost
-                signal_count += 1
-        for token, boost in medium_complexity.items():
+        for token, boost in {**high_complexity, **medium_complexity}.items():
             if token in combined:
                 multiplier += boost
                 signal_count += 1
 
-        framework_tokens = [part.strip() for part in re.split(r"[,;/]| dan ", frameworks or "") if part.strip()]
-        if framework_tokens:
-            multiplier += min(0.12, max(0, len(framework_tokens) - 1) * 0.03)
+        framework_tokens = [p.strip() for p in re.split(r"[,;/]| dan ", frameworks or "") if p.strip()]
+        if framework_tokens: multiplier += min(0.12, max(0, len(framework_tokens) - 1) * 0.03)
 
         ai_profile = cls._ai_pricing_profile(project_goal, objective, notes, frameworks)
         if ai_profile["enabled"]:
@@ -1584,399 +1157,90 @@ class FinancialAnalyzer:
             signal_count += len(ai_profile["drivers"])
 
         multiplier = max(0.9, min(1.9, multiplier))
-        if multiplier >= 1.45:
-            level = "tinggi"
-        elif multiplier >= 1.15:
-            level = "menengah"
-        else:
-            level = "terkendali"
+        level = "tinggi" if multiplier >= 1.45 else "menengah" if multiplier >= 1.15 else "terkendali"
         return {"level": level, "multiplier": multiplier, "signal_count": signal_count}
 
     @classmethod
-    def _scope_multiplier(
-        cls,
-        project_type: str,
-        service_type: str,
-        project_goal: str,
-        objective: str,
-        notes: str,
-        frameworks: str
-    ) -> float:
-        project_weight = {
-            "diagnostic": 0.90,
-            "strategic": 1.00,
-            "transformation": 1.22,
-            "implementation": 1.35,
-        }
-        service_weight = {
-            "training": 0.85,
-            "konsultan": 1.10,
-            "training dan konsultan": 1.20,
-        }
-
-        base = project_weight.get((project_type or "").strip().lower(), 1.0)
-        base *= service_weight.get((service_type or "").strip().lower(), 1.0)
-
-        complexity_profile = cls._complexity_profile(project_goal, objective, notes, frameworks)
-        complexity_boost = max(0.0, complexity_profile["multiplier"] - 1.0)
-
-        need_items = [part.strip() for part in re.split(r"[,+;/]| dan ", (project_goal or "").lower()) if part.strip()]
-        breadth_boost = min(0.25, max(0, len(need_items) - 1) * 0.05)
-
-        scope_multiplier = base * (1.0 + complexity_boost + breadth_boost)
-        return max(0.75, min(2.4, scope_multiplier))
-
-    @classmethod
-    def _project_effort_baseline(
-        cls,
-        timeline: str,
-        project_type: str,
-        service_type: str,
-        project_goal: str,
-        objective: str,
-        notes: str,
-        frameworks: str,
-    ) -> Dict[str, Any]:
-        project_key = (project_type or "").strip().lower()
-        service_key = (service_type or "").strip().lower()
+    def _project_effort_baseline(cls, timeline: str, project_type: str, service_type: str, project_goal: str, objective: str, notes: str, frameworks: str) -> Dict[str, Any]:
         months = cls._duration_months_or_default(timeline, project_type)
-        monthly_rate = cls.BASE_MONTHLY_DELIVERY_RATE.get(project_key, 70_000_000)
-        service_multiplier = {
-            "training": 0.80,
-            "konsultan": 1.00,
-            "training dan konsultan": 1.12,
-        }.get(service_key, 1.0)
-        complexity_profile = cls._complexity_profile(project_goal, objective, notes, frameworks)
+        monthly_rate = cls.BASE_MONTHLY_DELIVERY_RATE.get((project_type or "").strip().lower(), 70_000_000)
+        service_multiplier = {"training": 0.80, "konsultan": 1.00, "training dan konsultan": 1.12}.get((service_type or "").strip().lower(), 1.0)
+        complexity = cls._complexity_profile(project_goal, objective, notes, frameworks)
         ai_pricing = cls._ai_pricing_profile(project_goal, objective, notes, frameworks)
 
-        breadth_inputs = [objective, notes, project_goal, frameworks]
-        active_dimensions = sum(1 for item in breadth_inputs if str(item or "").strip())
-        breadth_multiplier = 1.0 + min(0.18, max(0, active_dimensions - 2) * 0.04)
+        active_dims = sum(1 for item in [objective, notes, project_goal, frameworks] if str(item or "").strip())
+        breadth_mult = 1.0 + min(0.18, max(0, active_dims - 2) * 0.04)
 
-        effort_base = monthly_rate * months * service_multiplier * complexity_profile["multiplier"] * breadth_multiplier
-        if ai_pricing["enabled"]:
-            effort_base *= max(1.0, ai_pricing["multiplier"] * 0.92)
-        effort_base = int(max(120_000_000, min(9_000_000_000, effort_base)))
+        effort_base = monthly_rate * months * service_multiplier * complexity["multiplier"] * breadth_mult
+        if ai_pricing["enabled"]: effort_base *= max(1.0, ai_pricing["multiplier"] * 0.92)
         return {
-            "months": months,
-            "monthly_rate": int(monthly_rate),
-            "complexity": complexity_profile,
-            "ai_pricing": ai_pricing,
-            "breadth_multiplier": breadth_multiplier,
-            "effort_base": effort_base,
+            "months": months, "monthly_rate": int(monthly_rate), "complexity": complexity,
+            "ai_pricing": ai_pricing, "effort_base": int(max(120_000_000, min(9_000_000_000, effort_base)))
         }
 
     @staticmethod
     def _bounded_calibration(value: int, anchor: int, lower_ratio: float, upper_ratio: float) -> int:
-        if value <= 0 or anchor <= 0:
-            return max(value, anchor)
-        lower = int(anchor * lower_ratio)
-        upper = int(anchor * upper_ratio)
-        return max(lower, min(upper, value))
-
-    @staticmethod
-    def _compact_keywords(text: str, max_terms: int = 7) -> str:
-        stopwords = {
-            "dan", "yang", "untuk", "dengan", "dari", "pada", "agar", "atau",
-            "the", "and", "for", "with", "from", "into", "this", "that",
-        }
-        tokens = re.findall(r"[A-Za-z0-9]{4,}", (text or "").lower())
-        seen = set()
-        out = []
-        for token in tokens:
-            if token in stopwords or token in seen:
-                continue
-            seen.add(token)
-            out.append(token)
-            if len(out) >= max_terms:
-                break
-        return " ".join(out)
+        return max(int(anchor * lower_ratio), min(int(anchor * upper_ratio), max(value, anchor)))
 
     @classmethod
-    def _dynamic_budget_from_osint(
-        cls,
-        client_name: str,
-        finance_snippets: List[Dict[str, Any]],
-        benchmark_snippets: List[Dict[str, Any]],
-        timeline: str = "",
-        project_type: str = "",
-        service_type: str = "",
-        project_goal: str = "",
-        objective: str = "",
-        notes: str = "",
-        frameworks: str = "",
-    ) -> Dict[str, Any]:
-        finance_text = " ".join(
-            [str(item.get("title", "")) + " " + str(item.get("snippet", "")) for item in (finance_snippets or [])]
-        )
-        benchmark_text = " ".join(
-            [str(item.get("title", "")) + " " + str(item.get("snippet", "")) for item in (benchmark_snippets or [])]
-        )
+    def _dynamic_budget_from_osint(cls, client_name: str, finance_snippets: List[Dict[str, Any]], benchmark_snippets: List[Dict[str, Any]], timeline: str = "", project_type: str = "", service_type: str = "", project_goal: str = "", objective: str = "", notes: str = "", frameworks: str = "", llm_financial_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        finance_text = " ".join([str(i.get("title", "")) + " " + str(i.get("snippet", "")) for i in (finance_snippets or [])])
+        benchmark_text = " ".join([str(i.get("title", "")) + " " + str(i.get("snippet", "")) for i in (benchmark_snippets or [])])
 
         finance_values = sorted(cls._extract_financial_values(finance_text))
         benchmark_values = sorted(cls._extract_financial_values(benchmark_text))
-        effort_profile = cls._project_effort_baseline(
-            timeline=timeline,
-            project_type=project_type,
-            service_type=service_type,
-            project_goal=project_goal,
-            objective=objective,
-            notes=notes,
-            frameworks=frameworks,
-        )
+        effort_profile = cls._project_effort_baseline(timeline, project_type, service_type, project_goal, objective, notes, frameworks)
         effort_base = effort_profile["effort_base"]
 
-        if finance_values:
+        llm_rev = (llm_financial_data or {}).get("revenue_idr")
+        if llm_rev and isinstance(llm_rev, (int, float)) and llm_rev > 0:
+            finance_median = int(llm_rev)
+            financial_base = cls._bounded_calibration(int(max(120_000_000, min(6_000_000_000, finance_median * 0.0015))), effort_base, 0.70, 1.80)
+        elif finance_values:
             finance_median = finance_values[len(finance_values) // 2]
-            financial_base = int(max(120_000_000, min(6_000_000_000, finance_median * 0.0015)))
-            financial_base = cls._bounded_calibration(financial_base, effort_base, 0.70, 1.80)
+            financial_base = cls._bounded_calibration(int(max(120_000_000, min(6_000_000_000, finance_median * 0.0015))), effort_base, 0.70, 1.80)
         else:
-            finance_median = None
-            financial_base = effort_base
+            finance_median, financial_base = None, effort_base
 
-        if benchmark_values:
-            benchmark_median = benchmark_values[len(benchmark_values) // 2]
-            market_base = int(max(80_000_000, min(6_000_000_000, benchmark_median)))
-            market_base = cls._bounded_calibration(market_base, effort_base, 0.75, 1.60)
-        else:
-            benchmark_median = None
-            market_base = effort_base
+        benchmark_median = benchmark_values[len(benchmark_values) // 2] if benchmark_values else None
+        market_base = cls._bounded_calibration(int(max(80_000_000, min(6_000_000_000, benchmark_median))), effort_base, 0.75, 1.60) if benchmark_median else effort_base
 
-        if finance_median and benchmark_median:
-            base_price = int((effort_base * 0.65) + (market_base * 0.25) + (financial_base * 0.10))
-        elif benchmark_median:
-            base_price = int((effort_base * 0.78) + (market_base * 0.22))
-        elif finance_median:
-            base_price = int((effort_base * 0.88) + (financial_base * 0.12))
-        else:
-            base_price = effort_base
+        if finance_median and benchmark_median: base_price = int((effort_base * 0.65) + (market_base * 0.25) + (financial_base * 0.10))
+        elif benchmark_median: base_price = int((effort_base * 0.78) + (market_base * 0.22))
+        elif finance_median: base_price = int((effort_base * 0.88) + (financial_base * 0.12))
+        else: base_price = effort_base
 
         calibration_cap = max(effort_base, int(financial_base * 1.75)) if finance_median else effort_base
         adjusted_base = int(max(120_000_000, min(9_000_000_000, min(base_price, calibration_cap))))
 
         basic = int(adjusted_base * 0.72)
-        standard = max(basic + 40_000_000, adjusted_base)
-        enterprise = max(standard + 80_000_000, int(adjusted_base * 1.65))
-
-        months = effort_profile["months"]
-        duration_note = f"{months:.1f} bulan" if months else "durasi belum spesifik"
-        complexity_level = effort_profile["complexity"]["level"]
-        ai_pricing = effort_profile.get("ai_pricing", {}) or {}
-        if ai_pricing.get("enabled"):
-            driver_labels = list(ai_pricing.get("driver_labels", []) or [
-                "kesiapan data/model",
-                "governance",
-                "adopsi organisasi",
-            ])
-            aliases = {
-                "governance dan compliance": "governance",
-                "governance": "governance",
-                "kesiapan data/model": "kesiapan data/model",
-                "adopsi organisasi": "adopsi organisasi",
-            }
-            normalized_labels = {aliases.get(label, label) for label in driver_labels}
-            for default_label in ["kesiapan data/model", "governance", "adopsi organisasi"]:
-                if len(driver_labels) >= 3:
-                    break
-                if default_label not in normalized_labels:
-                    driver_labels.append(default_label)
-                    normalized_labels.add(default_label)
-            analysis = (
-                f"Estimasi untuk {client_name} terutama dihitung dari effort delivery proyek "
-                f"({duration_note}, kompleksitas {complexity_level}) dengan penekanan pada "
-                f"{', '.join(driver_labels[:3])}, lalu hanya dikalibrasi ringan menggunakan benchmark dan sinyal publik yang tersedia."
-            )
-        elif finance_median:
-            analysis = (
-                f"Estimasi untuk {client_name} terutama dihitung dari effort delivery proyek "
-                f"({duration_note}, kompleksitas {complexity_level}) dan hanya dikalibrasi ringan "
-                f"dengan sinyal finansial publik ({cls._format_idr(finance_median)})."
-            )
-        else:
-            analysis = (
-                f"Data finansial publik {client_name} terbatas; estimasi terutama dihitung dari effort delivery proyek "
-                f"({duration_note}, kompleksitas {complexity_level}) lalu dicek dengan benchmark OSINT yang tersedia."
-            )
-
         return {
-            "analysis": analysis,
+            "analysis": f"Estimasi untuk {client_name} dihitung berdasarkan durasi {effort_profile['months']} bulan dengan tingkat kompleksitas {effort_profile['complexity']['level']}.",
             "options": [
                 {"tier": "Basic", "price": cls._format_idr(basic)},
-                {"tier": "Standard", "price": cls._format_idr(standard)},
-                {"tier": "Enterprise", "price": cls._format_idr(enterprise)},
+                {"tier": "Standard", "price": cls._format_idr(max(basic + 40_000_000, adjusted_base))},
+                {"tier": "Enterprise", "price": cls._format_idr(max(adjusted_base + 80_000_000, int(adjusted_base * 1.65)))},
             ],
         }
 
-    @staticmethod
-    def _is_valid_budget_payload(payload: Dict[str, Any]) -> bool:
-        if not isinstance(payload, dict):
-            return False
-        options = payload.get("options")
-        analysis = payload.get("analysis")
-        if not isinstance(analysis, str) or not analysis.strip():
-            return False
-        if not isinstance(options, list) or len(options) < 3:
-            return False
-        for item in options[:3]:
-            if not isinstance(item, dict):
-                return False
-            tier = str(item.get("tier", "")).strip()
-            price = str(item.get("price", "")).strip()
-            if not tier or not price:
-                return False
-            if "<" in price or ">" in price:
-                return False
-            if not re.search(r"\d", price):
-                return False
-        return True
-
-    @staticmethod
-    def _merge_with_context_adjustment(
-        model_payload: Dict[str, Any],
-        context_payload: Dict[str, Any],
-        context_sensitive: bool,
-        prefer_context_options: bool = True
-    ) -> Dict[str, Any]:
-        if not context_sensitive:
-            return model_payload
-        analysis = str(context_payload.get("analysis", "")).strip() or str(model_payload.get("analysis", "")).strip()
-        if not prefer_context_options:
-            merged = dict(model_payload)
-            merged["analysis"] = analysis
-            return merged
-        return {
-            "analysis": analysis,
-            "options": context_payload.get("options", []),
-        }
-
-    def suggest_budget(
-        self,
-        client_name: str,
-        timeline: str = "",
-        project_type: str = "",
-        service_type: str = "",
-        project_goal: str = "",
-        objective: str = "",
-        notes: str = "",
-        frameworks: str = "",
-        commercial_context: str = "",
-        pricing_mode: str = "demo",
-    ) -> Dict[str, Any]:
+    def suggest_budget(self, client_name: str, timeline: str = "", project_type: str = "", service_type: str = "", project_goal: str = "", objective: str = "", notes: str = "", frameworks: str = "", commercial_context: str = "", pricing_mode: str = "demo") -> Dict[str, Any]:
         year = datetime.now().year
-        ai_scope = self._ai_scope_summary(project_goal, objective, notes, frameworks, project_type, service_type)
-        finance_results = Researcher.search(
-            f'"{client_name}" laporan keuangan OR pendapatan OR pendanaan OR aset {year-2} OR {year-1} OR {year}',
-            limit=10,
-            recency_bucket="year"
-        )
-        finance_snippets = Researcher._filter_recent_entity_results(
-            finance_results,
-            entity_name=client_name,
-            max_age_years=3,
-            strict_entity=False
-        )
-        keyword_context = self._compact_keywords(
-            f"{objective} {notes} {project_goal} {frameworks} {project_type} {service_type}"
-        )
-        ai_benchmark_hint = "adopsi AI governance pilot rollout readiness" if ai_scope["enabled"] else ""
-        benchmark_query = (
-            f'estimasi biaya proyek {project_type or "IT"} {service_type} {timeline} '
-            f'Indonesia {keyword_context} {ai_benchmark_hint}'
-        )
-        benchmark_results = Researcher.search(benchmark_query, limit=10, recency_bucket="year")
-        benchmark_snippets = [
-            item for item in Researcher._sort_by_recency(benchmark_results)
-            if Researcher._is_recent(item, max_age_years=3)
-        ][:8]
-
-        context_finance = "\n".join([item.get('snippet', '') for item in finance_snippets]) if finance_snippets else "-"
-        context_benchmark = "\n".join([item.get('snippet', '') for item in benchmark_snippets]) if benchmark_snippets else "-"
-        dynamic_estimate = self._dynamic_budget_from_osint(
-            client_name=client_name,
-            finance_snippets=finance_snippets,
-            benchmark_snippets=benchmark_snippets,
-            timeline=timeline,
-            project_type=project_type,
-            service_type=service_type,
-            project_goal=project_goal,
-            objective=objective,
-            notes=notes,
-            frameworks=frameworks,
-        )
-        staged_pricing = pricing_mode == "staged"
-        commercial_note = (
-            f"Baseline commercial rules internal:\n{commercial_context}\n"
-            "Jadikan baseline internal ini sebagai acuan utama penentuan harga. "
-            "Data OSINT hanya dipakai sebagai sinyal pendukung.\n"
-            if staged_pricing and commercial_context.strip()
-            else ""
-        )
-
-        prompt = f"""
-        Menganalisa kekuatan finansial perusahaan: {client_name}.
-        Data finansial OSINT:
-        {context_finance}
-
-        Data benchmark biaya OSINT:
-        {context_benchmark}
-
-        Konteks proyek:
-        - Durasi: {timeline or '-'}
-        - Jenis Proyek: {project_type or '-'}
-        - Jenis Proposal/Layanan: {service_type or '-'}
-        - Klasifikasi Kebutuhan: {project_goal or '-'}
-        - Objective: {objective or '-'}
-        - Pain Points: {notes or '-'}
-        - Framework: {frameworks or '-'}
-        {commercial_note}
-
-        Berdasarkan data di atas, estimasikan kapasitas finansial mereka dan berikan 3 opsi estimasi budget proyek TI/Konsultasi.
-        PRIORITAS PENENTUAN HARGA:
-        1. Durasi/length proyek
-        2. Tingkat kesulitan, kompleksitas integrasi, regulasi, dan perubahan
-        2a. Jika konteks proyek terkait AI/adopsi AI, perhitungkan pula kesiapan data/model, governance, arsitektur, dan change enablement
-        3. Jenis proyek dan jenis layanan
-        4. Benchmark OSINT
-        5. Sinyal finansial publik klien hanya sebagai kalibrasi, bukan faktor dominan
-
-        FORMAT WAJIB JSON murni tanpa markdown, tanpa teks tambahan:
-        {{
-            "analysis": "Ringkasan 1 kalimat kekuatan finansial berdasarkan data (atau sebutkan estimasi jika data terbatas).",
-            "options": [
-                {{"tier": "Basic", "price": "Rp <angka>"}},
-                {{"tier": "Standard", "price": "Rp <angka>"}},
-                {{"tier": "Enterprise", "price": "Rp <angka>"}}
-            ]
-        }}
-        Pastikan angka terutama mempertimbangkan durasi, tingkat kesulitan, dan scope proyek; jangan bertumpu hanya pada pendapatan tahunan klien.
-        """
-        try:
-            res = self.ollama.chat(
-                model=LLM_MODEL,
-                messages=[{'role': 'system', 'content': 'You output strictly valid JSON.'}, {'role': 'user', 'content': prompt}],
-                options={'temperature': 0.1}
-            )
-            raw_text = res['message']['content']
-            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-            parsed = {}
-            if match:
-                parsed = json.loads(match.group(0))
-            else:
-                parsed = json.loads(raw_text)
-            if self._is_valid_budget_payload(parsed):
-                context_sensitive = any(
-                    [timeline.strip(), project_type.strip(), service_type.strip(), project_goal.strip(), objective.strip(), notes.strip(), frameworks.strip()]
-                )
-                return self._merge_with_context_adjustment(
-                    parsed,
-                    dynamic_estimate,
-                    context_sensitive=context_sensitive,
-                    prefer_context_options=not staged_pricing
-                )
-            return dynamic_estimate
-        except Exception as e:
-            logger.error(f"Financial Analyzer Error: {e}")
-            return dynamic_estimate
+        
+        # Parallel OSINT Fetching
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            future_finance = executor.submit(Researcher.search, f'"{client_name}" laporan keuangan OR pendapatan {year-1} OR {year}', 6, "year")
+            future_bench = executor.submit(Researcher.search, f'estimasi biaya proyek {project_type} {service_type} {timeline} Indonesia', 6, "year")
+        
+        finance_snippets = Researcher._filter_recent_entity_results(future_finance.result(), client_name, max_age_years=3)
+        benchmark_snippets = Researcher._sort_by_recency(future_bench.result())[:5]
+        
+        # Deep Scrape Financials
+        llm_financial_data = None
+        if finance_snippets and finance_snippets[0].get("link"):
+            markdown = Researcher.fetch_full_markdown(finance_snippets[0]["link"])
+            if markdown: llm_financial_data = self._extract_financials_with_llm(client_name, markdown)
+        
+        return self._dynamic_budget_from_osint(client_name, finance_snippets, benchmark_snippets, timeline, project_type, service_type, project_goal, objective, notes, frameworks, llm_financial_data)
 
 
 class AppStateStore:
@@ -2686,7 +1950,6 @@ class LogoManager:
                             stream = io.BytesIO(img_resp.content)
                             img = Image.open(stream)
                             
-                            # Normalize to PNG so python-docx can embed it reliably.
                             if img.mode in ("RGBA", "LA", "P"):
                                 normalized = Image.new("RGBA", img.size, (255, 255, 255, 0))
                                 normalized.paste(img, (0, 0), img if img.mode in ("RGBA", "LA") else None)
@@ -2702,7 +1965,6 @@ class LogoManager:
                                 factor = 120 / luminance
                                 dom_color = [max(0, min(255, int(c * factor))) for c in dom_color]
 
-                            # Use normalized bytes, not source bytes, to avoid format errors.
                             png_stream = io.BytesIO()
                             img.save(png_stream, format='PNG')
                             png_stream.seek(0)
@@ -2714,7 +1976,6 @@ class LogoManager:
         return LogoManager._create_fallback_logo(client_name), DEFAULT_COLOR
 
 
-# Document rendering utilities.
 class StyleEngine:
     PROFESSIONAL_FONT = "Times New Roman"
     BODY_FONT_SIZE = 12
@@ -2750,13 +2011,9 @@ class StyleEngine:
             section.bottom_margin = Cm(2.54)
             section.left_margin = Cm(2.54)
             section.right_margin = Cm(2.54)
-
-    # ========== ENHANCED STYLING METHODS ==========
-    # Enhanced document styling and formatting for professional proposals
     
     @staticmethod
     def apply_enhanced_styles(doc: Document, theme_color: Tuple[int, int, int] = (30, 58, 138)) -> None:
-        """Apply enhanced document styles with improved typography and spacing."""
         StyleEngine._apply_base_enhanced_styles(doc)
         StyleEngine._apply_enhanced_heading_styles(doc, theme_color)
         StyleEngine._apply_enhanced_list_styles(doc)
@@ -2764,7 +2021,6 @@ class StyleEngine:
     
     @staticmethod
     def _apply_base_enhanced_styles(doc: Document) -> None:
-        """Apply base document styles."""
         try:
             style = doc.styles['Normal']
             style.font.name = StyleEngine.PROFESSIONAL_FONT
@@ -2779,7 +2035,6 @@ class StyleEngine:
         except Exception as e:
             logger.warning(f"Could not apply base styles: {e}")
         
-        # Set margins
         for section in doc.sections:
             section.top_margin = Cm(2.54)
             section.bottom_margin = Cm(2.54)
@@ -2788,7 +2043,6 @@ class StyleEngine:
     
     @staticmethod
     def _apply_enhanced_heading_styles(doc: Document, theme_color: Tuple[int, int, int]) -> None:
-        """Apply formal heading styles with neutral color and spacing."""
         try:
             style = doc.styles['Heading 1']
             style.font.name = StyleEngine.PROFESSIONAL_FONT
@@ -2839,9 +2093,7 @@ class StyleEngine:
     
     @staticmethod
     def _apply_enhanced_list_styles(doc: Document) -> None:
-        """Apply enhanced list item styles."""
         try:
-            # List Bullet
             style = doc.styles['List Bullet']
             pf = style.paragraph_format
             pf.space_after = Pt(4)
@@ -2852,7 +2104,6 @@ class StyleEngine:
             logger.warning(f"Could not apply List Bullet style: {e}")
         
         try:
-            # List Number
             style = doc.styles['List Number']
             pf = style.paragraph_format
             pf.space_after = Pt(4)
@@ -2864,7 +2115,6 @@ class StyleEngine:
     
     @staticmethod
     def _apply_enhanced_table_styles(doc: Document, theme_color: Tuple[int, int, int]) -> None:
-        """Apply enhanced table styles."""
         try:
             style = doc.styles['Table Grid']
             style.font.name = StyleEngine.PROFESSIONAL_FONT
@@ -2875,7 +2125,6 @@ class StyleEngine:
     @staticmethod
     def add_colored_heading(doc: Document, text: str, level: int = 1, 
                            theme_color: Tuple[int, int, int] = (30, 58, 138)) -> None:
-        """Add a formal heading with neutral styling."""
         heading = doc.add_heading(text, level=level)
         heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
         
@@ -2894,7 +2143,6 @@ class StyleEngine:
     
     @staticmethod
     def add_horizontal_line(doc: Document, color: Tuple[int, int, int] = (200, 200, 200)) -> None:
-        """Add a horizontal line (visual separator) to the document."""
         try:
             paragraph = doc.add_paragraph()
             pPr = paragraph._element.get_or_add_pPr()
@@ -2917,8 +2165,6 @@ class StyleEngine:
     @staticmethod
     def add_info_box(doc: Document, title: str, content: str, 
                     theme_color: Tuple[int, int, int] = (30, 58, 138)) -> None:
-        """Add a styled information box with title and content."""
-        # Title
         p = doc.add_paragraph()
         run = p.add_run(title)
         run.font.bold = True
@@ -2926,7 +2172,6 @@ class StyleEngine:
         run.font.name = StyleEngine.PROFESSIONAL_FONT
         run.font.color.rgb = RGBColor(*StyleEngine.TEXT_COLOR)
         
-        # Content
         p = doc.add_paragraph(content)
         p.paragraph_format.left_indent = Inches(0.25)
         p.paragraph_format.space_before = Pt(3)
@@ -2935,8 +2180,6 @@ class StyleEngine:
     @staticmethod
     def format_contact_block(doc: Document, contact_lines: list, 
                            theme_color: Tuple[int, int, int] = (30, 58, 138)) -> None:
-        """Format a professional contact information block."""
-        # Header
         p = doc.add_paragraph()
         p.paragraph_format.space_before = Pt(6)
         p.paragraph_format.space_after = Pt(4)
@@ -2947,7 +2190,6 @@ class StyleEngine:
         run.font.name = StyleEngine.PROFESSIONAL_FONT
         run.font.color.rgb = RGBColor(*StyleEngine.TEXT_COLOR)
         
-        # Contact details
         for line in contact_lines:
             p = doc.add_paragraph()
             p.paragraph_format.left_indent = Inches(0.25)
@@ -3425,7 +2667,6 @@ class DocumentBuilder:
         if not cleaned:
             return
 
-        # Keep spacing between text runs stable so inline formatting stays readable.
         if paragraph.runs:
             last_text = paragraph.runs[-1].text or ""
             if last_text and not last_text.endswith((" ", "\t", "\n", "(", "[", "/")) and not cleaned.startswith((".", ",", ";", ":", ")", "]", "%")):
@@ -3536,12 +2777,10 @@ class DocumentBuilder:
                 p = doc.add_paragraph()
                 DocumentBuilder._process_inline_html(p, element)
             elif element.name in ['ul', 'ol']:
-                # Use native Word list formatting so alignment and wrapping stay consistent.
                 direct_items = element.find_all('li', recursive=False)
                 style_name = "List Number" if element.name == 'ol' else "List Bullet"
                 list_num_id = DocumentBuilder._create_list_num_id(doc, style_name)
                 for idx, li in enumerate(direct_items, start=1):
-                    # Avoid orphan markers like "3." with no text.
                     if not li.get_text(" ", strip=True):
                         continue
                     use_manual_fallback = False
