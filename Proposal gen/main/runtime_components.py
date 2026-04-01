@@ -1920,11 +1920,10 @@ class LogoManager:
     @staticmethod
     def _create_fallback_logo(client_name: str) -> io.BytesIO:
         initials = "".join([w[0] for w in re.findall(r"[A-Za-z0-9]+", client_name)[:3]]).upper() or "CL"
-        canvas = Image.new('RGB', (320, 320), color=(236, 242, 255))
+        canvas = Image.new('RGBA', (420, 180), color=(255, 255, 255, 0))
         draw = ImageDraw.Draw(canvas)
-        draw.rounded_rectangle((16, 16, 304, 304), radius=36, outline=(37, 99, 235), width=8)
         try:
-            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 110)
+            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 88)
         except Exception:
             font = ImageFont.load_default()
         try:
@@ -1933,11 +1932,107 @@ class LogoManager:
             h = bbox[3] - bbox[1]
         except Exception:
             w, h = draw.textsize(initials, font=font)
-        draw.text(((320 - w) / 2, (320 - h) / 2 - 6), initials, fill=(15, 23, 42), font=font)
+        draw.text(((420 - w) / 2, (180 - h) / 2 - 4), initials, fill=(15, 23, 42, 255), font=font)
         out = io.BytesIO()
         canvas.save(out, format='PNG')
         out.seek(0)
         return out
+
+    @staticmethod
+    def _crop_transparent_bounds(img: Image.Image, padding: int = 4) -> Image.Image:
+        alpha = img.getchannel("A")
+        bbox = alpha.getbbox()
+        if not bbox:
+            return img
+        left, top, right, bottom = bbox
+        return img.crop((
+            max(0, left - padding),
+            max(0, top - padding),
+            min(img.width, right + padding),
+            min(img.height, bottom + padding),
+        ))
+
+    @staticmethod
+    def _normalize_logo_image(img: Image.Image) -> Tuple[Image.Image, Tuple[int, int, int]]:
+        rgba = img.convert("RGBA")
+        alpha_min, alpha_max = rgba.getchannel("A").getextrema()
+
+        if alpha_min < 250:
+            normalized = LogoManager._crop_transparent_bounds(rgba)
+        else:
+            width, height = rgba.size
+            border_pixels: List[Tuple[int, int, int]] = []
+            step_x = max(1, width // 24)
+            step_y = max(1, height // 24)
+            for x in range(0, width, step_x):
+                border_pixels.append(rgba.getpixel((x, 0))[:3])
+                border_pixels.append(rgba.getpixel((x, height - 1))[:3])
+            for y in range(0, height, step_y):
+                border_pixels.append(rgba.getpixel((0, y))[:3])
+                border_pixels.append(rgba.getpixel((width - 1, y))[:3])
+
+            if border_pixels:
+                background = tuple(
+                    int(sum(pixel[idx] for pixel in border_pixels) / len(border_pixels))
+                    for idx in range(3)
+                )
+                max_border_delta = max(
+                    max(abs(pixel[idx] - background[idx]) for idx in range(3))
+                    for pixel in border_pixels
+                )
+            else:
+                background = (255, 255, 255)
+                max_border_delta = 255
+
+            normalized = rgba
+            if max_border_delta <= 28:
+                tolerance = 34
+                transparent_data = []
+                for r, g, b, a in rgba.getdata():
+                    if a <= 8:
+                        transparent_data.append((r, g, b, 0))
+                        continue
+                    if max(abs(r - background[0]), abs(g - background[1]), abs(b - background[2])) <= tolerance:
+                        transparent_data.append((r, g, b, 0))
+                    else:
+                        transparent_data.append((r, g, b, a))
+                candidate = Image.new("RGBA", rgba.size)
+                candidate.putdata(transparent_data)
+                cropped = LogoManager._crop_transparent_bounds(candidate)
+                if cropped.getchannel("A").getbbox():
+                    normalized = cropped
+
+        visible_pixels = [pixel[:3] for pixel in normalized.getdata() if pixel[3] > 32]
+        if visible_pixels:
+            dominant = tuple(
+                int(sum(pixel[idx] for pixel in visible_pixels) / len(visible_pixels))
+                for idx in range(3)
+            )
+        else:
+            dominant = tuple(int(value) for value in ImageStat.Stat(normalized.convert("RGB")).mean[:3])
+
+        return normalized, dominant
+
+    @staticmethod
+    def _border_opacity_ratio(img: Image.Image) -> float:
+        rgba = img.convert("RGBA")
+        width, height = rgba.size
+        if width <= 1 or height <= 1:
+            return 1.0
+
+        border_coords = set()
+        for x in range(width):
+            border_coords.add((x, 0))
+            border_coords.add((x, height - 1))
+        for y in range(height):
+            border_coords.add((0, y))
+            border_coords.add((width - 1, y))
+
+        opaque_count = 0
+        for x, y in border_coords:
+            if rgba.getpixel((x, y))[3] > 32:
+                opaque_count += 1
+        return opaque_count / max(1, len(border_coords))
 
     @staticmethod
     def get_logo_and_color(client_name: str) -> Tuple[Optional[io.BytesIO], Tuple[int, int, int]]:
@@ -1950,22 +2045,18 @@ class LogoManager:
             res = requests.post(url, headers=headers, data=payload, timeout=8).json()
             
             if 'images' in res and res['images']:
+                best_candidate: Optional[Tuple[float, io.BytesIO, Tuple[int, int, int]]] = None
                 for item in res['images']:
                     try:
                         img_resp = requests.get(item['imageUrl'], headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
                         if img_resp.status_code == 200:
                             stream = io.BytesIO(img_resp.content)
                             img = Image.open(stream)
-                            
-                            if img.mode in ("RGBA", "LA", "P"):
-                                normalized = Image.new("RGBA", img.size, (255, 255, 255, 0))
-                                normalized.paste(img, (0, 0), img if img.mode in ("RGBA", "LA") else None)
-                                img = normalized.convert('RGB')
-                            else:
-                                img = img.convert('RGB')
-
-                            img.thumbnail((150, 150))
-                            dom_color = list(map(int, ImageStat.Stat(img).mean[:3]))
+                            img, dom_color = LogoManager._normalize_logo_image(img)
+                            img.thumbnail((600, 240))
+                            border_ratio = LogoManager._border_opacity_ratio(img)
+                            if border_ratio > 0.18:
+                                continue
 
                             luminance = 0.299 * dom_color[0] + 0.587 * dom_color[1] + 0.114 * dom_color[2]
                             if luminance > 120:
@@ -1975,9 +2066,14 @@ class LogoManager:
                             png_stream = io.BytesIO()
                             img.save(png_stream, format='PNG')
                             png_stream.seek(0)
-                            return png_stream, tuple(dom_color)
+                            score = border_ratio + (0.01 * abs((img.width / max(1, img.height)) - 3.0))
+                            candidate = (score, png_stream, tuple(dom_color))
+                            if best_candidate is None or candidate[0] < best_candidate[0]:
+                                best_candidate = candidate
                     except Exception:
                         continue
+                if best_candidate is not None:
+                    return best_candidate[1], best_candidate[2]
         except Exception as e:
             logger.warning(f"Logo Retrieval Error: {e}")
         return LogoManager._create_fallback_logo(client_name), DEFAULT_COLOR
@@ -2568,7 +2664,7 @@ class DocumentBuilder:
         except KeyError:
             heading = doc.add_paragraph()
         heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        heading.paragraph_format.space_before = Pt(0 if is_first_chapter else 18)
+        heading.paragraph_format.space_before = Pt(0)
         heading.paragraph_format.space_after = Pt(10)
         heading.paragraph_format.keep_with_next = True
         run = heading.add_run(chapter_title)

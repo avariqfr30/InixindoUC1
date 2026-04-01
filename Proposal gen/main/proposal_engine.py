@@ -822,6 +822,8 @@ class ProposalEngineMixin:
                     content,
                     maxsplit=1,
                 )[0].rstrip()
+            if not is_first_rendered_chapter:
+                doc.add_page_break()
             DocumentBuilder.add_reference_chapter_heading(
                 doc,
                 chapter['title'],

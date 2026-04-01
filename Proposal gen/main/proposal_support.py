@@ -1042,6 +1042,69 @@ class ProposalSupportMixin:
         return "\n".join(compacted).strip()
 
     @classmethod
+    def _reorder_h2_sections(cls, content: str, ordered_sections: List[str]) -> str:
+        section_order = [str(item or "").strip() for item in (ordered_sections or []) if str(item or "").strip()]
+        if not section_order:
+            return str(content or "").strip()
+
+        lines = (content or "").splitlines()
+        if not any(re.match(r"^\s*##\s+\S+", line) for line in lines):
+            return str(content or "").strip()
+
+        intro_lines: List[str] = []
+        current_heading: Optional[str] = None
+        current_lines: List[str] = []
+        section_blocks: Dict[str, str] = {}
+        other_sections: List[Tuple[str, str]] = []
+
+        def flush_current() -> None:
+            nonlocal intro_lines, current_heading, current_lines
+            if current_heading is None:
+                if current_lines:
+                    intro_lines = current_lines[:]
+                current_lines = []
+                return
+
+            block = "\n".join(current_lines).strip()
+            if block:
+                if current_heading in section_order:
+                    existing = section_blocks.get(current_heading, "").strip()
+                    section_blocks[current_heading] = (existing + "\n\n" + block).strip() if existing else block
+                else:
+                    other_sections.append((current_heading, block))
+            current_heading = None
+            current_lines = []
+
+        for raw_line in lines:
+            stripped = raw_line.strip()
+            if stripped.startswith("## "):
+                flush_current()
+                current_heading = stripped[3:].strip()
+                current_lines = [raw_line.rstrip()]
+                continue
+            current_lines.append(raw_line.rstrip())
+        flush_current()
+
+        if not section_blocks:
+            return str(content or "").strip()
+
+        rebuilt: List[str] = []
+        intro_block = "\n".join(intro_lines).strip()
+        if intro_block:
+            rebuilt.append(intro_block)
+
+        for heading in section_order:
+            block = section_blocks.get(heading, "").strip()
+            if block:
+                rebuilt.append(block)
+
+        for _, block in other_sections:
+            if block.strip():
+                rebuilt.append(block.strip())
+
+        return "\n\n".join(part for part in rebuilt if part.strip()).strip()
+
+    @classmethod
     def _humanize_chapter_tone(cls, content: str) -> str:
         text = str(content or "").strip()
         if not text:
@@ -1075,6 +1138,7 @@ class ProposalSupportMixin:
         client: str,
     ) -> str:
         text = self._humanize_chapter_tone(content or "")
+        text = self._reorder_h2_sections(text, list((chapter or {}).get("subs") or []))
         text = self._prune_empty_markdown_sections(text)
         if not text:
             return ""
@@ -2273,9 +2337,13 @@ class ProposalSupportMixin:
                 f"- Kebutuhan klien harus dibaca sebagai kebutuhan akan arah kerja yang lebih jelas, lebih terukur, dan lebih mudah diawasi.\n"
                 f"- Kebutuhan tersebut juga menuntut hubungan yang lebih rapi antara prioritas bisnis, ritme pelaksanaan, dan kualitas keputusan lintas fungsi.\n\n"
                 "## 2.2 Konteks Bisnis\n"
-                f"Dari sisi konteks bisnis, {client} sedang berada pada situasi yang menuntut kejelasan prioritas atas {short_project.lower()}. "
-                f"Tekanan yang muncul tidak berdiri sendiri, melainkan terkait dengan harapan sponsor terhadap {gains_line}, kebutuhan menjaga ritme kerja {term_line}, dan tuntutan agar investasi atau upaya yang dikeluarkan benar-benar menghasilkan perbaikan yang bisa dirasakan. "
-                f"Konteks ini menjelaskan mengapa proposal perlu berbicara dalam bahasa keputusan bisnis, bukan hanya bahasa aktivitas proyek.\n\n"
+                f"Dari sisi bisnis, {client} sedang berada pada fase yang menuntut kejelasan prioritas atas {short_project.lower()} tanpa kehilangan kecepatan eksekusi. "
+                f"Tekanan yang muncul bukan hanya soal menyelesaikan aktivitas, tetapi memastikan bahwa upaya yang dijalankan benar-benar bergerak ke arah {gains_line}, tetap disiplin terhadap ritme kerja {term_line}, dan cukup kuat untuk dipertanggungjawabkan di level sponsor.\n"
+                f"Pada situasi seperti ini, konteks bisnis biasanya menuntut tiga kepastian sejak awal:\n"
+                f"- Prioritas mana yang paling langsung memengaruhi {kpi_line}.\n"
+                f"- Mekanisme keputusan dan koordinasi apa yang harus dipertegas agar eksekusi tidak tersendat di tengah jalan.\n"
+                f"- Batas kendali seperti scope, owner, dan acceptance apa yang harus dipasang agar investasi tetap defensible.\n"
+                f"Dengan pembacaan seperti itu, konteks bisnis {client} bukan sekadar latar, melainkan alasan mengapa persoalan pada bab ini perlu diterjemahkan ke bentuk kerja yang konkret dan siap diputuskan.\n\n"
                 "## 2.3 Tantangan Utama\n"
                 f"Tantangan utama yang dihadapi {client} dapat diringkas ke dalam tiga hal yang saling terkait:\n"
                 f"1. Menyatukan arah sponsor, tim inti, dan pelaksana kerja agar membaca tujuan yang sama terhadap {short_project.lower()}.\n"
@@ -3420,9 +3488,9 @@ class ProposalSupportMixin:
         for heading in missing_h2:
             patched += (
                 f"\n\n## {heading}\n"
-                "### Rincian Inti\n"
-                "1. Aktivitas utama pada bagian ini disesuaikan langsung dengan kebutuhan bisnis klien.\n"
-                "- Risiko, dependensi, dan indikator keberhasilan dijabarkan secara terukur untuk eksekusi.\n"
+                "Pembahasan pada bagian ini perlu menjelaskan keputusan kerja, konteks bisnis, dan arah hasil yang paling relevan secara langsung.\n"
+                "- Fokus utama harus tetap pada apa yang perlu dipertegas, dikendalikan, atau diselaraskan sejak awal.\n"
+                "- Risiko, dependensi, dan indikator hasil perlu dijelaskan dalam bahasa yang bisa segera ditindaklanjuti.\n"
             )
         return patched
 
@@ -3534,8 +3602,10 @@ class ProposalSupportMixin:
         section_templates = {
             "2.2 Konteks Bisnis": (
                 f"{client} sedang menjaga outcome seperti {kpi_line} dan membutuhkan arah kerja yang tetap terkoneksi dengan kebutuhan bisnis inti.{anchor_line}\n"
-                f"1. Konteks bisnis harus dibaca dari target hasil, tekanan sponsor, dan arah transformasi yang sedang berjalan pada {client}.\n"
-                f"- Pada tahap ini, proposal perlu menegaskan kondisi saat ini yang masih belum cukup stabil dibanding kondisi yang dituju."
+                f"Konteks bisnis pada tahap ini perlu dibaca sebagai kebutuhan untuk memastikan bahwa prioritas, keputusan sponsor, dan ritme eksekusi bergerak menuju hasil yang benar-benar terasa, bukan hanya menuju aktivitas yang terlihat sibuk.\n"
+                f"- Fokus pertama adalah memastikan prioritas yang dipilih memang paling relevan terhadap outcome bisnis yang ingin dijaga.\n"
+                f"- Fokus kedua adalah menegaskan mekanisme keputusan, koordinasi, dan batas kendali agar eksekusi tidak mudah bergeser.\n"
+                f"- Fokus ketiga adalah memastikan investasi dan effort yang dikeluarkan tetap defensible karena terikat pada target hasil yang jelas."
             ),
             "2.3 Tantangan Utama": (
                 f"Tantangan utama berada pada kemampuan menyelaraskan keputusan sponsor, ritme pelaksanaan, dan disiplin kerja {term_line} dalam satu alur yang konsisten.\n"
@@ -3826,9 +3896,9 @@ class ProposalSupportMixin:
     ) -> str:
         allowed = set(allowed_external_citations or set())
         repaired = self._clean_external_citations(content or "", allowed)
+        repaired = self._ensure_problem_definition_pattern(chapter, repaired, client, personalization_pack=personalization_pack)
         repaired = self._ensure_required_headings(chapter, repaired)
         repaired = self._ensure_list_structure(repaired, chapter, client, personalization_pack=personalization_pack)
-        repaired = self._ensure_problem_definition_pattern(chapter, repaired, client, personalization_pack=personalization_pack)
         repaired = self._ensure_visual_requirements(chapter, repaired, timeline=timeline)
         repaired = self._ensure_personalization_signals(
             repaired,
