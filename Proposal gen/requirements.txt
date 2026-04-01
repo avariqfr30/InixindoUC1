@@ -13,3 +13,5 @@ markdown
 matplotlib
 pillow
 pypdf
+pydantic
+diskcache
