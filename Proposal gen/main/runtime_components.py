@@ -886,7 +886,7 @@ class Researcher:
         # very short phrase (e.g., "02/7/2025 23:28. PT Aneka Tambang …").
         # These add noise without providing useful content.
         # --------------------------------------------------------------
-        def _is_noise(item: str) -\> bool:
+        def _is_noise(item: str) -> bool:
             """Return True if *item* looks like a date‑only news snippet.
 
             The heuristic matches a leading date (dd/mm/yyyy, dd-mm-yy, or
