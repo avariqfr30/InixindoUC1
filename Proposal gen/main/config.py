@@ -10,7 +10,10 @@ DEMO_MODE = os.getenv("DEMO_MODE", "true").strip().lower() in {"1", "true", "yes
 _raw_data_mode = os.getenv("DATA_ACQUISITION_MODE", "demo" if DEMO_MODE else "staged").strip().lower()
 DATA_ACQUISITION_MODE = "demo" if _raw_data_mode in {"demo", "legacy", "current"} else "staged"
 FIRM_API_URL = os.getenv("FIRM_API_URL", "https://api.perusahaan-anda.com/v1").strip() or "https://api.perusahaan-anda.com/v1"
+FIRM_API_AUTH_MODE = os.getenv("FIRM_API_AUTH_MODE", "bearer").strip().lower() or "bearer"
 API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "isi_token_disini_nanti")
+FIRM_API_USERNAME = os.getenv("FIRM_API_USERNAME", "").strip()
+FIRM_API_PASSWORD = os.getenv("FIRM_API_PASSWORD", "").strip()
 
 # External service configuration.
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "SERPER_API")

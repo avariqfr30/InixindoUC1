@@ -139,8 +139,32 @@ class FirmAPIClient:
     def __init__(self) -> None:
         self.demo_mode = DEMO_MODE
         self.data_acquisition_mode = DATA_ACQUISITION_MODE
-        self.base_url = FIRM_API_URL
-        self.headers = {"Authorization": f"Bearer {API_AUTH_TOKEN}"}
+        self.base_url = FIRM_API_URL.rstrip("/")
+        self.auth_mode = (FIRM_API_AUTH_MODE or "bearer").strip().lower()
+        self.headers = {"Accept": "application/json"}
+        self.auth: Optional[Tuple[str, str]] = None
+
+        if self.auth_mode == "basic":
+            if FIRM_API_USERNAME and FIRM_API_PASSWORD:
+                self.auth = (FIRM_API_USERNAME, FIRM_API_PASSWORD)
+        elif self.auth_mode == "bearer":
+            token = str(API_AUTH_TOKEN or "").strip()
+            if token and token != "isi_token_disini_nanti":
+                self.headers["Authorization"] = f"Bearer {token}"
+        elif self.auth_mode == "none":
+            pass
+        else:
+            logger.warning("Unknown FIRM_API_AUTH_MODE=%s. Falling back to unauthenticated requests.", self.auth_mode)
+
+    def _request(self, path: str, params: Optional[Dict[str, Any]] = None) -> requests.Response:
+        url = f"{self.base_url}/{path.lstrip('/')}"
+        return requests.get(
+            url,
+            params=params,
+            headers=self.headers,
+            auth=self.auth,
+            timeout=5,
+        )
 
     def uses_demo_logic(self) -> bool:
         return self.demo_mode or self.data_acquisition_mode == "demo"
@@ -198,7 +222,7 @@ class FirmAPIClient:
             demo_standards = MOCK_FIRM_STANDARDS.get(project_type, MOCK_FIRM_STANDARDS.get("Implementation"))
             return self._normalize_project_standards(demo_standards)
         try:
-            res = requests.get(f"{self.base_url}/standards/{project_type}", headers=self.headers, timeout=5)
+            res = self._request(f"/standards/{project_type}")
             res.raise_for_status()
             return self._normalize_project_standards(res.json())
         except requests.RequestException as e:
@@ -228,7 +252,7 @@ class FirmAPIClient:
         if self.demo_mode:
             return self._default_firm_profile()
         try:
-            res = requests.get(f"{self.base_url}/firm-profile", headers=self.headers, timeout=5)
+            res = self._request("/firm-profile")
             res.raise_for_status()
             return self._normalize_firm_profile(res.json())
         except requests.RequestException as e:
@@ -249,12 +273,7 @@ class FirmAPIClient:
             }
 
         try:
-            res = requests.get(
-                f"{self.base_url}/client-relationship",
-                params={"client_name": client_name},
-                headers=self.headers,
-                timeout=5
-            )
+            res = self._request("/client-relationship", params={"client_name": client_name})
             res.raise_for_status()
             return self._normalize_client_relationship(res.json())
         except requests.RequestException as e:

@@ -130,7 +130,21 @@ Untuk mode implementasi bertahap:
 ```bash
 export DEMO_MODE=false
 export DATA_ACQUISITION_MODE=staged
+export FIRM_API_URL=https://api.perusahaan-anda.com/v1
+export FIRM_API_AUTH_MODE=bearer
 export API_AUTH_TOKEN=isi_token_internal_api
+export SERPER_API_KEY=isi_api_key
+```
+
+Jika internal API memakai Basic Auth:
+
+```bash
+export DEMO_MODE=false
+export DATA_ACQUISITION_MODE=staged
+export FIRM_API_URL=https://api.perusahaan-anda.com/v1
+export FIRM_API_AUTH_MODE=basic
+export FIRM_API_USERNAME=isi_username
+export FIRM_API_PASSWORD=isi_password
 export SERPER_API_KEY=isi_api_key
 ```
 
