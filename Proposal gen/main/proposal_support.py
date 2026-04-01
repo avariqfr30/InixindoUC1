@@ -2842,9 +2842,9 @@ class ProposalSupportMixin:
                 anchors_text = self._human_join([
                     self._sanitize_anchor_fact(item.get('fact', '') or "")
                     for item in initiative_facts[:3]
-                ], fallback="Data inisiatif publik terbatas; jangan membuat klaim inisiatif tanpa bukti.", max_items=3)
+                ], fallback="", max_items=3)
             else:
-                anchors_text = "Data inisiatif publik terbatas; jangan membuat klaim inisiatif tanpa bukti."
+                anchors_text = ""
 
             extra = (
                 f"[PROPOSAL CONTRACT]\n{proposal_contract}\n"

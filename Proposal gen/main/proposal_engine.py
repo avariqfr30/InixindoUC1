@@ -689,7 +689,32 @@ class ProposalEngineMixin:
         for i, chapter in enumerate(selected_chapters):
             content = chapter_outputs.get(chapter['id'], '').strip()
             if not content:
-                continue
+                # When both external OSINT and internal CSV data fail to produce any
+                # content, fall back to a brief LLM‑generated paragraph instead of a
+                # static placeholder. This keeps every sub‑chapter professionally
+                # written while still allowing the model to draw on any available
+                # data sources.
+                fallback_prompt = (
+                    f"Tulis paragraf singkat (≈80 kata) yang menjelaskan sub‑bab "
+                    f"'{chapter.get('title', '')}' untuk klien {client}. "
+                    "Gunakan data internal yang tersedia (CSV) bila ada, dan "
+                    "tambahkan konteks umum bila tidak ada. Jangan menyertakan "
+                    "referensi eksternal karena tidak ada bukti yang kuat."
+                )
+                try:
+                    content = self._draft_chapter(
+                        chapter=chapter,
+                        prompt=fallback_prompt,
+                        client=client,
+                        target_words=500,
+                        allowed_external_citations=None,
+                        personalization_pack=None,
+                    )
+                except Exception:
+                    content = (
+                        f"Sub‑bab '{chapter.get('title', '')}' belum memiliki data publik "
+                        "yang cukup; silakan menambahkan rincian khusus secara manual."
+                    )
             rendered_any = True
             if chapter['id'] == "c_closing":
                 # The rendered DOCX appends a structured firm profile/contact block,

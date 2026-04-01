@@ -881,10 +881,37 @@ class Researcher:
             max_age_years=2,
             strict_entity=False
         )
+        # --------------------------------------------------------------
+        # Filter out entries that are merely a date/timestamp followed by a
+        # very short phrase (e.g., "02/7/2025 23:28. PT Aneka Tambang …").
+        # These add noise without providing useful content.
+        # --------------------------------------------------------------
+        def _is_noise(item: str) -\> bool:
+            """Return True if *item* looks like a date‑only news snippet.
+
+            The heuristic matches a leading date (dd/mm/yyyy, dd-mm-yy, or
+            ISO‑style) optionally followed by a time.  If the remaining text
+            after the date contains five words or fewer, the line is considered
+            noise and dropped.
+            """
+            import re
+
+            m = re.match(r"^\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})(?:\s+\d{1,2}:\d{2})?", item)
+            if not m:
+                return False
+            remainder = item[m.end():].strip()
+            if not remainder:
+                return True
+            return len(re.findall(r"\S+", remainder)) \u003c= 5
+
+        cleaned = [i for i in filtered if not _is_noise(i)]
+        # Keep at least one entry so the fallback logic still works.
+        final_items = cleaned if cleaned else filtered
         return Researcher._format_evidence(
-            filtered[:4],
+            final_items[:4],
             label="OSINT_NEWS",
-            fallback=f"Berita terbaru {client_name} tidak cukup kuat; jangan membuat klaim spesifik tanpa bukti."
+            # Suppress fallback text so missing news does not appear in the proposal.
+            fallback=""
         )
 
     @staticmethod
