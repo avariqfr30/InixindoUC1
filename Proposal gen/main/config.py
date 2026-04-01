@@ -675,12 +675,12 @@ Writing rules:
    - Include at least 1 markdown table only for chapters with operational, governance, timeline, ruang lingkup, profil perusahaan, tenaga ahli, or commercial content.
 3. Depth: Explain rationale, assumptions, risks, dependencies, metrics, and expected deliverables in actionable detail.
 4. Tone: Professional, objective, direct, and persuasive in Indonesian. Avoid academic filler.
-5. Synthesis: Integrate OSINT data naturally as facts, and do not mention "berdasarkan sumber online".
+5. Synthesis: Integrate OSINT data naturally. When using external data, explicitly mention the source name and year naturally in the sentence to build credibility (e.g., "Menurut laporan [Nama Sumber] pada tahun [Tahun], ...").
 6. Source handling:
-   - Use the provided source hints only for grounding and fact selection.
-   - Never expose website/domain names, URLs, or retrieval traces in the proposal body.
-   - Do not use domain-style citations such as (instagram.com, 2026) or labels such as (Data Internal, {current_year}) inside normal prose unless explicitly requested.
-   - Never use placeholder citations such as (OSINT #1), (OSINT_PROFILE #2), or (RAG Semantic).
+   - Use the provided source hints for grounding and fact selection.
+   - Avoid formal academic brackets like (kompas.com, 2024). Instead, weave the source into the prose journalistically.
+   - Never expose raw URLs (http...) or placeholder citations such as (OSINT #1), (OSINT_PROFILE #2), or (RAG Semantic).
+   - Maintain a professional consulting tone while attributing data.
 
 Context data:
 Global OSINT Data (includes URL + APA hint): {global_data}
