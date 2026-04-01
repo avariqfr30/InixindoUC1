@@ -677,6 +677,38 @@ class ProposalEngineMixin:
                 acceptance_report["low_categories"],
                 acceptance_report.get("soft_findings"),
             )
+        # Fill any missing standard sub‑headings (e.g., 2.5, 2.6) with a short LLM‑generated paragraph.
+        for chap_id, content in list(chapter_outputs.items()):
+            subsections = (CHAPTER_STANDARD_RULES.get(chap_id, {})
+                            .get("problem_definition_pattern", {})
+                            .get("subsections", []))
+            if not subsections:
+                continue
+            missing = []
+            for sub in subsections:
+                heading = f"## {sub}"
+                if heading not in content:
+                    missing.append(sub)
+            if not missing:
+                continue
+            prompts = []
+            for sub in missing:
+                prompts.append(
+                    f"Buat paragraf singkat (≈80 kata) untuk sub‑bab '{sub}' menggunakan data internal bila ada, tanpa kutipan eksternal."
+                )
+            fallback_prompt = " ".join(prompts)
+            try:
+                extra = self._draft_chapter(
+                    chapter={"id": chap_id, "title": f"BAB {chap_id[-1]} – {subsections[0].split(' ')[0]}"},
+                    prompt=fallback_prompt,
+                    client=client,
+                    target_words=400,
+                    allowed_external_citations=None,
+                    personalization_pack=None,
+                )
+                chapter_outputs[chap_id] = (content + "\n\n" + extra).strip()
+            except Exception:
+                pass
         else:
             logger.info(
                 "Proposal acceptance passed | score=%s | categories=%s | ai_adoption_fit=%s | estimated_pages=%s",
@@ -685,11 +717,11 @@ class ProposalEngineMixin:
                 acceptance_report.get("ai_adoption_fit"),
                 acceptance_report["estimated_pages"],
             )
-
-        try:
-            logo_stream, theme_color = logo_future.result(timeout=8)
-        except Exception:
-            logo_stream, theme_color = None, DEFAULT_COLOR
+                        )
+            try:
+                logo_stream, theme_color = logo_future.result(timeout=8)
+            except Exception:
+                logo_stream, theme_color = None, DEFAULT_COLOR
 
         template_path = app_state_store.get_template_path() if app_state_store else ""
         doc, using_template = DocumentBuilder.create_base_document(template_path)
