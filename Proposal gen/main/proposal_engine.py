@@ -765,7 +765,7 @@ class ProposalEngineMixin:
 
         rendered_any = False
         rendered_firm_profile = False
-        for i, chapter in enumerate(selected_chapters):
+        for chapter in selected_chapters:
             content = self._postprocess_chapter_content(
                 chapter,
                 chapter_outputs.get(chapter['id'], ''),
@@ -801,6 +801,7 @@ class ProposalEngineMixin:
                 content = self._postprocess_chapter_content(chapter, content, client)
             if not self._has_renderable_markdown(content):
                 continue
+            is_first_rendered_chapter = not rendered_any
             rendered_any = True
             if chapter['id'] == "c_closing":
                 # Enhance closing chapter with firm OSINT data (external numbers, credentials, portfolio)
@@ -821,24 +822,16 @@ class ProposalEngineMixin:
                     content,
                     maxsplit=1,
                 )[0].rstrip()
-            DocumentBuilder.add_reference_chapter_heading(doc, chapter['title'], theme_color)
+            DocumentBuilder.add_reference_chapter_heading(
+                doc,
+                chapter['title'],
+                theme_color,
+                is_first_chapter=is_first_rendered_chapter,
+            )
             DocumentBuilder.process_content(doc, content, theme_color, chapter['title'])
             if chapter['id'] == "c_closing" and not rendered_firm_profile:
                 DocumentBuilder.add_writer_firm_profile_section(doc, firm_profile, theme_color)
                 rendered_firm_profile = True
-
-            has_next = any(
-                self._has_renderable_markdown(
-                    self._postprocess_chapter_content(
-                        next_chapter,
-                        chapter_outputs.get(next_chapter['id'], ''),
-                        client,
-                    )
-                )
-                for next_chapter in selected_chapters[i + 1:]
-            )
-            if has_next:
-                doc.add_page_break()
 
         if not rendered_any:
             doc.add_paragraph("Konten proposal belum berhasil digenerate. Mohon ulangi proses.")

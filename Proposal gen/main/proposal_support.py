@@ -1234,6 +1234,122 @@ class ProposalSupportMixin:
             )
         return rows
 
+    @classmethod
+    def _problem_gap_matrix(
+        cls,
+        short_project: str,
+        short_goal: str,
+        timeline: str,
+        term_line: str,
+        ai_mode: bool = False,
+    ) -> List[Dict[str, str]]:
+        rows = [
+            {
+                "area": "Arah keputusan",
+                "current": f"Prioritas {short_project.lower()} belum selalu turun menjadi keputusan lintas fungsi yang konsisten.",
+                "target": f"Prioritas, owner, dan success criteria untuk {short_goal.lower()} diputuskan secara eksplisit sejak awal.",
+                "impact": "Scope menjadi lebih defensible dan keputusan sponsor lebih mudah dipertahankan.",
+            },
+            {
+                "area": "Kontrol delivery",
+                "current": f"Ritme kerja {term_line} belum cukup disiplin untuk menjaga acceptance hasil dan eskalasi isu.",
+                "target": "Forum kerja, quality gate, dan mekanisme eskalasi berjalan dalam ritme yang dapat dipantau.",
+                "impact": "Perubahan arah tidak liar dan koreksi bisa dilakukan sebelum deviasi membesar.",
+            },
+            {
+                "area": "Kesiapan eksekusi",
+                "current": "Kebutuhan bisnis sudah terasa jelas, tetapi urutan kerja dan titik validasinya belum cukup konkret.",
+                "target": f"Urutan kerja, dependensi, dan acceptance deliverable tersusun rapi dalam horizon {timeline or 'proyek'}.",
+                "impact": "Program lebih mudah dijalankan tanpa mengorbankan kecepatan keputusan.",
+            },
+        ]
+        if ai_mode:
+            rows.append(
+                {
+                    "area": "Readiness data & kontrol",
+                    "current": "Kesiapan data, kontrol, dan operating model belum sepenuhnya terbaca sebagai dasar adopsi.",
+                    "target": "Readiness dan guardrail diartikulasikan lebih awal sebelum solusi diperluas.",
+                    "impact": "Risiko adopsi turun dan keputusan scale-up menjadi lebih bertanggung jawab.",
+                }
+            )
+        return rows
+
+    @classmethod
+    def _problem_risk_matrix(
+        cls,
+        short_project: str,
+        short_notes: str,
+        kpi_line: str,
+        ai_mode: bool = False,
+    ) -> List[Dict[str, str]]:
+        rows = [
+            {
+                "risk": "Prioritas berubah-ubah",
+                "business": f"Program {short_project.lower()} sulit menjaga arah terhadap KPI seperti {kpi_line}.",
+                "operational": "Tim kerja kehilangan pegangan ketika keputusan sponsor berubah di tengah jalan.",
+                "response": "Tetapkan baseline prioritas, owner, dan gerbang perubahan sejak awal.",
+            },
+            {
+                "risk": "Scope melebar tanpa kontrol",
+                "business": "Investasi dan perhatian manajemen terserap ke aktivitas yang tidak memberi dampak nyata.",
+                "operational": "Deliverable terlambat, acceptance kabur, dan beban koordinasi meningkat.",
+                "response": "Gunakan scope boundary dan change control yang diputuskan secara formal.",
+            },
+            {
+                "risk": "Kualitas hasil sulit diuji",
+                "business": "Manfaat bisnis tertunda karena keluaran tidak cukup kuat untuk dipakai mengambil keputusan.",
+                "operational": f"Issue seperti {short_notes.lower()} terus berulang tanpa pola penyelesaian yang konsisten.",
+                "response": "Ikat setiap fase pada quality gate, review lintas fungsi, dan sign-off yang jelas.",
+            },
+        ]
+        if ai_mode:
+            rows.append(
+                {
+                    "risk": "Adopsi bergerak lebih cepat dari kontrol",
+                    "business": "Nilai bisnis sulit dipertahankan karena risiko model, data, atau governance belum tertutup.",
+                    "operational": "Pilot mudah mandek saat masuk ke fase implementasi atau scale-up.",
+                    "response": "Pasang validation checkpoint dan readiness review sebelum perluasan solusi.",
+                }
+            )
+        return rows
+
+    @classmethod
+    def _problem_solution_matrix(
+        cls,
+        client: str,
+        short_goal: str,
+        kpi_line: str,
+        term_line: str,
+        gains_line: str,
+        ai_mode: bool = False,
+    ) -> List[Dict[str, str]]:
+        rows = [
+            {
+                "need": "Baseline diagnosis yang lebih tajam",
+                "function": f"Menegaskan gap prioritas, akar masalah, dan titik keputusan yang paling berpengaruh bagi {client}.",
+                "outcome": "Sponsor mendapatkan dasar keputusan yang lebih kuat dan tidak mudah bergeser.",
+            },
+            {
+                "need": "Ritme governance dan quality gate",
+                "function": f"Menjaga bahasa kerja {term_line} tetap konsisten dari forum sponsor sampai delivery harian.",
+                "outcome": f"Keputusan menjadi lebih cepat, risiko lebih terjaga, dan hasil seperti {kpi_line} lebih realistis dikejar.",
+            },
+            {
+                "need": "Roadmap dan deliverable yang siap dipakai",
+                "function": f"Menerjemahkan tujuan {short_goal.lower()} menjadi langkah kerja, milestone, dan acceptance yang konkret.",
+                "outcome": f"Program lebih mudah dijalankan dan manfaat seperti {gains_line} lebih cepat terasa.",
+            },
+        ]
+        if ai_mode:
+            rows.append(
+                {
+                    "need": "Readiness & adoption guardrail",
+                    "function": "Menjaga hubungan antara business value, kesiapan data, kontrol, dan perubahan cara kerja.",
+                    "outcome": "Solusi tidak berhenti di eksperimen dan lebih siap masuk ke implementasi bertahap.",
+                }
+            )
+        return rows
+
     @staticmethod
     def _framework_reference_rows(regulations: str, project_type: str, ai_mode: bool = False) -> List[Dict[str, str]]:
         raw_items = [re.sub(r"\s+", " ", item).strip(" -.;:") for item in re.split(r"[,;/\n]+", str(regulations or ""))]
@@ -2107,6 +2223,36 @@ class ProposalSupportMixin:
             )
 
         if chapter["id"] == "c_2":
+            gap_rows = "\n".join(
+                f"| {item['area']} | {item['current']} | {item['target']} | {item['impact']} |"
+                for item in self._problem_gap_matrix(
+                    short_project=short_project,
+                    short_goal=short_goal,
+                    timeline=timeline,
+                    term_line=term_line,
+                    ai_mode=ai_mode,
+                )
+            )
+            risk_rows = "\n".join(
+                f"| {item['risk']} | {item['business']} | {item['operational']} | {item['response']} |"
+                for item in self._problem_risk_matrix(
+                    short_project=short_project,
+                    short_notes=short_notes,
+                    kpi_line=kpi_line,
+                    ai_mode=ai_mode,
+                )
+            )
+            solution_rows = "\n".join(
+                f"| {item['need']} | {item['function']} | {item['outcome']} |"
+                for item in self._problem_solution_matrix(
+                    client=client,
+                    short_goal=short_goal,
+                    kpi_line=kpi_line,
+                    term_line=term_line,
+                    gains_line=gains_line,
+                    ai_mode=ai_mode,
+                )
+            )
             anchor_line = self._chapter_anchor_line(
                 "c_2",
                 personalization_pack,
@@ -2138,7 +2284,12 @@ class ProposalSupportMixin:
                 f"Tantangan ini penting dicatat karena sering kali gejala di lapangan terlihat teknis atau operasional, padahal akar masalahnya justru berada pada sinkronisasi keputusan, kontrol, dan kesiapan eksekusi.\n\n"
                 "## 2.4 Akar Kesenjangan\n"
                 f"Akar kesenjangan yang perlu ditutup terletak pada jarak antara kondisi saat ini yang masih belum cukup terkendali dengan kondisi yang dituju, yang menuntut keputusan lebih tegas, ritme kerja lebih konsisten, dan hasil yang lebih terukur. "
-                f"Gap tersebut biasanya muncul ketika organisasi sudah mengetahui arah yang diinginkan, tetapi belum memiliki mekanisme yang cukup disiplin untuk menjaga prioritas, tanggung jawab, dan acceptance hasil secara berurutan.\n"
+                f"Gap tersebut biasanya muncul ketika organisasi sudah mengetahui arah yang diinginkan, tetapi belum memiliki mekanisme yang cukup disiplin untuk menjaga prioritas, tanggung jawab, dan acceptance hasil secara berurutan.\n\n"
+                "| Area Gap | Kondisi Saat Ini | Kondisi yang Dituju | Dampak bila Ditutup |\n"
+                "| --- | --- | --- | --- |\n"
+                f"{gap_rows}\n\n"
+                f"Tabel di atas memperlihatkan bahwa persoalan utama bukan hanya ada pada aktivitas operasional, tetapi pada desain keputusan dan cara kerja yang menopang {short_project.lower()}. "
+                f"Karena itu, gap yang perlu ditutup harus dibaca sebagai gap manajerial dan delivery sekaligus.\n"
                 f"- Gap pertama berada pada penerjemahan kebutuhan bisnis ke langkah kerja yang benar-benar dapat dijalankan.\n"
                 f"- Gap kedua berada pada pengendalian keputusan, terutama ketika ketergantungan kerja dan kepentingan lintas fungsi mulai bertemu.\n"
                 f"- Gap ketiga berada pada kesiapan pelaksanaan untuk menjaga kualitas hasil sambil tetap bergerak dalam horizon {timeline or 'proyek'}.\n\n"
@@ -2146,10 +2297,22 @@ class ProposalSupportMixin:
                 f"Bila kesenjangan tersebut dibiarkan, {client} berisiko menghadapi deviasi terhadap KPI, penurunan kualitas koordinasi, serta bertambahnya tekanan pada sponsor ketika keputusan harus diambil cepat. "
                 f"Dalam praktiknya, risiko yang timbul bukan hanya keterlambatan aktivitas, tetapi juga keputusan yang kurang presisi, ruang lingkup yang melebar, dan hasil kerja yang sulit diuji secara objektif. "
                 f"Karena itu, pembacaan risiko perlu diposisikan sebagai dasar mengapa intervensi harus dilakukan secara lebih terstruktur.\n\n"
+                "| Risiko Utama | Dampak Bisnis | Dampak Operasional | Respon yang Diperlukan |\n"
+                "| --- | --- | --- | --- |\n"
+                f"{risk_rows}\n\n"
+                f"Dengan struktur risiko seperti ini, sponsor dapat melihat bahwa konsekuensi masalah tidak berhenti pada keterlambatan kerja, tetapi langsung menyentuh akurasi keputusan, efektivitas investasi, dan kualitas hasil yang diterima organisasi.\n"
+                f"- Risiko yang paling kritis adalah ketika prioritas berubah lebih cepat daripada kemampuan tim menjaga disiplin delivery.\n"
+                f"- Risiko berikutnya adalah ketika scope bertambah tanpa quality gate yang cukup kuat untuk menahan pelebaran yang tidak perlu.\n"
+                f"- Risiko terakhir adalah ketika output sudah dibuat, tetapi belum cukup kuat menjadi bahan keputusan atau langkah eksekusi berikutnya.\n\n"
                 "## 2.6 Kebutuhan Solusi\n"
                 f"Dengan pola masalah seperti di atas, {client} membutuhkan solusi yang tidak hanya menjanjikan perbaikan, tetapi juga mampu menutup gap secara terukur. "
                 f"Kebutuhan solusi di sini berarti kebutuhan akan pendekatan, metodologi, dan desain keluaran yang menjaga hubungan antara target bisnis, kontrol kerja, dan kelayakan implementasi. "
-                f"Bab-bab setelah ini sengaja dibangun untuk menjawab kebutuhan tersebut secara bertahap: mulai dari pendekatan, metodologi, desain solusi, sampai model pelaksanaan dan tata kelola yang bisa dijalankan."
+                f"Bab-bab setelah ini sengaja dibangun untuk menjawab kebutuhan tersebut secara bertahap: mulai dari pendekatan, metodologi, desain solusi, sampai model pelaksanaan dan tata kelola yang bisa dijalankan.\n\n"
+                "| Kebutuhan Solusi | Fungsi dalam Proposal | Dampak yang Diharapkan |\n"
+                "| --- | --- | --- |\n"
+                f"{solution_rows}\n\n"
+                f"Artinya, solusi yang dicari oleh {client} bukan tambahan presentasi, melainkan perangkat kerja yang dapat membantu sponsor memutuskan arah, membantu tim inti mengendalikan delivery, dan membantu organisasi menjaga manfaat bisnis tetap terasa.\n"
+                f"Pada titik ini, pendekatan, metodologi, dan solution design pada bab berikutnya harus dibaca sebagai jawaban langsung atas kebutuhan solusi tersebut, bukan sebagai pembahasan yang berdiri sendiri."
             )
 
         if chapter["id"] == "c_3":
@@ -3381,16 +3544,31 @@ class ProposalSupportMixin:
             ),
             "2.4 Akar Kesenjangan": (
                 f"Terdapat gap antara kondisi saat ini yang masih belum cukup terkontrol dengan kondisi yang dituju, yang menuntut keputusan lebih cepat, kontrol risiko lebih rapi, dan kualitas eksekusi yang lebih stabil.\n"
+                "| Area Gap | Kondisi Saat Ini | Kondisi yang Dituju |\n"
+                "| --- | --- | --- |\n"
+                f"| Arah keputusan | Prioritas dan owner belum selalu terkunci rapi. | Prioritas, owner, dan success criteria disepakati lebih eksplisit. |\n"
+                f"| Kontrol delivery | Quality gate dan eskalasi belum cukup disiplin. | Ritme review dan acceptance berjalan lebih konsisten. |\n"
+                f"| Kesiapan eksekusi | Langkah kerja belum cukup konkret untuk langsung dijalankan. | Dependensi, urutan kerja, dan acceptance hasil menjadi lebih jelas. |\n"
                 f"1. Akar kesenjangan inilah yang menjadi inti definisi masalah untuk {client}, karena ia menjelaskan hal mendasar yang perlu ditutup.\n"
                 f"- Dengan mengartikulasikan gap secara eksplisit, proposal dapat bergerak dari keluhan operasional menjadi dasar intervensi yang lebih dapat dipertanggungjawabkan."
             ),
             "2.5 Implikasi / Risiko": (
                 f"Jika gap ini tidak ditutup, {client} berisiko mengalami deviasi KPI, penurunan kualitas layanan, dan bertambahnya tekanan pada governance maupun operasi.\n"
+                "| Risiko | Dampak Bisnis | Dampak Operasional |\n"
+                "| --- | --- | --- |\n"
+                f"| Prioritas berubah-ubah | Target hasil menjadi sulit dipertahankan. | Tim kehilangan pegangan saat keputusan sponsor berubah. |\n"
+                f"| Scope melebar | Nilai investasi menjadi kurang defensible. | Deliverable terlambat dan acceptance makin kabur. |\n"
+                f"| Kualitas hasil lemah | Sponsor sulit mengambil keputusan dengan yakin. | Temuan dan issue mudah berulang tanpa pola penyelesaian. |\n"
                 f"1. Implikasi masalah harus diterjemahkan ke dampak bisnis, risiko eksekusi, dan konsekuensi keputusan yang mungkin muncul di level sponsor.\n"
                 f"- Risiko ini juga menjadi alasan mengapa perbaikan tidak bisa ditunda atau diperlakukan sebagai isu administratif semata."
             ),
             "2.6 Kebutuhan Solusi": (
                 f"Karena itu, rumusan masalah perlu mengarah pada kebutuhan solusi yang mampu menutup gap tersebut secara terukur, defensible, dan siap diturunkan ke tahap pendekatan serta desain solusi.\n"
+                "| Kebutuhan Solusi | Fungsi | Nilai untuk Sponsor |\n"
+                "| --- | --- | --- |\n"
+                f"| Baseline diagnosis | Memastikan gap prioritas dan akar masalah terbaca lebih tajam. | Keputusan awal menjadi lebih kuat. |\n"
+                f"| Governance dan quality gate | Menjaga ritme kerja, review, dan acceptance hasil. | Risiko lebih terkontrol dan delivery lebih disiplin. |\n"
+                f"| Roadmap dan deliverable | Mengubah kebutuhan menjadi langkah kerja dan keluaran yang siap dipakai. | Program lebih mudah dijalankan dan dievaluasi. |\n"
                 f"1. Kebutuhan solusi perlu menjadi jembatan langsung ke bab pendekatan, metodologi, dan solution design.\n"
                 f"- Dengan struktur ini, {client} dapat melihat bahwa solusi yang diusulkan memang lahir dari definisi masalah yang runtut, bukan dari asumsi generik."
             ),

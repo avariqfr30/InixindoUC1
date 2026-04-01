@@ -2561,14 +2561,16 @@ class DocumentBuilder:
         doc: Document,
         chapter_title: str,
         theme_color: Tuple[int, int, int],
+        is_first_chapter: bool = False,
     ) -> None:
         try:
             heading = doc.add_paragraph(style="Heading 1")
         except KeyError:
             heading = doc.add_paragraph()
         heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        heading.paragraph_format.space_before = Pt(0)
-        heading.paragraph_format.space_after = Pt(12)
+        heading.paragraph_format.space_before = Pt(0 if is_first_chapter else 18)
+        heading.paragraph_format.space_after = Pt(10)
+        heading.paragraph_format.keep_with_next = True
         run = heading.add_run(chapter_title)
         DocumentBuilder._set_run_format(run, size=14, bold=True)
 
