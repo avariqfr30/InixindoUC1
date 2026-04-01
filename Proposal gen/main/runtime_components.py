@@ -902,7 +902,7 @@ class Researcher:
             remainder = item[m.end():].strip()
             if not remainder:
                 return True
-            return len(re.findall(r"\S+", remainder)) \u003c= 5
+            return len(re.findall(r"\S+", remainder)) <= 5
 
         cleaned = [i for i in filtered if not _is_noise(i)]
         # Keep at least one entry so the fallback logic still works.
