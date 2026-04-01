@@ -469,7 +469,31 @@ class ProposalEngineMixin:
                     content=rendered,
                     target_words=chapter_targets.get(chapter['id'], self._target_words(chapter)),
                 )
-                chapter_outputs[chapter['id']] = self._clean_external_citations(rendered, allowed_external_citations)
+                cleaned_content = self._clean_external_citations(rendered, allowed_external_citations)
+                # If the structured chapter ends up empty, generate a minimal paragraph
+                # using the same fallback logic applied to free‑form chapters.
+                if not cleaned_content.strip():
+                    fallback_prompt = (
+                        f"Tulis paragraf singkat (≈80 kata) untuk sub‑bab "
+                        f"'{chapter.get('title', '')}' pada proposal {client}. "
+                        "Gunakan data internal yang tersedia (CSV) bila ada, atau beri "
+                        "konteks umum bila tidak ada. Hindari kutipan eksternal."
+                    )
+                    try:
+                        cleaned_content = self._draft_chapter(
+                            chapter=chapter,
+                            prompt=fallback_prompt,
+                            client=client,
+                            target_words=500,
+                            allowed_external_citations=None,
+                            personalization_pack=None,
+                        )
+                    except Exception:
+                        cleaned_content = (
+                            f"Sub‑bab '{chapter.get('title', '')}' tidak memiliki data "
+                            "yang cukup; silakan tambahkan secara manual."
+                        )
+                chapter_outputs[chapter['id']] = cleaned_content
                 continue
             ctx = context_futures[chapter['id']].result()
             if not ctx['success']:
