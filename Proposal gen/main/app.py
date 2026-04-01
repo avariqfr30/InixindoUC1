@@ -41,6 +41,24 @@ from .runtime_components import AppStateStore
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
+from .config import SERPER_API_KEY
+from .runtime_components import Researcher
+
+# Initialize and log Serper availability
+def _log_serper_status() -> None:
+    """Log Serper API availability at app startup."""
+    try:
+        has_serper = Researcher._has_serper_key()
+        if has_serper:
+            logger.info("✓ Serper API Key loaded successfully | OSINT research features ENABLED")
+        else:
+            key_status = "not configured" if not SERPER_API_KEY else "placeholder key detected"
+            logger.warning(f"⚠ Serper API Key {key_status} | OSINT research features DISABLED | Set SERPER_API_KEY environment variable to enable")
+    except Exception as e:
+        logger.error(f"✗ Error checking Serper status: {e}")
+
+_log_serper_status()
+
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR))

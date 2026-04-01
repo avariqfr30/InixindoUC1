@@ -2599,13 +2599,17 @@ class ProposalSupportMixin:
     ) -> str:
         key = self._cache_key("research", base_client, regulations, str(include_collaboration), ai_context)
         if self._get_cached_research_bundle(key):
+            logger.debug(f"Serper | Research bundle (cached) | client={base_client}")
             return "cached"
 
         with self._cache_lock:
             if key in self._research_inflight:
+                logger.debug(f"Serper | Research bundle (warming) | client={base_client}")
                 return "warming"
             event = threading.Event()
             self._research_inflight[key] = event
+
+        logger.info(f"Serper | Research bundle (prefetching) | client={base_client} | ai_context={bool(ai_context)}")
 
         def worker() -> None:
             try:
@@ -2616,6 +2620,13 @@ class ProposalSupportMixin:
                     ai_context=ai_context,
                 )
                 self._store_research_bundle(key, bundle)
+                has_external_data = any(
+                    "Sumber eksternal" in str(v) or len(str(v)) > 50
+                    for v in (bundle or {}).values()
+                )
+                logger.info(f"Serper | Research bundle (completed) | client={base_client} | external_data={has_external_data}")
+            except Exception as e:
+                logger.warning(f"Serper | Research bundle failed | client={base_client} | error={str(e)[:80]}")
             finally:
                 with self._cache_lock:
                     inflight = self._research_inflight.pop(key, None)
@@ -4153,6 +4164,128 @@ class ProposalSupportMixin:
         try:
             firm_profile = Researcher.build_comprehensive_firm_profile(firm_name, office_location)
             return ProposalSupportMixin._format_firm_section(firm_name=firm_name, firm_profile=firm_profile)
+        except Exception as e:
+            logger.error(f"Error building enhanced firm information: {e}")
+            return ""
+    
+    @staticmethod
+    def _format_firm_section(firm_name: str, firm_profile: Dict[str, str]) -> str:
+        """Format firm information into proposal closing text."""
+        sections = []
+        sections.append("## Tentang Penulis Proposal")
+        sections.append("")
+        
+        # Opening paragraph about the firm
+        sections.append(
+            f"{firm_name} adalah mitra konsultasi dan delivery yang fokus pada solusi "
+            "strategis, transformasi terstruktur, dan hasil bisnis yang terukur."
+        )
+        sections.append("")
+        
+        # Values and approach
+        if firm_profile.get("values_approach"):
+            sections.append(f"**Pendekatan Kami:** {firm_profile['values_approach']}")
+            sections.append("")
+        
+        # Team expertise
+        if firm_profile.get("team_expertise"):
+            sections.append(f"**Keahlian Tim:** {firm_profile['team_expertise']}")
+            sections.append("")
+        
+        # Portfolio and scale
+        if firm_profile.get("portfolio_scale"):
+            sections.append(f"**Portofolio & Pengalaman:** {firm_profile['portfolio_scale']}")
+            sections.append("")
+        
+        # Certifications and credentials
+        if firm_profile.get("certifications"):
+            sections.append(f"**Sertifikasi & Kredensial:** {firm_profile['certifications']}")
+            sections.append("")
+        
+        # Recognition and accolades
+        if firm_profile.get("accolades"):
+            sections.append(f"**Pengakuan Industri:** {firm_profile['accolades']}")
+            sections.append("")
+        
+        # How to reach out
+        if firm_profile.get("key_contacts"):
+            sections.append(f"**Hubungi Kami:** {firm_profile['key_contacts']}")
+            sections.append("")
+        
+        return "\n".join(sections)
+    
+    @staticmethod
+    def _build_firm_information_section_from_osint(
+        firm_name: str,
+        comprehensive_profile: Optional[Dict[str, str]] = None,
+        firm_profile: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Build firm information section for closing chapter using OSINT data.
+        Integrates external numbers from Serper, certifications, portfolio scale, and credentials
+        to demonstrate firm credibility and persuade client they're hiring the right team.
+        
+        Args:
+            firm_name: Name of the firm
+            comprehensive_profile: OSINT-gathered firm profile data (values, team, certifications, portfolio, contacts, accolades)
+            firm_profile: Internal firm profile data
+            
+        Returns:
+            Formatted firm information section with external OSINT data
+        """
+        if not comprehensive_profile:
+            return ""
+        
+        sections = []
+        sections.append("## Tentang Mitra Penulis Proposal")
+        sections.append("")
+        
+        # Opening paragraph about the firm with credibility framing
+        sections.append(
+            f"{firm_name} adalah mitra konsultasi dan delivery yang fokus pada solusi "
+            "strategis, transformasi terstruktur, dan hasil bisnis yang terukur. Kami berkomitmen "
+            "untuk memberikan nilai jangka panjang dan membantu klien mencapai tujuan transformasi mereka."
+        )
+        sections.append("")
+        
+        # Firm values and approach from OSINT
+        if comprehensive_profile.get("values_approach"):
+            sections.append(f"**Pendekatan & Nilai Kami:** {comprehensive_profile['values_approach']}")
+            sections.append("")
+        
+        # Team expertise from OSINT
+        if comprehensive_profile.get("team_expertise"):
+            sections.append(f"**Keahlian Tim:** {comprehensive_profile['team_expertise']}")
+            sections.append("")
+        
+        # Portfolio and scale (external numbers from OSINT)
+        if comprehensive_profile.get("portfolio_scale"):
+            sections.append(f"**Portofolio & Skala Pengalaman:** {comprehensive_profile['portfolio_scale']}")
+            sections.append("")
+        
+        # Certifications and credentials from OSINT
+        if comprehensive_profile.get("certifications"):
+            sections.append(f"**Sertifikasi & Kredensial:** {comprehensive_profile['certifications']}")
+            sections.append("")
+        
+        # Industry recognition and accolades
+        if comprehensive_profile.get("accolades"):
+            sections.append(f"**Pengakuan Industri:** {comprehensive_profile['accolades']}")
+            sections.append("")
+        
+        # Contact information
+        if comprehensive_profile.get("key_contacts"):
+            sections.append(f"**Hubungi Kami:** {comprehensive_profile['key_contacts']}")
+            sections.append("")
+        
+        return "\n".join(sections)
+    
+    @staticmethod
+    def _build_firm_information_section(firm_name: str, firm_profile: Dict[str, str]) -> str:
+        """Build comprehensive firm information section using OSINT."""
+        try:
+            firm_profile_comprehensive = Researcher.build_comprehensive_firm_profile(firm_name, firm_profile.get("office_address", "") if firm_profile else "")
+            return ProposalSupportMixin._format_firm_section(firm_name=firm_name, firm_profile=firm_profile_comprehensive)
         except Exception as e:
             logger.error(f"Error building enhanced firm information: {e}")
             return ""

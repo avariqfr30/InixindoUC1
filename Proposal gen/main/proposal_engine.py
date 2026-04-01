@@ -54,24 +54,40 @@ class ProposalEngineMixin:
     ) -> str:
         """
         Enhance closing chapter with comprehensive firm information via OSINT.
-        Appends firm details such as team expertise, certifications, and accolades
-        to the closing chapter.
+        Integrates firm details such as team expertise, certifications, external numbers,
+        portfolio scale, and accolades to help persuade the client they're hiring the 
+        right team.
         
         Args:
             closing_content: Existing closing chapter content
             firm_profile: Optional firm profile dictionary
         
         Returns:
-            Enhanced closing content with firm information
+            Enhanced closing content with firm information from OSINT/Serper
         """
         try:
-            # Use consolidated ProposalSupportMixin method
-            return ProposalSupportMixin._enhance_closing_with_firm_details(
-                closing_content,
+            # Gather comprehensive firma profile with OSINT data from Serper
+            firm_comprehensive_profile = Researcher.build_comprehensive_firm_profile(
                 WRITER_FIRM_NAME,
-                firm_profile,
                 firm_profile.get("office_address", "") if firm_profile else ""
             )
+            
+            # Build firm information section leveraging OSINT for credentials, scale, etc.
+            firm_section = ProposalSupportMixin._build_firm_information_section_from_osint(
+                firm_name=WRITER_FIRM_NAME,
+                comprehensive_profile=firm_comprehensive_profile,
+                firm_profile=firm_profile
+            )
+            
+            # Combine original closing content with enhanced firm section
+            if firm_section:
+                enhanced = closing_content + "\n\n" + firm_section
+                # Inject verified contact information
+                return ProposalSupportMixin._inject_verified_firm_contact(
+                    enhanced,
+                    firm_profile
+                )
+            return closing_content
         except Exception as e:
             logger.warning(f"Error enhancing closing with firm OSINT: {e}")
             return closing_content
@@ -694,7 +710,7 @@ class ProposalEngineMixin:
             prompts = []
             for sub in missing:
                 prompts.append(
-                    f"Buat paragraf singkat (≈80 kata) untuk sub‑bab '{sub}' menggunakan data internal bila ada, tanpa kutipan eksternal."
+                    f"Buat paragraf substansial (≈150-200 kata) untuk sub‑bab '{sub}' menggunakan data internal bila ada, tanpa kutipan eksternal. Pastikan isi paragraf informatif, jelas, dan relevan untuk klien."
                 )
             fallback_prompt = " ".join(prompts)
             try:
@@ -702,26 +718,28 @@ class ProposalEngineMixin:
                     chapter={"id": chap_id, "title": f"BAB {chap_id[-1]} – {subsections[0].split(' ')[0]}"},
                     prompt=fallback_prompt,
                     client=client,
-                    target_words=400,
+                    target_words=600,
                     allowed_external_citations=None,
                     personalization_pack=None,
                 )
-                chapter_outputs[chap_id] = (content + "\n\n" + extra).strip()
+                # Validate that generated content meets minimum quality threshold
+                if extra and self._word_count(extra) >= 100:
+                    chapter_outputs[chap_id] = (content + "\n\n" + extra).strip()
             except Exception:
                 pass
-        else:
-            logger.info(
-                "Proposal acceptance passed | score=%s | categories=%s | ai_adoption_fit=%s | estimated_pages=%s",
-                acceptance_report["score"],
-                acceptance_report["categories"],
-                acceptance_report.get("ai_adoption_fit"),
-                acceptance_report["estimated_pages"],
-            )
-                        )
-            try:
-                logo_stream, theme_color = logo_future.result(timeout=8)
-            except Exception:
-                logo_stream, theme_color = None, DEFAULT_COLOR
+
+        logger.info(
+            "Proposal acceptance passed | score=%s | categories=%s | ai_adoption_fit=%s | estimated_pages=%s",
+            acceptance_report["score"],
+            acceptance_report["categories"],
+            acceptance_report.get("ai_adoption_fit"),
+            acceptance_report["estimated_pages"],
+        )
+
+        try:
+            logo_stream, theme_color = logo_future.result(timeout=8)
+        except Exception:
+            logo_stream, theme_color = None, DEFAULT_COLOR
 
         template_path = app_state_store.get_template_path() if app_state_store else ""
         doc, using_template = DocumentBuilder.create_base_document(template_path)
@@ -773,6 +791,17 @@ class ProposalEngineMixin:
                     )
             rendered_any = True
             if chapter['id'] == "c_closing":
+                # Enhance closing chapter with firm OSINT data (external numbers, credentials, portfolio)
+                # to help persuade the client they're hiring the right team
+                try:
+                    enhanced = self._enhance_closing_with_firm_osint(
+                        closing_content=content,
+                        firm_profile=firm_profile
+                    )
+                    if enhanced and len(enhanced.strip()) > len(content.strip()):
+                        content = enhanced
+                except Exception:
+                    pass
                 # The rendered DOCX appends a structured firm profile/contact block,
                 # so keep the closing narrative clean by stripping the inline contact section.
                 content = re.split(
