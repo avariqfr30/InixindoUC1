@@ -24,6 +24,11 @@ class FinancialSchema(BaseModel):
     project_budget_idr: Optional[int] = Field(None, description="Project budget in IDR")
     source_quote: str = Field("", description="Exact quote from text")
 
+class ContactSchema(BaseModel):
+    office_address: str = Field("", description="The primary or head office address. Empty if not found.")
+    email: str = Field("", description="The official contact email. Empty if not found.")
+    phone: str = Field("", description="The official phone or WhatsApp number. Empty if not found.")
+
 # ==========================================
 
 class SchemaMapper:
@@ -449,72 +454,55 @@ class FirmAPIClient:
         }
 
     def _build_profile_from_osint(self) -> Dict[str, str]:
+        """Upgraded OSINT builder using Deep Scrape and Pydantic."""
         current_year = datetime.now().year
-        query = (
-            f'"{WRITER_FIRM_NAME}" Yogyakarta kontak email telp alamat profil '
-            f'{current_year} OR {current_year - 1}'
-        )
-        raw_hits = Researcher.search(query, limit=8, recency_bucket="year")
-        hits = Researcher._filter_recent_entity_results(
-            raw_hits,
-            entity_name=WRITER_FIRM_NAME,
-            max_age_years=4,
-            strict_entity=True
-        )
-        if not hits:
-            fallback_query = f'"{WRITER_FIRM_NAME}" Yogyakarta pelatihan konsultasi kontak resmi'
-            fallback_hits = Researcher.search(fallback_query, limit=8)
-            hits = Researcher._filter_recent_entity_results(
-                fallback_hits,
-                entity_name=WRITER_FIRM_NAME,
-                max_age_years=6,
-                strict_entity=True
-            )
-        address_query = f'"{WRITER_FIRM_NAME}" alamat kantor Yogyakarta OR "Jl." OR "Jalan"'
-        address_hits = Researcher.search(address_query, limit=8, recency_bucket="year")
-        address_hits = Researcher._filter_recent_entity_results(
-            address_hits,
-            entity_name=WRITER_FIRM_NAME,
-            max_age_years=6,
-            strict_entity=True
-        )
+        query = f'"{WRITER_FIRM_NAME}" kontak OR "hubungi kami" OR alamat kantor resmi {current_year}'
+        
+        # 1. Get the top search results
+        raw_hits = Researcher.search(query, limit=5, recency_bucket="year")
+        hits = Researcher._filter_recent_entity_results(raw_hits, entity_name=WRITER_FIRM_NAME, max_age_years=4)
+        
+        extracted_data = ContactSchema() # Default empty schema
+        
+        # 2. Deep scrape the #1 result (Usually the official website's Contact page)
+        if hits and hits[0].get("link"):
+            top_link = hits[0]["link"]
+            markdown = Researcher.fetch_full_markdown(top_link)
+            
+            if markdown:
+                prompt = f"""
+                You are a data extractor. Read the following text about {WRITER_FIRM_NAME}.
+                Extract their primary head office address, official email, and phone number.
+                
+                TEXT:
+                {markdown}
+                
+                Respond ONLY with a valid JSON object matching the requested schema.
+                """
+                try:
+                    res = Client(host=OLLAMA_HOST).chat(
+                        model=LLM_MODEL,
+                        messages=[{'role': 'user', 'content': prompt}],
+                        options={'temperature': 0.0}
+                    )
+                    raw_text = res['message']['content']
+                    match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+                    parsed_dict = json.loads(match.group(0)) if match else json.loads(raw_text)
+                    
+                    # Force strict Pydantic validation
+                    extracted_data = ContactSchema.model_validate(parsed_dict)
+                except Exception as e:
+                    logger.warning(f"Contact Deep Scrape failed: {e}")
 
-        merged_hits = hits + [item for item in address_hits if item not in hits]
-        merged_text = " ".join(
-            [
-                " ".join(
-                    [
-                        str(item.get("title", "")),
-                        str(item.get("snippet", "")),
-                        str(item.get("link", "")),
-                    ]
-                )
-                for item in merged_hits
-            ]
-        )
-        parsed = self._extract_contact_fields(merged_text)
-
-        if not parsed.get("office_address"):
-            for item in merged_hits:
-                item_text = " ".join(
-                    [
-                        str(item.get("title", "")),
-                        str(item.get("snippet", "")),
-                        str(item.get("link", "")),
-                    ]
-                )
-                parsed_item = self._extract_contact_fields(item_text)
-                if parsed_item.get("office_address"):
-                    parsed["office_address"] = parsed_item["office_address"]
-                    break
-
+        # 3. Pass the LLM-extracted data directly into your normalizer
         return self._normalize_firm_profile(
             {
-                "office_address": parsed.get("office_address", "") or WRITER_FIRM_OFFICE_ADDRESS,
-                "email": parsed.get("email", "") or WRITER_FIRM_EMAIL,
-                "phone": parsed.get("phone", "") or WRITER_FIRM_PHONE,
-                "whatsapp": parsed.get("whatsapp", "") or WRITER_FIRM_WHATSAPP,
-                "website": parsed.get("website", "") or WRITER_FIRM_WEBSITE,
+                "office_address": extracted_data.office_address or WRITER_FIRM_OFFICE_ADDRESS,
+                "email": extracted_data.email or WRITER_FIRM_EMAIL,
+                "phone": extracted_data.phone or WRITER_FIRM_PHONE,
+                # Keep your standard defaults for the rest
+                "whatsapp": WRITER_FIRM_WHATSAPP,
+                "website": WRITER_FIRM_WEBSITE,
                 "legal_name": WRITER_FIRM_LEGAL_NAME,
                 "operating_hours": WRITER_FIRM_OPERATING_HOURS,
                 "profile_summary": WRITER_FIRM_PROFILE_SUMMARY,
