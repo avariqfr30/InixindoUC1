@@ -728,6 +728,11 @@ class ProposalEngineMixin:
             except Exception:
                 pass
 
+        chapter_outputs = {
+            chapter_id: self._postprocess_chapter_content(chapter_map.get(chapter_id), content, client)
+            for chapter_id, content in chapter_outputs.items()
+        }
+
         logger.info(
             "Proposal acceptance passed | score=%s | categories=%s | ai_adoption_fit=%s | estimated_pages=%s",
             acceptance_report["score"],
@@ -761,8 +766,12 @@ class ProposalEngineMixin:
         rendered_any = False
         rendered_firm_profile = False
         for i, chapter in enumerate(selected_chapters):
-            content = chapter_outputs.get(chapter['id'], '').strip()
-            if not content:
+            content = self._postprocess_chapter_content(
+                chapter,
+                chapter_outputs.get(chapter['id'], ''),
+                client,
+            )
+            if not self._has_renderable_markdown(content):
                 # When both external OSINT and internal CSV data fail to produce any
                 # content, fall back to a brief LLM‑generated paragraph instead of a
                 # static placeholder. This keeps every sub‑chapter professionally
@@ -789,6 +798,9 @@ class ProposalEngineMixin:
                         f"Sub‑bab '{chapter.get('title', '')}' belum memiliki data publik "
                         "yang cukup; silakan menambahkan rincian khusus secara manual."
                     )
+                content = self._postprocess_chapter_content(chapter, content, client)
+            if not self._has_renderable_markdown(content):
+                continue
             rendered_any = True
             if chapter['id'] == "c_closing":
                 # Enhance closing chapter with firm OSINT data (external numbers, credentials, portfolio)
@@ -816,7 +828,13 @@ class ProposalEngineMixin:
                 rendered_firm_profile = True
 
             has_next = any(
-                chapter_outputs.get(next_chapter['id'], '').strip()
+                self._has_renderable_markdown(
+                    self._postprocess_chapter_content(
+                        next_chapter,
+                        chapter_outputs.get(next_chapter['id'], ''),
+                        client,
+                    )
+                )
                 for next_chapter in selected_chapters[i + 1:]
             )
             if has_next:

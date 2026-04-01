@@ -672,12 +672,15 @@ Writing rules:
 1. Be concise and direct ("singkat, padat, tidak bertele-tele"), but keep the content specific and useful.
 2. Formatting:
    - Use EXACT heading structure from provided H2 list.
-   - Under each H2, create 2-3 H3 subsections (###) that are relevant and non-redundant.
+   - Add H3 subsections (###) only when they genuinely add structure and substance.
+   - Never create empty H2 or H3 headings. If a subsection would be thin, fold it into prose or lists under the H2.
    - Use numbered lists for steps/sequences (1., 2., 3.) and bullet lists for supporting detail points (-).
    - Keep prose dense: avoid excessive blank lines and avoid one-line bullets without explanation.
    - Include at least 1 markdown table only for chapters with operational, governance, timeline, ruang lingkup, profil perusahaan, tenaga ahli, or commercial content.
 3. Depth: Explain rationale, assumptions, risks, dependencies, metrics, and expected deliverables in actionable detail.
-4. Tone: Professional, objective, direct, and persuasive in Indonesian. Avoid academic filler.
+4. Tone: Professional, objective, direct, and persuasive in Indonesian. Avoid academic filler and avoid meta-writing about the document itself.
+   - Do not start sentences with phrases like "Bab ini", "Bagian ini", "Pada proposal ini", "Sebagai acuan konteks", or "Sebagai konteks eksternal".
+   - Start directly from the client's situation, decision, risk, dependency, or expected outcome.
 5. Synthesis: Integrate OSINT data naturally. When using external data, explicitly mention the source name and year naturally in the sentence to build credibility (e.g., "Menurut laporan [Nama Sumber] pada tahun [Tahun], ...").
 6. Source handling:
    - Use the provided source hints for grounding and fact selection.

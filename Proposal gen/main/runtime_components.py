@@ -2943,8 +2943,59 @@ class DocumentBuilder:
         return not "".join(texts).strip()
 
     @staticmethod
+    def _paragraph_is_page_break_only(paragraph_el) -> bool:
+        if paragraph_el.find('.//' + qn('w:drawing')) is not None:
+            return False
+        texts = [node.text or "" for node in paragraph_el.findall('.//' + qn('w:t'))]
+        if "".join(texts).strip():
+            return False
+        breaks = paragraph_el.findall('.//' + qn('w:br'))
+        return bool(breaks) and all(br.get(qn('w:type')) == 'page' for br in breaks)
+
+    @staticmethod
     def compact_layout(doc: Document) -> None:
         body = doc._element.body
         for child in list(body):
             if child.tag == qn('w:p') and DocumentBuilder._paragraph_is_blank(child):
+                body.remove(child)
+
+        children = list(body)
+        for idx, child in enumerate(children):
+            if child.tag != qn('w:p') or not DocumentBuilder._paragraph_is_page_break_only(child):
+                continue
+
+            previous_substantive = None
+            for prev in reversed(children[:idx]):
+                if prev.tag == qn('w:p') and DocumentBuilder._paragraph_is_blank(prev):
+                    continue
+                previous_substantive = prev
+                break
+
+            next_substantive = None
+            for nxt in children[idx + 1:]:
+                if nxt.tag == qn('w:p') and DocumentBuilder._paragraph_is_blank(nxt):
+                    continue
+                next_substantive = nxt
+                break
+
+            previous_is_page_break = bool(
+                previous_substantive is not None
+                and previous_substantive.tag == qn('w:p')
+                and DocumentBuilder._paragraph_is_page_break_only(previous_substantive)
+            )
+            next_is_page_break = bool(
+                next_substantive is not None
+                and next_substantive.tag == qn('w:p')
+                and DocumentBuilder._paragraph_is_page_break_only(next_substantive)
+            )
+            next_is_real_content = bool(
+                next_substantive is not None
+                and not next_is_page_break
+                and (
+                    next_substantive.tag != qn('w:p')
+                    or not DocumentBuilder._paragraph_is_blank(next_substantive)
+                )
+            )
+
+            if previous_is_page_break or next_is_page_break or not next_is_real_content:
                 body.remove(child)
