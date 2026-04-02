@@ -175,26 +175,96 @@ class ProposalGenerator(ProposalEngineMixin, ProposalSupportMixin):
         if total_base <= budget:
             return base_targets
 
-        # Scale all chapters down proportionally while keeping minimum readable length.
-        scaled: Dict[str, int] = {}
+        # Allocate in two stages:
+        # 1. protect a minimum readable floor for every chapter
+        # 2. distribute the remaining budget toward chapters with the highest business value
+        #    so critical sections keep more detail before lower-value chapters are trimmed.
+        floors: Dict[str, int] = {}
         for chapter in chapters:
-            base = base_targets[chapter["id"]]
-            floor = self._chapter_floor_words(chapter["id"], for_compression=False)
-            scaled[chapter["id"]] = max(floor, int(base * budget / total_base))
+            chapter_id = chapter["id"]
+            base = base_targets[chapter_id]
+            floors[chapter_id] = min(base, self._chapter_floor_words(chapter_id, for_compression=False))
 
-        # If still over budget, cut from the longest chapters first.
-        overflow = sum(scaled.values()) - budget
-        if overflow > 0:
-            ordered_ids = sorted(scaled.keys(), key=lambda cid: scaled[cid], reverse=True)
+        floor_sum = sum(floors.values())
+        if floor_sum >= budget:
+            trimmed = dict(floors)
+            overflow = floor_sum - budget
+            ordered_ids = sorted(
+                trimmed.keys(),
+                key=lambda cid: (
+                    self._chapter_business_rank(cid),
+                    -self._chapter_compression_rank(cid),
+                    -trimmed[cid],
+                )
+            )
             for cid in ordered_ids:
                 if overflow <= 0:
                     break
-                floor = self._chapter_floor_words(cid, for_compression=False)
-                reducible = max(0, scaled[cid] - floor)
+                minimum = min(
+                    trimmed[cid],
+                    self._chapter_floor_words(cid, for_compression=True),
+                )
+                reducible = max(0, trimmed[cid] - minimum)
+                if reducible <= 0:
+                    continue
                 cut = min(reducible, overflow)
-                scaled[cid] -= cut
+                trimmed[cid] -= cut
                 overflow -= cut
-        return scaled
+            return trimmed
+
+        targets = dict(floors)
+        remaining_budget = budget - floor_sum
+        weighted_headroom: Dict[str, float] = {}
+        for chapter in chapters:
+            chapter_id = chapter["id"]
+            headroom = max(0, base_targets[chapter_id] - floors[chapter_id])
+            if headroom <= 0:
+                continue
+            business_weight = 1.0 + (0.22 * self._chapter_business_rank(chapter_id))
+            structure_weight = 1.08 if self._use_structured_chapter(chapter_id) else 1.0
+            weighted_headroom[chapter_id] = headroom * business_weight * structure_weight
+
+        total_weight = sum(weighted_headroom.values())
+        if total_weight > 0 and remaining_budget > 0:
+            for chapter in chapters:
+                chapter_id = chapter["id"]
+                weight = weighted_headroom.get(chapter_id, 0.0)
+                if weight <= 0:
+                    continue
+                room = max(0, base_targets[chapter_id] - targets[chapter_id])
+                if room <= 0:
+                    continue
+                allocation = min(room, int(remaining_budget * (weight / total_weight)))
+                targets[chapter_id] += allocation
+
+        leftover = budget - sum(targets.values())
+        if leftover > 0:
+            ordered_ids = sorted(
+                [chapter["id"] for chapter in chapters],
+                key=lambda cid: (
+                    self._chapter_business_rank(cid),
+                    max(0, base_targets[cid] - targets[cid]),
+                    self._use_structured_chapter(cid),
+                    -self._chapter_compression_rank(cid),
+                ),
+                reverse=True,
+            )
+            while leftover > 0:
+                progressed = False
+                for cid in ordered_ids:
+                    room = max(0, base_targets[cid] - targets[cid])
+                    if room <= 0:
+                        continue
+                    step = min(room, leftover, 12)
+                    targets[cid] += step
+                    leftover -= step
+                    progressed = True
+                    if leftover <= 0:
+                        break
+                if not progressed:
+                    break
+
+        return targets
 
     def _estimated_pages(self, total_words: int) -> int:
         content_pages = max(1, (total_words + ESTIMATED_WORDS_PER_PAGE - 1) // ESTIMATED_WORDS_PER_PAGE)

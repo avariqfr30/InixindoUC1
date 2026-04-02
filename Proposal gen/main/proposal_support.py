@@ -1093,9 +1093,46 @@ class ProposalSupportMixin:
                 return "bullet"
             return "plain"
 
+        def previous_nonblank_index(index: int) -> Optional[int]:
+            for pos in range(index - 1, -1, -1):
+                if lines[pos].strip():
+                    return pos
+            return None
+
+        def nearest_heading_index(index: int) -> Optional[int]:
+            for pos in range(index - 1, -1, -1):
+                kind = line_kind(lines[pos])
+                if kind == "heading":
+                    return pos
+            return None
+
+        def is_protected_plain(index: int) -> bool:
+            if line_kind(lines[index]) != "plain":
+                return False
+            prev_idx = previous_nonblank_index(index)
+            if prev_idx is None:
+                return False
+            return line_kind(lines[prev_idx]) == "heading"
+
+        def is_early_section_bullet(index: int) -> bool:
+            if line_kind(lines[index]) != "bullet":
+                return False
+            heading_idx = nearest_heading_index(index)
+            if heading_idx is None:
+                return False
+            bullet_count = 0
+            for pos in range(heading_idx + 1, index + 1):
+                if line_kind(lines[pos]) == "heading":
+                    break
+                if line_kind(lines[pos]) == "bullet":
+                    bullet_count += 1
+            return bullet_count <= 2
+
         for idx in range(len(lines) - 1, -1, -1):
             line = lines[idx].strip()
             if line_kind(line) != "plain":
+                continue
+            if is_protected_plain(idx):
                 continue
             if any(token in line for token in protected_contact_tokens):
                 continue
@@ -1106,6 +1143,8 @@ class ProposalSupportMixin:
         for idx in range(len(lines) - 1, -1, -1):
             line = lines[idx].strip()
             if line_kind(line) != "plain":
+                continue
+            if is_protected_plain(idx):
                 continue
             if any(token in line for token in protected_contact_tokens):
                 continue
@@ -1122,6 +1161,8 @@ class ProposalSupportMixin:
         for idx in range(len(lines) - 1, -1, -1):
             line = lines[idx].strip()
             if line_kind(line) != "bullet":
+                continue
+            if is_early_section_bullet(idx):
                 continue
             if count_lines("bullet") <= 1:
                 break
@@ -1711,6 +1752,86 @@ class ProposalSupportMixin:
         return rows
 
     @classmethod
+    def _framework_application_rows(
+        cls,
+        regulations: str,
+        project_type: str,
+        service_type: str,
+        timeline: str,
+        notes: str = "",
+        ai_mode: bool = False,
+    ) -> List[Dict[str, str]]:
+        raw_items = [re.sub(r"\s+", " ", item).strip(" -.;:") for item in re.split(r"[,;/\n]+", str(regulations or ""))]
+        selected = [item for item in raw_items if item]
+        if not selected:
+            selected = [item["acuan"] for item in cls._framework_reference_rows(regulations, project_type, ai_mode=ai_mode)]
+
+        phase_plan = cls._build_ai_phase_plan(timeline) if ai_mode else cls._build_phase_plan(project_type, timeline)
+        first_phase = phase_plan[0]["phase"] if phase_plan else "fase awal"
+        middle_phase = phase_plan[1]["phase"] if len(phase_plan) > 1 else (phase_plan[0]["phase"] if phase_plan else "fase tengah")
+        last_phase = phase_plan[-1]["phase"] if phase_plan else "fase akhir"
+        short_notes = cls._summarize_phrase(notes, "kebutuhan kontrol mutu dan keputusan kerja", max_words=14)
+
+        rows: List[Dict[str, str]] = []
+        for item in selected[:4]:
+            lowered = item.lower()
+            if "togaf" in lowered:
+                penggunaan = "dipakai untuk membaca current state, merumuskan target operating model, dan menurunkan roadmap transisi yang konsisten."
+                artefak = "baseline capability map, target state, dan roadmap transisi."
+                fase = f"{first_phase} sampai {middle_phase}"
+            elif "cobit" in lowered:
+                penggunaan = "dipakai untuk menetapkan kontrol tata kelola, decision right, accountability, dan ukuran keberhasilan delivery."
+                artefak = "control objective, RACI keputusan, dan KPI/KGI governance."
+                fase = f"{first_phase} dan checkpoint pada {middle_phase}"
+            elif "itil" in lowered:
+                penggunaan = "dipakai untuk merapikan service process, incident/problem/change handling, dan ritme quality gate operasional."
+                artefak = "process flow, SLA/OLA expectation, dan kontrol service operation."
+                fase = f"{middle_phase} sampai {last_phase}"
+            elif "iso 27001" in lowered:
+                penggunaan = "dipakai untuk menjaga bahwa desain kontrol, akses, logging, dan perlindungan informasi sudah dipikirkan sejak awal."
+                artefak = "security requirement, control checklist, dan risk treatment awal."
+                fase = f"{first_phase} sampai {last_phase}"
+            elif "iso 20000" in lowered:
+                penggunaan = "dipakai untuk menata mutu service management, service acceptance, dan mekanisme continual improvement."
+                artefak = "service management checkpoint dan acceptance criteria layanan."
+                fase = f"{middle_phase} dan {last_phase}"
+            elif any(token in lowered for token in ["pojk", "ojk", "uu pdp", "pdp", "hipaa", "regulasi", "kepatuhan"]):
+                penggunaan = "dipakai sebagai pagar kepatuhan agar ruang lingkup, kontrol data, approval, dan bentuk keluaran tidak melanggar kewajiban formal."
+                artefak = "compliance checkpoint, daftar kontrol wajib, dan catatan keputusan kepatuhan."
+                fase = f"{first_phase} dengan review berulang hingga {last_phase}"
+            elif any(token in lowered for token in ["responsible ai", "nist ai", "ai rmf", "ai governance"]):
+                penggunaan = "dipakai untuk menguji kelayakan use case, human oversight, quality gate model, dan monitoring risiko adopsi."
+                artefak = "AI risk register, stop/go criteria, dan monitoring requirement."
+                fase = f"{first_phase} sampai {last_phase}"
+            elif any(token in lowered for token in ["dama", "data"]):
+                penggunaan = "dipakai untuk memastikan ownership data, kualitas informasi, metadata, dan kontrol pemakaian data relevan dengan kebutuhan proyek."
+                artefak = "data ownership map, quality checkpoint, dan requirement data source."
+                fase = f"{first_phase} dan {middle_phase}"
+            elif "tm forum" in lowered:
+                penggunaan = "dipakai untuk merapikan alur layanan, dependensi operasi, dan hubungan proses front-end sampai back-end."
+                artefak = "service/process model dan integrasi alur operasi."
+                fase = f"{middle_phase} sampai {last_phase}"
+            else:
+                penggunaan = (
+                    f"dipakai sebagai acuan praktis untuk menerjemahkan {item} ke kriteria desain, checklist mutu, dan checkpoint keputusan "
+                    f"yang relevan dengan proyek {project_type.lower()} dan layanan {service_type.lower()}."
+                )
+                artefak = (
+                    f"checklist kerja, catatan keputusan, dan acceptance criteria yang menjaga {short_notes.lower()}."
+                )
+                fase = f"{first_phase} sampai {last_phase}"
+
+            rows.append(
+                {
+                    "framework": item,
+                    "penggunaan": penggunaan,
+                    "artefak": artefak,
+                    "fase": fase,
+                }
+            )
+        return rows
+
+    @classmethod
     def _methodology_rows(
         cls,
         project_type: str,
@@ -2263,6 +2384,17 @@ class ProposalSupportMixin:
             f"| {item['acuan']} | {item['peran']} | {item['relevansi']} |"
             for item in self._framework_reference_rows(regulations, project_type, ai_mode=ai_mode)
         )
+        framework_application_rows = "\n".join(
+            f"| {item['framework']} | {item['penggunaan']} | {item['artefak']} | {item['fase']} |"
+            for item in self._framework_application_rows(
+                regulations,
+                project_type,
+                service_type,
+                timeline,
+                notes=notes,
+                ai_mode=ai_mode,
+            )
+        )
         methodology_rows = "\n".join(
             f"| {item['fase']} | {item['periode']} | {item['tujuan']} | {item['keluaran']} | {item['quality_gate']} |"
             for item in self._methodology_rows(project_type, service_type, timeline, ai_mode=ai_mode)
@@ -2390,6 +2522,11 @@ class ProposalSupportMixin:
                     f"Dengan metodologi yang jelas, sponsor dapat melihat bagaimana pekerjaan dijalankan, kapan keputusan penting perlu diambil, dan keluaran apa yang dihasilkan pada tiap tahap.\n"
                     "1. Metodologi menjaga agar tiap fase mempunyai tujuan kerja, keluaran, dan titik pengendalian yang jelas.\n"
                     "2. Metodologi juga membantu memastikan bahwa tanggapan terhadap KAK turun menjadi program kerja yang dapat dijalankan.\n"
+                    "| Framework / Acuan | Cara Diterapkan | Artefak atau Output yang Dipengaruhi | Fase Penggunaan Dominan |\n"
+                    "| --- | --- | --- | --- |\n"
+                    f"{framework_application_rows}\n"
+                    "- Framework di atas dipakai sebagai perangkat kerja yang memengaruhi checkpoint, keluaran, dan cara mengambil keputusan pada tiap fase.\n"
+                    "- Untuk acuan custom atau internal, penerapannya tetap harus dapat ditelusuri ke checklist, kriteria review, atau acceptance yang nyata.\n"
                     "| Fase | Periode | Tujuan Kerja | Keluaran Utama | Gerbang Mutu |\n"
                     "| --- | --- | --- | --- | --- |\n"
                     f"{methodology_rows}\n"
@@ -2725,7 +2862,17 @@ class ProposalSupportMixin:
                 f"3. Metodologi ini cukup fleksibel untuk merespons perubahan prioritas, tetapi tetap disiplin terhadap akuntabilitas hasil.\n"
                 f"- Dengan metodologi seperti ini, forum kerja {client} bisa fokus pada keputusan penting, bukan menghabiskan energi untuk merapikan ulang arah kerja setiap saat.\n"
                 f"- Metodologi ini juga memudahkan penempatan peninjau mutu, penerimaan keluaran, dan kontrol perubahan sejak awal.\n\n"
-                "## 5.2 Langkah Kerja dengan Kerangka Acuan Terpilih\n"
+                "## 5.2 Cara Framework Diterapkan dalam Metodologi\n"
+                f"Framework yang dipilih tidak berhenti sebagai referensi, tetapi diterjemahkan ke peran kerja yang bisa dibaca sponsor dan tim pelaksana. "
+                f"Dengan cara ini, {client} dapat melihat framework mana yang dipakai untuk membentuk keputusan, dokumen kerja, kontrol mutu, dan gerbang penerimaan selama engagement berjalan.\n\n"
+                "| Framework / Acuan | Cara Diterapkan | Artefak atau Output yang Dipengaruhi | Fase Penggunaan Dominan |\n"
+                "| --- | --- | --- | --- |\n"
+                f"{framework_application_rows}\n\n"
+                f"Tabel di atas memperlihatkan bahwa setiap framework dipakai karena ada fungsi kerja yang jelas, bukan sekadar untuk memperindah narasi proposal. "
+                f"Untuk framework yang bersifat custom atau internal, penerapannya tetap diturunkan menjadi checklist, kriteria desain, dan acceptance yang dapat diuji pada fase yang relevan.\n"
+                f"- Prinsip utamanya adalah setiap acuan harus punya jejak pada keputusan, dokumen, atau quality gate yang nyata.\n"
+                f"- Dengan begitu, sponsor {client} dapat menilai apakah framework yang disebut benar-benar membantu eksekusi, bukan hanya menjadi label metodologis.\n\n"
+                "## 5.3 Langkah Kerja dengan Kerangka Acuan Terpilih\n"
                 f"Langkah kerja berikut dipakai untuk menerjemahkan pendekatan ke ritme pelaksanaan yang lebih konkret:\n\n"
                 "| Fase | Periode | Tujuan Kerja | Keluaran Utama | Gerbang Mutu |\n"
                 "| --- | --- | --- | --- | --- |\n"

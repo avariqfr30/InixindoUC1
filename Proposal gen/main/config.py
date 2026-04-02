@@ -45,7 +45,10 @@ APP_PORT = max(1, int(os.getenv("APP_PORT", "5500")))
 
 # Document length guardrails.
 MAX_PROPOSAL_PAGES = 25
-ESTIMATED_WORDS_PER_PAGE = 230
+# Word's actual pagination for these proposals has been denser than 230 words/page,
+# especially once headings, tables, and visuals are laid out. Keep the hard page cap,
+# but make the planning estimate less conservative so critical chapters are not starved.
+ESTIMATED_WORDS_PER_PAGE = max(230, int(os.getenv("ESTIMATED_WORDS_PER_PAGE", "255")))
 RESERVED_NON_CONTENT_PAGES = 2
 PAGE_SAFETY_BUFFER = 1
 
