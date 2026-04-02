@@ -653,6 +653,7 @@ class Researcher:
         return key not in placeholder_keys
 
     @staticmethod
+    @osint_cache.memoize(expire=43200)
     def fetch_full_markdown(url: str) -> str:
         """Fetches the clean markdown text of any URL using Jina Reader."""
         if not url: return ""
@@ -667,10 +668,11 @@ class Researcher:
             logger.warning(f"Failed to fetch full markdown for {url}: {e}")
             return ""
 
-    @classmethod
-    def extract_insight_with_llm(cls, url: str, extraction_goal: str) -> str:
+    @staticmethod
+    @osint_cache.memoize(expire=43200)
+    def extract_insight_with_llm(url: str, extraction_goal: str) -> str:
         """Universal Deep Scraper: Reads a URL and extracts a specific qualitative insight via Pydantic/LLM."""
-        markdown_text = cls.fetch_full_markdown(url)
+        markdown_text = Researcher.fetch_full_markdown(url)
         if not markdown_text:
             return ""
             
@@ -707,6 +709,43 @@ class Researcher:
         except Exception as e:
             logger.warning(f"Insight extraction failed for {url}: {e}")
             return ""
+
+    @staticmethod
+    def _format_source_evidence_item(item: Dict[str, Any], fact_override: str = "", index: int = 1) -> str:
+        title = str(item.get("title", "") or "Sumber tanpa judul").strip()
+        link = str(item.get("link", "") or "-").strip()
+        fact = str(fact_override or item.get("snippet", "") or "").strip()
+        if not fact:
+            return ""
+        source_name = Researcher._source_name(link)
+        citation = f"({source_name}, {Researcher._citation_year(item)})"
+        return f"Sumber eksternal {max(1, int(index or 1))}: fakta={fact} | sumber={title} | url={link} | sitasi_apa={citation}"
+
+    @staticmethod
+    def _combine_summary_and_evidence(summary: str, evidence_lines: List[str], fallback: str = "") -> str:
+        parts: List[str] = []
+        cleaned_summary = str(summary or "").strip()
+        if cleaned_summary:
+            parts.append(cleaned_summary)
+
+        deduped_lines: List[str] = []
+        seen: Set[str] = set()
+        for raw_line in evidence_lines or []:
+            line = str(raw_line or "").strip()
+            if not line:
+                continue
+            key = line.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped_lines.append(line)
+
+        if deduped_lines:
+            parts.append("\n".join(deduped_lines))
+
+        if not parts:
+            return fallback
+        return "\n".join(parts)
 
     @staticmethod
     @osint_cache.memoize(expire=86400)
@@ -878,7 +917,17 @@ class Researcher:
             insight = Researcher.extract_insight_with_llm(top_link, goal)
             if insight:
                 source = Researcher._source_name(top_link)
-                return f"Berdasarkan inisiatif strategis terbaru dari liputan {source}: {insight}"
+                summary = f"Berdasarkan inisiatif strategis terbaru dari liputan {source}: {insight}"
+                evidence_lines = [Researcher._format_source_evidence_item(filtered[0], fact_override=insight, index=1)]
+                corroborating = [
+                    line for line in (
+                        Researcher._format_source_evidence_item(item, index=idx)
+                        for idx, item in enumerate(filtered[1:3], start=2)
+                    )
+                    if line
+                ]
+                evidence_lines.extend(corroborating)
+                return Researcher._combine_summary_and_evidence(summary, evidence_lines, fallback="")
                 
         # Fallback to standard snippets
         cleaned = [i for i in filtered if len(re.findall(r"\S+", i.get('snippet',''))) > 5]
@@ -900,7 +949,21 @@ class Researcher:
             insight = Researcher.extract_insight_with_llm(top_link, goal)
             if insight:
                 source = Researcher._source_name(top_link)
-                return f"Kesiapan AI & Data {client_name} (via {source}): {insight}"
+                summary = f"Kesiapan AI & Data {client_name} (via {source}): {insight}"
+                evidence_lines = [Researcher._format_source_evidence_item(filtered[0], fact_override=insight, index=1)]
+                corroborating = [
+                    line for line in (
+                        Researcher._format_source_evidence_item(item, index=idx)
+                        for idx, item in enumerate(filtered[1:3], start=2)
+                    )
+                    if line
+                ]
+                evidence_lines.extend(corroborating)
+                return Researcher._combine_summary_and_evidence(
+                    summary,
+                    evidence_lines,
+                    fallback="Data publik terkait AI posture klien terbatas.",
+                )
                 
         return Researcher._format_evidence(filtered[:3], label="OSINT_AI", fallback="Data publik terkait AI posture klien terbatas.")
 
@@ -917,7 +980,9 @@ class Researcher:
             goal = f"What are the core professional values, mission statement, or unique working methodologies of {firm_name}?"
             insight = Researcher.extract_insight_with_llm(top_link, goal)
             if insight:
-                return f"Pendekatan dan Nilai Inti {firm_name}: {insight}"
+                summary = f"Pendekatan dan Nilai Inti {firm_name}: {insight}"
+                evidence_line = Researcher._format_source_evidence_item(filtered[0], fact_override=insight, index=1)
+                return Researcher._combine_summary_and_evidence(summary, [evidence_line], fallback=summary)
         
         return "Pendekatan menekankan delivery berkualitas tinggi, kolaborasi erat, dan hasil bisnis terukur."
 

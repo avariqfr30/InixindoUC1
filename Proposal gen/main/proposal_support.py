@@ -32,6 +32,108 @@ class ProposalSupportMixin:
             self._research_cache_times[key] = time.time()
         return dict(normalized)
 
+    @classmethod
+    def _research_bundle_signal_score(cls, bundle: Optional[Dict[str, str]]) -> Dict[str, int]:
+        candidate = dict(bundle or {})
+        evidence_fields = 0
+        substantial_fields = 0
+        anchor_fields = 0
+
+        for key in ("profile", "news", "track_record", "collaboration", "regulations", "ai_posture"):
+            text = str(candidate.get(key, "") or "").strip()
+            if not text:
+                continue
+
+            has_external_evidence = cls._has_external_evidence(text)
+            if has_external_evidence:
+                evidence_fields += 1
+
+            lowered = text.lower()
+            is_substantial = (
+                len(re.findall(r"\S+", text)) >= 10
+                and "data " in lowered
+                and "terbatas" not in lowered
+            ) or (
+                len(re.findall(r"\S+", text)) >= 14
+                and "terbatas" not in lowered
+                and "n.d." not in lowered
+            )
+            if is_substantial:
+                substantial_fields += 1
+
+            if key in {"news", "track_record", "profile"} and (has_external_evidence or is_substantial):
+                anchor_fields += 1
+
+        score = (evidence_fields * 3) + substantial_fields + anchor_fields
+        return {
+            "score": score,
+            "evidence_fields": evidence_fields,
+            "substantial_fields": substantial_fields,
+            "anchor_fields": anchor_fields,
+        }
+
+    @classmethod
+    def _research_bundle_is_weak(cls, bundle: Optional[Dict[str, str]]) -> bool:
+        stats = cls._research_bundle_signal_score(bundle)
+        return stats["score"] < 5 or stats["anchor_fields"] == 0
+
+    @classmethod
+    def _research_bundle_is_very_weak(cls, bundle: Optional[Dict[str, str]]) -> bool:
+        stats = cls._research_bundle_signal_score(bundle)
+        return stats["score"] < 2 or (
+            stats["evidence_fields"] == 0
+            and stats["substantial_fields"] == 0
+        )
+
+    def _schedule_research_bundle_refresh(
+        self,
+        base_client: str,
+        regulations: str,
+        include_collaboration: bool = True,
+        ai_context: str = "",
+        reason: str = "prefetch",
+    ) -> str:
+        key = self._cache_key("research", base_client, regulations, str(include_collaboration), ai_context)
+        with self._cache_lock:
+            if key in self._research_inflight:
+                logger.debug(f"Serper | Research bundle (warming) | client={base_client} | reason={reason}")
+                return "warming"
+            event = threading.Event()
+            self._research_inflight[key] = event
+
+        logger.info(f"Serper | Research bundle ({reason}) | client={base_client} | ai_context={bool(ai_context)}")
+
+        def worker() -> None:
+            try:
+                bundle = self._build_research_bundle_uncached(
+                    base_client=base_client,
+                    regulations=regulations,
+                    include_collaboration=include_collaboration,
+                    ai_context=ai_context,
+                )
+                self._store_research_bundle(key, bundle)
+                has_external_data = any(
+                    "Sumber eksternal" in str(v) or len(str(v)) > 50
+                    for v in (bundle or {}).values()
+                )
+                logger.info(
+                    f"Serper | Research bundle (completed) | client={base_client} | external_data={has_external_data}"
+                )
+            except Exception as e:
+                logger.warning(f"Serper | Research bundle failed | client={base_client} | error={str(e)[:80]}")
+            finally:
+                with self._cache_lock:
+                    inflight = self._research_inflight.pop(key, None)
+                    if inflight:
+                        inflight.set()
+
+        threading.Thread(
+            target=worker,
+            name=f"research-prefetch-{SchemaMapper.normalize_key(base_client) or 'client'}",
+            daemon=True
+        ).start()
+        return "warming"
+
     @staticmethod
     def _fallback_research_bundle(base_client: str, include_collaboration: bool, ai_mode: bool = False) -> Dict[str, str]:
         return {
@@ -2933,47 +3035,27 @@ class ProposalSupportMixin:
         ai_context: str = "",
     ) -> str:
         key = self._cache_key("research", base_client, regulations, str(include_collaboration), ai_context)
-        if self._get_cached_research_bundle(key):
-            logger.debug(f"Serper | Research bundle (cached) | client={base_client}")
-            return "cached"
-
-        with self._cache_lock:
-            if key in self._research_inflight:
-                logger.debug(f"Serper | Research bundle (warming) | client={base_client}")
-                return "warming"
-            event = threading.Event()
-            self._research_inflight[key] = event
-
-        logger.info(f"Serper | Research bundle (prefetching) | client={base_client} | ai_context={bool(ai_context)}")
-
-        def worker() -> None:
-            try:
-                bundle = self._build_research_bundle_uncached(
+        cached = self._get_cached_research_bundle(key)
+        if cached:
+            if self._research_bundle_is_weak(cached):
+                self._schedule_research_bundle_refresh(
                     base_client=base_client,
                     regulations=regulations,
                     include_collaboration=include_collaboration,
                     ai_context=ai_context,
+                    reason="refreshing_weak_cache",
                 )
-                self._store_research_bundle(key, bundle)
-                has_external_data = any(
-                    "Sumber eksternal" in str(v) or len(str(v)) > 50
-                    for v in (bundle or {}).values()
-                )
-                logger.info(f"Serper | Research bundle (completed) | client={base_client} | external_data={has_external_data}")
-            except Exception as e:
-                logger.warning(f"Serper | Research bundle failed | client={base_client} | error={str(e)[:80]}")
-            finally:
-                with self._cache_lock:
-                    inflight = self._research_inflight.pop(key, None)
-                    if inflight:
-                        inflight.set()
-
-        threading.Thread(
-            target=worker,
-            name=f"research-prefetch-{SchemaMapper.normalize_key(base_client) or 'client'}",
-            daemon=True
-        ).start()
-        return "warming"
+                logger.debug(f"Serper | Research bundle (cached_weak) | client={base_client}")
+                return "warming"
+            logger.debug(f"Serper | Research bundle (cached) | client={base_client}")
+            return "cached"
+        return self._schedule_research_bundle_refresh(
+            base_client=base_client,
+            regulations=regulations,
+            include_collaboration=include_collaboration,
+            ai_context=ai_context,
+            reason="prefetching",
+        )
 
     def _get_research_bundle(
         self,
@@ -2985,7 +3067,19 @@ class ProposalSupportMixin:
         key = self._cache_key("research", base_client, regulations, str(include_collaboration), ai_context)
         cached = self._get_cached_research_bundle(key)
         if cached:
-            return cached
+            if not self._research_bundle_is_weak(cached):
+                return cached
+            if not self._research_bundle_is_very_weak(cached):
+                self._schedule_research_bundle_refresh(
+                    base_client=base_client,
+                    regulations=regulations,
+                    include_collaboration=include_collaboration,
+                    ai_context=ai_context,
+                    reason="refreshing_weak_cache",
+                )
+                logger.info(f"Serper | Research bundle (using_cached_weak) | client={base_client}")
+                return cached
+            logger.info(f"Serper | Research bundle (bypass_very_weak_cache) | client={base_client}")
 
         leader = False
         event: Optional[threading.Event] = None
@@ -2999,7 +3093,7 @@ class ProposalSupportMixin:
         if not leader:
             event.wait(timeout=12)
             cached = self._get_cached_research_bundle(key)
-            if cached:
+            if cached and not self._research_bundle_is_very_weak(cached):
                 return cached
 
         try:
