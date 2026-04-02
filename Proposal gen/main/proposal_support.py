@@ -1,5 +1,7 @@
 """Proposal support logic: research assembly, structured chapters, quality checks, and acceptance."""
 
+import hashlib
+
 from .proposal_shared import *
 from .runtime_components import (
     ChartEngine,
@@ -14,22 +16,149 @@ from .runtime_components import (
 
 
 class ProposalSupportMixin:
-    def _get_cached_research_bundle(self, key: str) -> Optional[Dict[str, str]]:
+    RESEARCH_BUNDLE_TEXT_FIELDS = (
+        "profile",
+        "news",
+        "track_record",
+        "collaboration",
+        "regulations",
+        "ai_posture",
+    )
+
+    @staticmethod
+    def _research_bundle_cache_dir() -> Path:
+        cache_dir = Path(APP_STATE_DB_PATH).parent / ".research_bundle_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir
+
+    @classmethod
+    def _research_bundle_cache_path(cls, key: str) -> Path:
+        digest = hashlib.sha256(str(key or "").encode("utf-8")).hexdigest()
+        return cls._research_bundle_cache_dir() / f"{digest}.json"
+
+    @classmethod
+    def _build_structured_research_sources(cls, bundle: Optional[Dict[str, Any]]) -> Dict[str, List[Dict[str, str]]]:
+        candidate = dict(bundle or {})
+        structured: Dict[str, List[Dict[str, str]]] = {}
+        for field in cls.RESEARCH_BUNDLE_TEXT_FIELDS:
+            text = str(candidate.get(field, "") or "").strip()
+            if not text:
+                continue
+            facts = cls._extract_osint_facts(text, max_items=4)
+            if facts:
+                structured[field] = facts
+        return structured
+
+    @classmethod
+    def _normalize_research_bundle(cls, bundle: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        normalized = dict(bundle or {})
+        structured = normalized.get("structured_sources")
+        if not isinstance(structured, dict):
+            structured = {}
+        merged_structured = cls._build_structured_research_sources(normalized)
+        for field, items in merged_structured.items():
+            if field not in structured or not structured.get(field):
+                structured[field] = items
+        normalized["structured_sources"] = {
+            str(field): [
+                {
+                    "fact": str(item.get("fact", "") or "").strip(),
+                    "title": str(item.get("title", "") or "").strip(),
+                    "url": str(item.get("url", "") or "").strip(),
+                    "citation": str(item.get("citation", "") or "").strip(),
+                }
+                for item in (items or [])
+                if str(item.get("fact", "") or "").strip()
+            ]
+            for field, items in structured.items()
+            if items
+        }
+        return normalized
+
+    @classmethod
+    def _load_persisted_research_bundle(cls, key: str) -> Optional[Dict[str, Any]]:
+        path = cls._research_bundle_cache_path(key)
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            try:
+                path.unlink()
+            except Exception:
+                pass
+            return None
+
+        stored_at = float((payload or {}).get("stored_at", 0.0) or 0.0)
+        if not stored_at or (time.time() - stored_at) > RESEARCH_CACHE_TTL_SECONDS:
+            try:
+                path.unlink()
+            except Exception:
+                pass
+            return None
+
+        bundle = (payload or {}).get("bundle", {})
+        if not isinstance(bundle, dict):
+            return None
+        return cls._normalize_research_bundle(bundle)
+
+    @classmethod
+    def _persist_research_bundle(cls, key: str, bundle: Dict[str, Any]) -> None:
+        path = cls._research_bundle_cache_path(key)
+        payload = {
+            "stored_at": time.time(),
+            "bundle": cls._normalize_research_bundle(bundle),
+        }
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        tmp_path.replace(path)
+
+    @classmethod
+    def _research_bundle_sources(cls, research_bundle: Optional[Dict[str, Any]], field: str, max_items: int = 3) -> List[Dict[str, str]]:
+        bundle = dict(research_bundle or {})
+        structured = bundle.get("structured_sources")
+        if isinstance(structured, dict):
+            items = structured.get(field) or []
+            cleaned = [
+                {
+                    "fact": str(item.get("fact", "") or "").strip(),
+                    "title": str(item.get("title", "") or "").strip(),
+                    "url": str(item.get("url", "") or "").strip(),
+                    "citation": str(item.get("citation", "") or "").strip(),
+                }
+                for item in items
+                if str(item.get("fact", "") or "").strip()
+            ]
+            if cleaned:
+                return cleaned[:max_items]
+        text = str(bundle.get(field, "") or "").strip()
+        if not text:
+            return []
+        return cls._extract_osint_facts(text, max_items=max_items)
+
+    def _get_cached_research_bundle(self, key: str) -> Optional[Dict[str, Any]]:
         with self._cache_lock:
             cached = self._research_cache.get(key)
             cached_at = float(self._research_cache_times.get(key, 0.0) or 0.0)
             if cached and cached_at and (time.time() - cached_at) <= RESEARCH_CACHE_TTL_SECONDS:
-                return dict(cached)
+                return self._normalize_research_bundle(cached)
             if key in self._research_cache:
                 self._research_cache.pop(key, None)
                 self._research_cache_times.pop(key, None)
+        persisted = self._load_persisted_research_bundle(key)
+        if not persisted:
             return None
+        with self._cache_lock:
+            self._cache_put(self._research_cache, key, persisted, max_size=96)
+            self._research_cache_times[key] = time.time()
+        return dict(persisted)
 
-    def _store_research_bundle(self, key: str, bundle: Dict[str, str]) -> Dict[str, str]:
-        normalized = dict(bundle or {})
+    def _store_research_bundle(self, key: str, bundle: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = self._normalize_research_bundle(bundle)
         with self._cache_lock:
             self._cache_put(self._research_cache, key, normalized, max_size=96)
             self._research_cache_times[key] = time.time()
+        self._persist_research_bundle(key, normalized)
         return dict(normalized)
 
     @classmethod
@@ -623,8 +752,8 @@ class ProposalSupportMixin:
                 else "Gunakan narasi kemitraan baru. Jangan klaim pernah bekerja sama tanpa bukti publik."
             )
 
-        news_facts = cls._extract_osint_facts(news, max_items=2)
-        track_facts = cls._extract_osint_facts(track_record, max_items=2)
+        news_facts = cls._research_bundle_sources(research_bundle, "news", max_items=2)
+        track_facts = cls._research_bundle_sources(research_bundle, "track_record", max_items=2)
         initiative_facts: List[Dict[str, str]] = []
         seen_citations: Set[str] = set()
         for item in news_facts + track_facts:
@@ -851,11 +980,27 @@ class ProposalSupportMixin:
         return citations
 
     @classmethod
-    def _collect_allowed_external_citations(cls, research_bundle: Dict[str, str]) -> Set[str]:
+    def _collect_allowed_external_citations(cls, research_bundle: Dict[str, Any]) -> Set[str]:
         if not research_bundle:
             return set()
-        merged = "\n".join([str(value) for value in research_bundle.values()])
-        return set(cls._extract_external_citations(merged))
+        merged = "\n".join([
+            str(research_bundle.get(field, "") or "")
+            for field in cls.RESEARCH_BUNDLE_TEXT_FIELDS
+        ])
+        citations = set(cls._extract_external_citations(merged))
+        structured = research_bundle.get("structured_sources")
+        if isinstance(structured, dict):
+            for items in structured.values():
+                for item in (items or []):
+                    raw_citation = str(item.get("citation", "") or "").strip()
+                    match = re.search(
+                        r"\(([A-Za-z0-9.-]+\.[A-Za-z]{2,}),\s*(\d{4}|n\.d\.)\)",
+                        raw_citation,
+                        flags=re.IGNORECASE,
+                    )
+                    if match:
+                        citations.add(cls._normalize_external_citation(match.group(1), match.group(2)))
+        return citations
 
     @classmethod
     def _clean_external_citations(cls, content: str, allowed_external_citations: Set[str]) -> str:
