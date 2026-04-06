@@ -1384,6 +1384,17 @@ class AppStateStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_users (
+                    id TEXT PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    username_key TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )
+                """
+            )
             existing_columns = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(proposal_history)").fetchall()
@@ -1479,6 +1490,62 @@ class AppStateStore:
                 (key, str(value or "")),
             )
             conn.commit()
+
+    @staticmethod
+    def _normalize_username(username: str) -> str:
+        normalized = re.sub(r"\s+", " ", str(username or "").strip())
+        return normalized
+
+    @classmethod
+    def _username_key(cls, username: str) -> str:
+        return SchemaMapper.normalize_key(cls._normalize_username(username))
+
+    def get_user(self, username: str) -> Optional[Dict[str, Any]]:
+        username_key = self._username_key(username)
+        if not username_key:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, username, password_hash, created_at
+                FROM app_users
+                WHERE username_key = ?
+                """,
+                (username_key,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "username": row["username"],
+            "password_hash": row["password_hash"],
+            "created_at": float(row["created_at"] or 0.0),
+        }
+
+    def create_user(self, username: str, password_hash: str) -> bool:
+        normalized_username = self._normalize_username(username)
+        username_key = self._username_key(normalized_username)
+        if not normalized_username or not username_key or not password_hash:
+            return False
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO app_users(id, username, username_key, password_hash, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        uuid.uuid4().hex,
+                        normalized_username,
+                        username_key,
+                        str(password_hash),
+                        time.time(),
+                    ),
+                )
+                conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
 
     @staticmethod
     def _normalize_document_type(value: str) -> str:

@@ -1,5 +1,6 @@
 """Flask entrypoint for the proposal generator app."""
 import concurrent.futures
+from functools import wraps
 import hashlib
 import io
 import json
@@ -11,9 +12,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
 from flask_cors import CORS
 import requests
+from werkzeug.security import check_password_hash, generate_password_hash
 
 try:
     from waitress import serve as waitress_serve
@@ -23,6 +25,7 @@ except Exception:  # pragma: no cover - optional local server dependency
 from .config import (
     APP_HOST,
     APP_PORT,
+    APP_SECRET_KEY,
     DB_URI,
     GENERATION_PROFILE,
     JOB_POLL_INTERVAL_MS,
@@ -33,6 +36,7 @@ from .config import (
     PROJECT_CSV_PATH,
     PROJECT_DB_PATH,
     PROPOSAL_MODES,
+    SESSION_COOKIE_SECURE,
     SMART_SUGGESTIONS,
 )
 from .core import FinancialAnalyzer, KnowledgeBase, ProposalGenerator
@@ -63,6 +67,12 @@ TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
 CORS(app)
+app.config.update(
+    SECRET_KEY=APP_SECRET_KEY,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=SESSION_COOKIE_SECURE,
+)
 
 knowledge_base = KnowledgeBase(DB_URI)
 proposal_generator = ProposalGenerator(knowledge_base)
@@ -285,6 +295,67 @@ generation_queue = GenerationQueue(
     retention_seconds=JOB_RETENTION_SECONDS,
 )
 
+PUBLIC_ENDPOINTS = {
+    "auth_page",
+    "login",
+    "signup",
+    "logout",
+    "health",
+    "ready",
+    "static",
+}
+
+
+def _current_username() -> str:
+    return str(session.get("auth_username") or "").strip()
+
+
+def _is_authenticated() -> bool:
+    return bool(_current_username())
+
+
+def _is_api_request() -> bool:
+    return request.path.startswith("/api/") or request.path == "/generate"
+
+
+def _login_redirect_target() -> str:
+    next_target = str(request.args.get("next") or "").strip()
+    if next_target.startswith("/") and not next_target.startswith("//"):
+        return next_target
+    return url_for("home")
+
+
+def _set_authenticated_user(username: str) -> None:
+    session["auth_username"] = str(username or "").strip()
+    session.permanent = True
+
+
+def _clear_authenticated_user() -> None:
+    session.pop("auth_username", None)
+
+
+def login_required(view_func):
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if _is_authenticated():
+            return view_func(*args, **kwargs)
+        if _is_api_request():
+            return jsonify({"error": "Authentication required."}), 401
+        return redirect(url_for("auth_page", next=request.full_path if request.query_string else request.path))
+    return wrapper
+
+
+@app.before_request
+def _enforce_authentication():
+    endpoint = request.endpoint or ""
+    if endpoint in PUBLIC_ENDPOINTS:
+        return None
+    if _is_authenticated():
+        return None
+    if _is_api_request():
+        return jsonify({"error": "Authentication required."}), 401
+    return redirect(url_for("auth_page", next=request.full_path if request.query_string else request.path))
+
 
 def _normalize_client_name(raw_name: str) -> str:
     return re.sub(r'\b(Cabang|Branch|Tbk)\b.*$|^(PT\.|CV\.)', '', raw_name or '', flags=re.IGNORECASE).strip()
@@ -312,8 +383,73 @@ def _warm_request_context(data: Dict[str, Any]) -> str:
 
 
 @app.route('/')
+@login_required
 def home():
-    return render_template('index.html')
+    return render_template('index.html', current_user=_current_username())
+
+
+@app.route('/auth')
+def auth_page():
+    if _is_authenticated():
+        return redirect(_login_redirect_target())
+    return render_template(
+        'auth.html',
+        login_error=request.args.get("login_error", "").strip(),
+        signup_error=request.args.get("signup_error", "").strip(),
+        signup_success=request.args.get("signup_success", "").strip(),
+        next_target=_login_redirect_target(),
+    )
+
+
+@app.route('/login', methods=['POST'])
+def login():
+    username = str(request.form.get("username") or "").strip()
+    password = str(request.form.get("password") or "")
+    next_target = str(request.form.get("next") or "").strip()
+    if not username or not password:
+        return redirect(url_for("auth_page", login_error="Username dan password wajib diisi.", next=next_target))
+
+    user = app_state_store.get_user(username)
+    password_hash = str((user or {}).get("password_hash") or "")
+    if not user or not password_hash or not check_password_hash(password_hash, password):
+        return redirect(url_for("auth_page", login_error="Username atau password tidak cocok.", next=next_target))
+
+    _set_authenticated_user(str(user.get("username") or username))
+    if next_target.startswith("/") and not next_target.startswith("//"):
+        return redirect(next_target)
+    return redirect(url_for("home"))
+
+
+@app.route('/signup', methods=['POST'])
+def signup():
+    username = str(request.form.get("username") or "").strip()
+    password = str(request.form.get("password") or "")
+    confirm_password = str(request.form.get("confirm_password") or "")
+    next_target = str(request.form.get("next") or "").strip()
+
+    if not username or not password:
+        return redirect(url_for("auth_page", signup_error="Username dan password wajib diisi.", next=next_target))
+    if len(username) < 3:
+        return redirect(url_for("auth_page", signup_error="Username minimal 3 karakter.", next=next_target))
+    if len(password) < 6:
+        return redirect(url_for("auth_page", signup_error="Password minimal 6 karakter.", next=next_target))
+    if password != confirm_password:
+        return redirect(url_for("auth_page", signup_error="Konfirmasi password tidak cocok.", next=next_target))
+
+    created = app_state_store.create_user(
+        username=username,
+        password_hash=generate_password_hash(password, method="pbkdf2:sha256"),
+    )
+    if not created:
+        return redirect(url_for("auth_page", signup_error="Username sudah dipakai. Gunakan username lain.", next=next_target))
+
+    return redirect(url_for("auth_page", signup_success="Akun berhasil dibuat. Silakan login.", next=next_target))
+
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    _clear_authenticated_user()
+    return redirect(url_for("auth_page"))
 
 
 @app.route('/health')

@@ -11,6 +11,8 @@
         .hidden { display: none !important; }
         .header-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
         .header-actions, .modal-actions, .history-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .user-chip { display: inline-flex; align-items: center; padding: 8px 12px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 0.84rem; font-weight: 600; border: 1px solid #bfdbfe; }
+        .logout-form { margin: 0; }
         h2 { color: #0f172a; margin: 0 0 5px 0; font-size: 1.6rem; }
         p.sub { color: #64748b; margin: 0 0 20px 0; font-size: 0.95rem; }
         label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; color: #475569;}
@@ -93,8 +95,12 @@
                     <p class="sub">Engine Requirement & Discovery</p>
                 </div>
                 <div class="header-actions">
+                    <span class="user-chip">Login sebagai {{ current_user or 'User' }}</span>
                     <button type="button" id="btn-history" class="secondary">Riwayat</button>
                     <button type="button" id="btn-settings" class="secondary">Pengaturan</button>
+                    <form method="POST" action="/logout" class="logout-form">
+                        <button type="submit" class="secondary">Logout</button>
+                    </form>
                 </div>
             </div>
             

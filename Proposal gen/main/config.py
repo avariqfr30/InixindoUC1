@@ -42,6 +42,8 @@ JOB_POLL_INTERVAL_MS = max(1000, int(os.getenv("JOB_POLL_INTERVAL_MS", "2000")))
 RESEARCH_CACHE_TTL_SECONDS = max(300, int(os.getenv("RESEARCH_CACHE_TTL_SECONDS", "1800")))
 APP_HOST = os.getenv("APP_HOST", "0.0.0.0").strip() or "0.0.0.0"
 APP_PORT = max(1, int(os.getenv("APP_PORT", "5500")))
+APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "proposal-gen-dev-secret-change-me").strip() or "proposal-gen-dev-secret-change-me"
+SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 # Document length guardrails.
 MAX_PROPOSAL_PAGES = 25
