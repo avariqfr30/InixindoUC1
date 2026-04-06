@@ -92,7 +92,7 @@
             <div class="header-bar">
                 <div>
                     <h2>Proposal Generator</h2>
-                    <p class="sub">Engine Requirement & Discovery</p>
+                    <p class="sub">Engine Requirement &amp; Discovery</p>
                 </div>
                 <div class="header-actions">
                     <span class="user-chip">Masuk sebagai {{ current_user or 'Pengguna' }}</span>
@@ -160,7 +160,7 @@
                 </div>
 
                 <div class="finance-panel">
-                    <button type="button" id="btn-analyze" class="secondary" style="font-size: 0.85rem;" disabled>📊 Auto-Analisis Finansial & Opsi Harga</button>
+                    <button type="button" id="btn-analyze" class="secondary" style="font-size: 0.85rem;" disabled>📊 Auto-Analisis Finansial &amp; Opsi Harga</button>
                     <div id="finance-result" class="hidden" style="margin-top: 10px; font-size: 0.85rem;">
                         <p id="finance-summary" style="margin: 0 0 10px 0; font-style: italic; color: #475569;"></p>
                         <div id="finance-options"></div>
@@ -232,7 +232,7 @@
                 <div class="template-status">Belum ada file pendukung portofolio yang diunggah.</div>
             </div>
 
-            <label for="settings-credentials">Kapabilitas & Sertifikasi Internal</label>
+            <label for="settings-credentials">Kapabilitas &amp; Sertifikasi Internal</label>
             <textarea id="settings-credentials" class="rich-editor-source" placeholder="Contoh: ISO 27001 | COBIT | IT Governance | Change Management | Enterprise Architecture"></textarea>
             <label for="settings-credential-files">File Pendukung Kapabilitas & Sertifikasi</label>
             <div class="upload-row">
@@ -664,15 +664,15 @@
                 }
                 ui.historyList.innerHTML = items.map(item => `
                     <div class="history-item">
-                        <h4>${item.client}</h4>
+                        <h4>${escapeHtml(item.client)}</h4>
                         <div class="history-meta">
-                            <div><strong>Waktu:</strong> ${item.finished_at_label}</div>
-                            <div><strong>Mode:</strong> ${item.proposal_mode} | <strong>Layanan:</strong> ${item.service_type} | <strong>Jenis Proyek:</strong> ${item.project_type}</div>
-                            <div><strong>Inisiatif:</strong> ${item.project}</div>
+                            <div><strong>Waktu:</strong> ${escapeHtml(item.finished_at_label)}</div>
+                            <div><strong>Mode:</strong> ${escapeHtml(item.proposal_mode)} | <strong>Layanan:</strong> ${escapeHtml(item.service_type)} | <strong>Jenis Proyek:</strong> ${escapeHtml(item.project_type)}</div>
+                            <div><strong>Inisiatif:</strong> ${escapeHtml(item.project)}</div>
                         </div>
                         <div class="history-actions">
-                            ${item.can_reuse ? `<button type="button" class="secondary" onclick="reuseHistory('${item.id}')">Gunakan Lagi</button>` : ''}
-                            <button type="button" class="secondary" onclick="downloadHistory('${item.id}')">Unduh</button>
+                            ${item.can_reuse ? `<button type="button" class="secondary" data-history-reuse="${escapeHtml(item.id)}">Gunakan Lagi</button>` : ''}
+                            <button type="button" class="secondary" data-history-download="${escapeHtml(item.id)}">Unduh</button>
                         </div>
                     </div>
                 `).join('');
@@ -691,7 +691,7 @@
         function renderSupportingDocuments(target, items, emptyMessage) {
             const docs = Array.isArray(items) ? items : [];
             if (!docs.length) {
-                target.innerHTML = `<div class="template-status">${emptyMessage}</div>`;
+                target.innerHTML = `<div class="template-status">${escapeHtml(emptyMessage)}</div>`;
                 return;
             }
             target.innerHTML = docs.map(item => `
@@ -703,7 +703,7 @@
                             ${item.has_text ? ' · teks berhasil dibaca' : ' · teks belum berhasil diekstrak'}
                         </div>
                     </div>
-                    <button type="button" class="secondary" onclick="removeSupportingDocument('${item.id}')">Hapus</button>
+                    <button type="button" class="secondary" data-doc-remove="${escapeHtml(item.id)}">Hapus</button>
                 </div>
             `).join('');
         }
@@ -789,6 +789,27 @@
         window.reuseHistory = reuseHistory;
         window.downloadHistory = downloadHistory;
         window.removeSupportingDocument = removeSupportingDocument;
+
+        ui.historyList.addEventListener('click', (event) => {
+            const reuseButton = event.target.closest('[data-history-reuse]');
+            if (reuseButton) {
+                reuseHistory(reuseButton.dataset.historyReuse);
+                return;
+            }
+            const downloadButton = event.target.closest('[data-history-download]');
+            if (downloadButton) {
+                downloadHistory(downloadButton.dataset.historyDownload);
+            }
+        });
+
+        function handleSupportingDocumentClick(event) {
+            const removeButton = event.target.closest('[data-doc-remove]');
+            if (!removeButton) return;
+            removeSupportingDocument(removeButton.dataset.docRemove);
+        }
+
+        ui.portfolioDocList.addEventListener('click', handleSupportingDocumentClick);
+        ui.credentialDocList.addEventListener('click', handleSupportingDocumentClick);
 
         ui.selPerusahaan.addEventListener('change', () => {
             ui.containerDynamic.classList.remove('hidden');
@@ -914,9 +935,9 @@
                 
                 ui.financeSummary.innerText = data.analysis;
                 ui.financeOptions.innerHTML = data.options.map(opt => `
-                    <div class="finance-tier" onclick="document.getElementById('input-biaya').value='${opt.price}'; document.getElementById('input-biaya').dispatchEvent(new Event('input'));">
-                        <strong>${opt.tier}</strong>
-                        <span>${opt.price}</span>
+                    <div class="finance-tier" data-price="${escapeHtml(opt.price)}">
+                        <strong>${escapeHtml(opt.tier)}</strong>
+                        <span>${escapeHtml(opt.price)}</span>
                     </div>
                 `).join('');
                 
@@ -962,6 +983,13 @@
             clearTimeout(prefetchTimer);
             prefetchTimer = setTimeout(() => prefetchContext(force), 350);
         }
+
+        ui.financeOptions.addEventListener('click', (event) => {
+            const tier = event.target.closest('[data-price]');
+            if (!tier) return;
+            ui.inpBiaya.value = tier.dataset.price || '';
+            ui.inpBiaya.dispatchEvent(new Event('input'));
+        });
 
         const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -1034,9 +1062,9 @@
                 const data = await res.json();
                 ui.previewContent.innerHTML = data.outline.map(ch => `
                     <div class="preview-item">
-                        <h4>${ch.title}</h4>
-                        <p>${ch.preview}</p>
-                        <ul>${ch.subsections.map(s => `<li>${s}</li>`).join('')}</ul>
+                        <h4>${escapeHtml(ch.title)}</h4>
+                        <p>${escapeHtml(ch.preview)}</p>
+                        <ul>${ch.subsections.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ul>
                     </div>
                 `).join('');
                 ui.previewPanel.classList.remove('hidden');

@@ -281,13 +281,13 @@
             </div>
         </section>
 
-        <section class="auth-panel">
+        <section class="auth-panel" data-initial-tab="{{ 'signup-form' if signup_error else 'login-form' }}">
             <div class="tab-switcher" role="tablist" aria-label="Pilihan akses">
-                <button type="button" class="tab-button" id="tab-login" data-target="login-form" aria-controls="login-form">Masuk</button>
-                <button type="button" class="tab-button" id="tab-signup" data-target="signup-form" aria-controls="signup-form">Daftar</button>
+                <button type="button" class="tab-button" id="tab-login" role="tab" data-target="login-form" aria-controls="login-form" aria-selected="false">Masuk</button>
+                <button type="button" class="tab-button" id="tab-signup" role="tab" data-target="signup-form" aria-controls="signup-form" aria-selected="false">Daftar</button>
             </div>
 
-            <form method="POST" action="/login" id="login-form" class="auth-form">
+            <form method="POST" action="/login" id="login-form" class="auth-form" role="tabpanel" aria-labelledby="tab-login">
                 <input type="hidden" name="next" value="{{ next_target }}">
                 <h2 class="panel-title">Masuk</h2>
                 <p class="panel-subtitle">Masukkan username dan password yang sudah terdaftar untuk melanjutkan ke aplikasi.</p>
@@ -313,7 +313,7 @@
                 </p>
             </form>
 
-            <form method="POST" action="/signup" id="signup-form" class="auth-form">
+            <form method="POST" action="/signup" id="signup-form" class="auth-form" role="tabpanel" aria-labelledby="tab-signup">
                 <input type="hidden" name="next" value="{{ next_target }}">
                 <h2 class="panel-title">Buat Akun</h2>
                 <p class="panel-subtitle">Buat username dan password internal sederhana agar bisa mengakses aplikasi dengan aman.</p>
@@ -343,8 +343,9 @@
         </section>
     </div>
 
-    <script>
+        <script>
         (function () {
+            const authPanel = document.querySelector('.auth-panel');
             const tabButtons = Array.from(document.querySelectorAll('.tab-button'));
             const forms = {
                 'login-form': document.getElementById('login-form'),
@@ -354,10 +355,14 @@
             function activateTab(targetId) {
                 Object.entries(forms).forEach(([formId, formEl]) => {
                     if (!formEl) return;
-                    formEl.classList.toggle('active', formId === targetId);
+                    const isActive = formId === targetId;
+                    formEl.classList.toggle('active', isActive);
+                    formEl.hidden = !isActive;
                 });
                 tabButtons.forEach((button) => {
-                    button.classList.toggle('active', button.dataset.target === targetId);
+                    const isActive = button.dataset.target === targetId;
+                    button.classList.toggle('active', isActive);
+                    button.setAttribute('aria-selected', String(isActive));
                 });
             }
 
@@ -369,7 +374,7 @@
                 button.addEventListener('click', () => activateTab(button.getAttribute('data-show-tab')));
             });
 
-            const initialTab = {{ ('signup-form' if signup_error else 'login-form') | tojson }};
+            const initialTab = authPanel?.dataset.initialTab || 'login-form';
             activateTab(initialTab);
         })();
     </script>
