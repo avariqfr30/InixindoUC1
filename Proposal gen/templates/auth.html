@@ -369,7 +369,7 @@
                 button.addEventListener('click', () => activateTab(button.getAttribute('data-show-tab')));
             });
 
-            const initialTab = {{ '\"signup-form\"' if signup_error else '\"login-form\"' }};
+            const initialTab = {{ ('signup-form' if signup_error else 'login-form') | tojson }};
             activateTab(initialTab);
         })();
     </script>

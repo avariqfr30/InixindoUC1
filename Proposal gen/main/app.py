@@ -318,20 +318,25 @@ def _is_api_request() -> bool:
     return request.path.startswith("/api/") or request.path == "/generate"
 
 
-def _login_redirect_target() -> str:
-    next_target = str(request.args.get("next") or "").strip()
+def _safe_next_target(raw_target: str) -> str:
+    next_target = str(raw_target or "").strip()
     if next_target.startswith("/") and not next_target.startswith("//"):
         return next_target
     return url_for("home")
 
 
+def _login_redirect_target() -> str:
+    return _safe_next_target(request.args.get("next"))
+
+
 def _set_authenticated_user(username: str) -> None:
+    session.clear()
     session["auth_username"] = str(username or "").strip()
     session.permanent = True
 
 
 def _clear_authenticated_user() -> None:
-    session.pop("auth_username", None)
+    session.clear()
 
 
 def login_required(view_func):
@@ -355,6 +360,24 @@ def _enforce_authentication():
     if _is_api_request():
         return jsonify({"error": "Authentication required."}), 401
     return redirect(url_for("auth_page", next=request.full_path if request.query_string else request.path))
+
+
+@app.after_request
+def _apply_auth_cache_headers(response):
+    path = request.path or ""
+    if (
+        path == "/"
+        or path == "/auth"
+        or path == "/login"
+        or path == "/signup"
+        or path == "/logout"
+        or path == "/generate"
+        or path.startswith("/api/")
+    ):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 
 def _normalize_client_name(raw_name: str) -> str:
@@ -405,7 +428,7 @@ def auth_page():
 def login():
     username = str(request.form.get("username") or "").strip()
     password = str(request.form.get("password") or "")
-    next_target = str(request.form.get("next") or "").strip()
+    next_target = _safe_next_target(request.form.get("next"))
     if not username or not password:
         return redirect(url_for("auth_page", login_error="Username dan password wajib diisi.", next=next_target))
 
@@ -415,9 +438,7 @@ def login():
         return redirect(url_for("auth_page", login_error="Username atau password tidak cocok.", next=next_target))
 
     _set_authenticated_user(str(user.get("username") or username))
-    if next_target.startswith("/") and not next_target.startswith("//"):
-        return redirect(next_target)
-    return redirect(url_for("home"))
+    return redirect(next_target)
 
 
 @app.route('/signup', methods=['POST'])
@@ -425,7 +446,7 @@ def signup():
     username = str(request.form.get("username") or "").strip()
     password = str(request.form.get("password") or "")
     confirm_password = str(request.form.get("confirm_password") or "")
-    next_target = str(request.form.get("next") or "").strip()
+    next_target = _safe_next_target(request.form.get("next"))
 
     if not username or not password:
         return redirect(url_for("auth_page", signup_error="Username dan password wajib diisi.", next=next_target))
