@@ -3,149 +3,266 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login Proposal Generator</title>
+    <title>Akses Proposal Generator</title>
     <style>
+        :root {
+            --bg-a: #fff8f7;
+            --bg-b: #fff3f1;
+            --card: #fffdfd;
+            --line: #ecd8d4;
+            --text: #1f2937;
+            --muted: #667085;
+            --hero-a: #a12b20;
+            --hero-b: #d13b2c;
+            --hero-c: #e86b54;
+            --action: #cc301f;
+            --action-hover: #b92818;
+            --soft: #f6f7fb;
+            --soft-line: #dbe1ea;
+            --error-bg: #fff1f2;
+            --error-line: #fecdd3;
+            --error-text: #b42318;
+            --success-bg: #ecfdf3;
+            --success-line: #abefc6;
+            --success-text: #067647;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             margin: 0;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 24px;
-            background: linear-gradient(135deg, #e0f2fe 0%, #f8fafc 45%, #dbeafe 100%);
-            color: #1e293b;
-            font-family: Georgia, "Times New Roman", serif;
+            padding: 28px;
+            background:
+                radial-gradient(circle at top left, rgba(255, 255, 255, 0.98) 0%, rgba(255, 247, 245, 0.95) 38%, rgba(255, 239, 236, 0.92) 100%),
+                linear-gradient(135deg, var(--bg-a) 0%, var(--bg-b) 100%);
+            color: var(--text);
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
         }
+
         .auth-shell {
-            width: min(860px, 100%);
+            width: min(980px, 100%);
             display: grid;
-            grid-template-columns: 1.05fr 0.95fr;
-            background: #ffffff;
-            border: 1px solid #dbeafe;
-            border-radius: 18px;
+            grid-template-columns: 0.92fr 1fr;
+            border-radius: 28px;
             overflow: hidden;
-            box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+            background: var(--card);
+            border: 1px solid rgba(236, 216, 212, 0.9);
+            box-shadow: 0 28px 70px rgba(158, 62, 46, 0.12);
         }
+
         .auth-hero {
-            padding: 42px 36px;
-            background: radial-gradient(circle at top left, #eff6ff 0%, #dbeafe 42%, #bfdbfe 100%);
-            border-right: 1px solid #bfdbfe;
+            padding: 40px 30px 34px 30px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 560px;
+            background:
+                radial-gradient(circle at bottom center, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0) 50%),
+                linear-gradient(180deg, var(--hero-a) 0%, var(--hero-b) 58%, var(--hero-c) 100%);
+            color: #fff8f6;
         }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            width: fit-content;
+            padding: 9px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.1);
+            font-size: 0.84rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+
         .auth-hero h1 {
-            margin: 0 0 14px 0;
-            font-size: 2rem;
-            line-height: 1.15;
-            color: #0f172a;
+            margin: 18px 0 0 0;
+            font-size: 2.3rem;
+            line-height: 1.08;
+            letter-spacing: -0.03em;
+            max-width: 320px;
         }
-        .auth-hero p {
-            margin: 0 0 16px 0;
+
+        .hero-copy {
+            max-width: 320px;
+            font-size: 1rem;
             line-height: 1.6;
-            color: #334155;
-            font-size: 0.98rem;
+            color: rgba(255, 248, 246, 0.96);
         }
-        .auth-notes {
-            margin: 24px 0 0 0;
-            padding: 0;
-            list-style: none;
-            display: grid;
-            gap: 12px;
+
+        .hero-copy p {
+            margin: 0 0 12px 0;
         }
-        .auth-notes li {
-            padding: 12px 14px;
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.72);
-            border: 1px solid rgba(191, 219, 254, 0.95);
-            font-size: 0.92rem;
-            line-height: 1.45;
+
+        .auth-panel {
+            padding: 34px 30px;
+            background: rgba(255, 255, 255, 0.94);
         }
-        .auth-forms {
-            padding: 32px 28px;
-            display: grid;
-            gap: 18px;
-            align-content: start;
-            background: #ffffff;
+
+        .tab-switcher {
+            display: inline-flex;
+            padding: 5px;
+            border-radius: 999px;
+            border: 1px solid var(--soft-line);
+            background: var(--soft);
+            margin-bottom: 22px;
         }
-        .panel {
-            border: 1px solid #e2e8f0;
-            border-radius: 14px;
-            padding: 18px;
-            background: #f8fafc;
+
+        .tab-button {
+            border: none;
+            background: transparent;
+            color: #475467;
+            font-weight: 700;
+            padding: 10px 18px;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: 0.18s ease;
+            font-size: 0.94rem;
         }
-        .panel h2 {
+
+        .tab-button.active {
+            background: var(--action);
+            color: #ffffff;
+            box-shadow: 0 10px 22px rgba(204, 48, 31, 0.18);
+        }
+
+        .panel-title {
             margin: 0 0 6px 0;
-            font-size: 1.1rem;
-            color: #0f172a;
+            font-size: 2rem;
+            line-height: 1.05;
+            letter-spacing: -0.03em;
+            color: #101828;
         }
-        .panel p {
+
+        .panel-subtitle {
+            margin: 0 0 18px 0;
+            color: var(--muted);
+            font-size: 1rem;
+            line-height: 1.5;
+            max-width: 390px;
+        }
+
+        .notice {
             margin: 0 0 14px 0;
-            color: #475569;
+            padding: 11px 13px;
+            border-radius: 14px;
             font-size: 0.9rem;
             line-height: 1.45;
+            border: 1px solid transparent;
         }
-        .notice {
-            margin: 0 0 12px 0;
-            padding: 10px 12px;
-            border-radius: 10px;
-            font-size: 0.88rem;
-            line-height: 1.4;
-        }
+
         .notice.error {
-            background: #fef2f2;
-            color: #991b1b;
-            border: 1px solid #fecaca;
+            background: var(--error-bg);
+            color: var(--error-text);
+            border-color: var(--error-line);
         }
+
         .notice.success {
-            background: #ecfdf5;
-            color: #166534;
-            border: 1px solid #bbf7d0;
+            background: var(--success-bg);
+            color: var(--success-text);
+            border-color: var(--success-line);
         }
+
+        .auth-form {
+            display: none;
+        }
+
+        .auth-form.active {
+            display: block;
+        }
+
         label {
             display: block;
-            margin-bottom: 6px;
+            margin-bottom: 7px;
+            font-size: 0.92rem;
             font-weight: 700;
-            font-size: 0.88rem;
-            color: #334155;
+            color: #344054;
         }
-        input, button {
-            width: 100%;
-            box-sizing: border-box;
-            border-radius: 10px;
-            font-size: 0.95rem;
-        }
+
         input {
-            padding: 11px 12px;
-            border: 1px solid #cbd5e1;
-            margin-bottom: 12px;
+            width: 100%;
+            padding: 12px 14px;
+            margin-bottom: 9px;
+            border-radius: 14px;
+            border: 1px solid #d0d5dd;
             background: #ffffff;
+            color: #101828;
+            font-size: 0.96rem;
+            transition: border-color 0.16s ease, box-shadow 0.16s ease;
         }
+
         input:focus {
             outline: none;
-            border-color: #2563eb;
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+            border-color: #d74632;
+            box-shadow: 0 0 0 4px rgba(215, 70, 50, 0.11);
         }
-        button {
+
+        .field-note {
+            margin: -2px 0 14px 0;
+            color: #667085;
+            font-size: 0.83rem;
+            line-height: 1.35;
+        }
+
+        .submit-button {
+            width: 100%;
+            margin-top: 6px;
             border: none;
-            padding: 11px 14px;
-            background: #1d4ed8;
+            border-radius: 14px;
+            padding: 13px 16px;
+            background: var(--action);
             color: #ffffff;
-            font-weight: 700;
+            font-size: 0.98rem;
+            font-weight: 800;
             cursor: pointer;
+            transition: background 0.18s ease, transform 0.18s ease;
         }
-        button:hover {
-            background: #1e40af;
+
+        .submit-button:hover {
+            background: var(--action-hover);
+            transform: translateY(-1px);
         }
-        .hint {
-            margin: 8px 0 0 0;
-            font-size: 0.82rem;
-            color: #64748b;
+
+        .switch-note {
+            margin: 14px 0 0 0;
+            color: var(--muted);
+            font-size: 0.9rem;
         }
-        @media (max-width: 820px) {
+
+        .switch-link {
+            border: none;
+            background: transparent;
+            color: var(--action);
+            font-weight: 800;
+            cursor: pointer;
+            padding: 0;
+            font-size: inherit;
+        }
+
+        .switch-link:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 860px) {
             .auth-shell {
                 grid-template-columns: 1fr;
             }
+
             .auth-hero {
-                border-right: none;
-                border-bottom: 1px solid #bfdbfe;
+                min-height: auto;
+                gap: 28px;
+            }
+
+            .auth-hero h1,
+            .hero-copy {
+                max-width: none;
             }
         }
     </style>
@@ -153,54 +270,108 @@
 <body>
     <div class="auth-shell">
         <section class="auth-hero">
-            <h1>Proposal Generator Access</h1>
-            <p>Halaman ini menambahkan lapisan keamanan sederhana sebelum user dapat masuk ke engine proposal. Cukup gunakan username dan password untuk login, atau buat akun baru bila belum ada.</p>
-            <ul class="auth-notes">
-                <li>Login akan membuka seluruh flow proposal, riwayat, pengaturan, dan unduhan di sesi browser yang sama.</li>
-                <li>Sign up ini sengaja dibuat ringan: username unik, password terenkripsi, dan sesi berbasis cookie.</li>
-                <li>Untuk produksi penuh nanti, kita masih bisa naikkan ke peran admin, reset password, atau SSO tanpa membuang struktur dasarnya.</li>
-            </ul>
+            <div>
+                <div class="hero-badge">Akses Internal</div>
+                <h1>Inixindo Proposal Intelligence</h1>
+            </div>
+
+            <div class="hero-copy">
+                <p>Gunakan akun internal sederhana untuk membuka dashboard proposal, meninjau riwayat pekerjaan, dan menjalankan flow generasi dokumen.</p>
+                <p>Lapisan akses ini sengaja dibuat ringan untuk pengamanan dasar. Password tetap disimpan sebagai hash, bukan teks biasa.</p>
+            </div>
         </section>
 
-        <section class="auth-forms">
-            <div class="panel">
-                <h2>Login</h2>
-                <p>Masuk dengan akun yang sudah terdaftar.</p>
+        <section class="auth-panel">
+            <div class="tab-switcher" role="tablist" aria-label="Pilihan akses">
+                <button type="button" class="tab-button" id="tab-login" data-target="login-form" aria-controls="login-form">Masuk</button>
+                <button type="button" class="tab-button" id="tab-signup" data-target="signup-form" aria-controls="signup-form">Daftar</button>
+            </div>
+
+            <form method="POST" action="/login" id="login-form" class="auth-form">
+                <input type="hidden" name="next" value="{{ next_target }}">
+                <h2 class="panel-title">Masuk</h2>
+                <p class="panel-subtitle">Masukkan username dan password yang sudah terdaftar untuk melanjutkan ke aplikasi.</p>
+
                 {% if login_error %}
                 <div class="notice error">{{ login_error }}</div>
                 {% endif %}
                 {% if signup_success %}
                 <div class="notice success">{{ signup_success }}</div>
                 {% endif %}
-                <form method="POST" action="/login">
-                    <input type="hidden" name="next" value="{{ next_target }}">
-                    <label for="login-username">Username</label>
-                    <input id="login-username" name="username" type="text" autocomplete="username" required>
-                    <label for="login-password">Password</label>
-                    <input id="login-password" name="password" type="password" autocomplete="current-password" required>
-                    <button type="submit">Login</button>
-                </form>
-            </div>
 
-            <div class="panel">
-                <h2>Sign Up</h2>
-                <p>Buat akun baru untuk masuk ke sistem.</p>
+                <label for="login-username">Username</label>
+                <input id="login-username" name="username" type="text" autocomplete="username" required>
+
+                <label for="login-password">Password</label>
+                <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+
+                <button type="submit" class="submit-button">Masuk ke Sistem</button>
+
+                <p class="switch-note">
+                    Belum punya akun?
+                    <button type="button" class="switch-link" data-show-tab="signup-form">Daftar di sini.</button>
+                </p>
+            </form>
+
+            <form method="POST" action="/signup" id="signup-form" class="auth-form">
+                <input type="hidden" name="next" value="{{ next_target }}">
+                <h2 class="panel-title">Buat Akun</h2>
+                <p class="panel-subtitle">Buat username dan password internal sederhana agar bisa mengakses aplikasi dengan aman.</p>
+
                 {% if signup_error %}
                 <div class="notice error">{{ signup_error }}</div>
                 {% endif %}
-                <form method="POST" action="/signup">
-                    <input type="hidden" name="next" value="{{ next_target }}">
-                    <label for="signup-username">Username</label>
-                    <input id="signup-username" name="username" type="text" minlength="3" autocomplete="username" required>
-                    <label for="signup-password">Password</label>
-                    <input id="signup-password" name="password" type="password" minlength="6" autocomplete="new-password" required>
-                    <label for="signup-confirm-password">Konfirmasi Password</label>
-                    <input id="signup-confirm-password" name="confirm_password" type="password" minlength="6" autocomplete="new-password" required>
-                    <button type="submit">Buat Akun</button>
-                </form>
-                <p class="hint">Versi ini memang sengaja basic: cukup username dan password. Password disimpan dalam bentuk hash, bukan plaintext.</p>
-            </div>
+
+                <label for="signup-username">Username</label>
+                <input id="signup-username" name="username" type="text" minlength="3" autocomplete="username" required>
+                <p class="field-note">Gunakan minimal 3 karakter. Username sebaiknya singkat dan mudah diingat.</p>
+
+                <label for="signup-password">Password</label>
+                <input id="signup-password" name="password" type="password" minlength="6" autocomplete="new-password" required>
+                <p class="field-note">Gunakan minimal 6 karakter.</p>
+
+                <label for="signup-confirm-password">Konfirmasi Password</label>
+                <input id="signup-confirm-password" name="confirm_password" type="password" minlength="6" autocomplete="new-password" required>
+
+                <button type="submit" class="submit-button">Buat Akun</button>
+
+                <p class="switch-note">
+                    Sudah punya akun?
+                    <button type="button" class="switch-link" data-show-tab="login-form">Masuk di sini.</button>
+                </p>
+            </form>
         </section>
     </div>
+
+    <script>
+        (function () {
+            const tabButtons = Array.from(document.querySelectorAll('.tab-button'));
+            const forms = {
+                'login-form': document.getElementById('login-form'),
+                'signup-form': document.getElementById('signup-form')
+            };
+
+            function activateTab(targetId) {
+                Object.entries(forms).forEach(([formId, formEl]) => {
+                    if (!formEl) return;
+                    formEl.classList.toggle('active', formId === targetId);
+                });
+                tabButtons.forEach((button) => {
+                    button.classList.toggle('active', button.dataset.target === targetId);
+                });
+            }
+
+            tabButtons.forEach((button) => {
+                button.addEventListener('click', () => activateTab(button.dataset.target));
+            });
+
+            document.querySelectorAll('[data-show-tab]').forEach((button) => {
+                button.addEventListener('click', () => activateTab(button.getAttribute('data-show-tab')));
+            });
+
+            const initialTab = {{ '\"signup-form\"' if signup_error else '\"login-form\"' }};
+            activateTab(initialTab);
+        })();
+    </script>
 </body>
 </html>
