@@ -131,6 +131,7 @@ Untuk mode implementasi bertahap:
 export DEMO_MODE=false
 export DATA_ACQUISITION_MODE=staged
 export FIRM_API_URL=https://api.perusahaan-anda.com/v1
+export FIRM_API_INTEGRATION_MODE=rest
 export FIRM_API_AUTH_MODE=bearer
 export API_AUTH_TOKEN=isi_token_internal_api
 export SERPER_API_KEY=isi_api_key
@@ -142,11 +143,27 @@ Jika internal API memakai Basic Auth:
 export DEMO_MODE=false
 export DATA_ACQUISITION_MODE=staged
 export FIRM_API_URL=https://api.perusahaan-anda.com/v1
+export FIRM_API_INTEGRATION_MODE=rest
 export FIRM_API_AUTH_MODE=basic
 export FIRM_API_USERNAME=isi_username
 export FIRM_API_PASSWORD=isi_password
 export SERPER_API_KEY=isi_api_key
 ```
+
+Jika ingin integrasi internal API lebih mudah dirawat, gunakan satu file konfigurasi JSON:
+
+```bash
+export DEMO_MODE=false
+export DATA_ACQUISITION_MODE=staged
+export FIRM_API_URL=https://api.perusahaan-anda.com
+export FIRM_API_INTEGRATION_MODE=generic
+export FIRM_API_AUTH_MODE=basic
+export FIRM_API_USERNAME=isi_username
+export FIRM_API_PASSWORD=isi_password
+export FIRM_API_CONFIG_FILE=/srv/apps/proposal-gen/internal_api_config.json
+```
+
+Contoh file ada di [internal_api_config.example.json](./internal_api_config.example.json). Dengan pendekatan ini, perubahan path, full URL endpoint, method, query param, body request, response path, atau mode dataset bisa dilakukan di satu file tanpa mengubah adapter Python.
 
 ### 4. Jalankan aplikasi
 
@@ -160,7 +177,20 @@ Lalu buka:
 http://127.0.0.1:5000
 ```
 
-## Endpoint Internal yang Disarankan untuk Staged Mode
+## Integrasi Internal API yang Disarankan
+
+Sekarang ada 2 mode integrasi:
+
+- `FIRM_API_INTEGRATION_MODE=rest`
+  Gunakan bila backend internal sudah punya endpoint terpisah per resource.
+- `FIRM_API_INTEGRATION_MODE=dataset`
+  Gunakan bila backend hanya punya satu endpoint dataset generik, misalnya `/api/Resource/dataset`.
+- `FIRM_API_INTEGRATION_MODE=generic`
+  Gunakan bila backend punya endpoint apa pun dengan shape JSON bebas, misalnya `https://xxx.com/api/tag`, dan Anda ingin aplikasi mengadaptasi payload itu ke workflow proposal.
+
+Ketiganya memakai adapter yang sama di aplikasi, jadi logika proposal tidak perlu ikut diubah.
+
+### Mode REST
 
 Jika aplikasi akan dipakai di tahap lanjut, sebaiknya internal API menyiapkan data berikut:
 
@@ -172,6 +202,49 @@ Tujuannya agar aplikasi dapat:
 - menampilkan identitas firma penulis proposal dengan akurat
 - menggunakan metodologi dan standar delivery internal
 - membedakan klien baru dan klien existing berdasarkan data internal
+
+### Mode Dataset
+
+Jika backend saat ini baru menyediakan satu endpoint generik seperti:
+
+- `POST /api/Resource/dataset`
+
+maka aplikasi bisa diarahkan ke mode dataset. Konfigurasi JSON cukup menjelaskan:
+
+- path endpoint dataset
+- method request
+- payload default seperti `{"dataset":"ReferenceDataset"}`
+- lokasi array record di response
+- nama field penanda resource
+- filter untuk `project_type` dan `client_name`
+
+Dengan begitu, saat struktur backend berubah, Anda cukup mengubah JSON config, bukan kelas adapter Python.
+
+### Mode Generic
+
+Mode ini paling fleksibel untuk integrasi internal database yang belum stabil atau masih berubah-ubah.
+
+Anda cukup mendefinisikan per resource:
+
+- endpoint penuh atau path relatif
+- method request
+- query param
+- body JSON
+- lokasi payload di response (`response_path`)
+- filter record bila response berupa array
+
+Jika struktur JSON tidak langsung cocok dengan field internal aplikasi, adapter akan:
+
+1. mencoba membaca field memakai alias map bawaan,
+2. lalu, bila masih lemah, memakai model untuk menafsirkan payload JSON mentah ke schema internal.
+
+Artinya, endpoint seperti berikut bisa dipakai tanpa menulis adapter baru:
+
+- `https://xxx.com/api/tag-firm-profile`
+- `https://xxx.com/api/tag-standards`
+- `https://xxx.com/api/tag-client-history`
+
+Selama response berupa JSON dan konfigurasi `resources` diarahkan dengan benar, workflow proposal tetap bisa memakai data tersebut.
 
 ## Troubleshooting Singkat
 

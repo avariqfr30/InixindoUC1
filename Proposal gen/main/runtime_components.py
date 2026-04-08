@@ -29,6 +29,31 @@ class ContactSchema(BaseModel):
     email: str = Field("", description="The official contact email. Empty if not found.")
     phone: str = Field("", description="The official phone or WhatsApp number. Empty if not found.")
 
+
+class GenericProjectStandardsSchema(BaseModel):
+    methodology: str = Field("", description="Delivery methodology or working approach.")
+    team: str = Field("", description="Team composition, staffing plan, or experts involved.")
+    commercial: str = Field("", description="Commercial terms, pricing model, or payment terms.")
+
+
+class GenericClientRelationshipSchema(BaseModel):
+    summary: str = Field("", description="Client relationship or engagement summary.")
+    status: str = Field("", description="Relationship status such as existing, new, active, or renewal.")
+
+
+class GenericFirmProfileSchema(BaseModel):
+    office_address: str = Field("", description="Primary office address.")
+    email: str = Field("", description="Official contact email.")
+    phone: str = Field("", description="Official phone number.")
+    whatsapp: str = Field("", description="Official WhatsApp number.")
+    website: str = Field("", description="Official website.")
+    legal_name: str = Field("", description="Legal entity name.")
+    operating_hours: str = Field("", description="Operating or business hours.")
+    profile_summary: str = Field("", description="Short company summary.")
+    credential_highlights: str = Field("", description="Capability or credential highlights.")
+    portfolio_highlights: str = Field("", description="Portfolio or capability highlights.")
+    official_source_urls: List[str] = Field(default_factory=list, description="Official source URLs.")
+
 # ==========================================
 
 class SchemaMapper:
@@ -140,9 +165,15 @@ class FirmAPIClient:
         self.demo_mode = DEMO_MODE
         self.data_acquisition_mode = DATA_ACQUISITION_MODE
         self.base_url = FIRM_API_URL.rstrip("/")
+        self.timeout_seconds = FIRM_API_TIMEOUT_SECONDS
+        self.integration_mode = FIRM_API_INTEGRATION_MODE
         self.auth_mode = (FIRM_API_AUTH_MODE or "bearer").strip().lower()
+        self.endpoint_config = dict(FIRM_API_ENDPOINT_CONFIG or {})
+        self.dataset_config = dict(FIRM_API_DATASET_CONFIG or {})
+        self.resource_config = dict(FIRM_API_RESOURCE_CONFIG or {})
         self.headers = {"Accept": "application/json"}
         self.auth: Optional[Tuple[str, str]] = None
+        self._dataset_response_cache: Optional[Any] = None
 
         if self.auth_mode == "basic":
             if FIRM_API_USERNAME and FIRM_API_PASSWORD:
@@ -156,15 +187,271 @@ class FirmAPIClient:
         else:
             logger.warning("Unknown FIRM_API_AUTH_MODE=%s. Falling back to unauthenticated requests.", self.auth_mode)
 
-    def _request(self, path: str, params: Optional[Dict[str, Any]] = None) -> requests.Response:
-        url = f"{self.base_url}/{path.lstrip('/')}"
-        return requests.get(
+    @staticmethod
+    def _render_template_value(value: Any, context: Dict[str, Any]) -> Any:
+        if isinstance(value, str):
+            try:
+                return value.format(**context)
+            except Exception:
+                return value
+        return value
+
+    @classmethod
+    def _render_template_payload(cls, payload: Any, context: Dict[str, Any]) -> Any:
+        if isinstance(payload, dict):
+            return {key: cls._render_template_payload(value, context) for key, value in payload.items()}
+        if isinstance(payload, list):
+            return [cls._render_template_payload(value, context) for value in payload]
+        return cls._render_template_value(payload, context)
+
+    @staticmethod
+    def _extract_json_path(payload: Any, path: str) -> Any:
+        current = payload
+        for raw_part in filter(None, str(path or "").split(".")):
+            if isinstance(current, list):
+                if not raw_part.isdigit():
+                    return None
+                index = int(raw_part)
+                if index < 0 or index >= len(current):
+                    return None
+                current = current[index]
+                continue
+            if isinstance(current, dict):
+                if raw_part not in current:
+                    return None
+                current = current[raw_part]
+                continue
+            return None
+        return current
+
+    @staticmethod
+    def _lookup_record_value(record: Dict[str, Any], field_name: str) -> Any:
+        if field_name in record:
+            return record[field_name]
+        normalized_key = SchemaMapper.normalize_key(field_name)
+        for key, value in record.items():
+            if SchemaMapper.normalize_key(key) == normalized_key:
+                return value
+        return None
+
+    @classmethod
+    def _record_matches(cls, record: Dict[str, Any], filters: Dict[str, Any]) -> bool:
+        for key, expected in (filters or {}).items():
+            if expected in (None, ""):
+                continue
+            actual = cls._lookup_record_value(record, str(key))
+            if actual is None:
+                return False
+            if str(actual).strip() == str(expected).strip():
+                continue
+            if SchemaMapper.normalize_key(actual) == SchemaMapper.normalize_key(expected):
+                continue
+            return False
+        return True
+
+    def _request(
+        self,
+        path: str,
+        method: str = "GET",
+        params: Optional[Dict[str, Any]] = None,
+        body: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, Any]] = None,
+    ) -> requests.Response:
+        url = str(path or "").strip()
+        if not re.match(r"^https?://", url, flags=re.IGNORECASE):
+            url = f"{self.base_url}/{url.lstrip('/')}"
+        merged_headers = dict(self.headers)
+        for key, value in (headers or {}).items():
+            if value not in (None, ""):
+                merged_headers[str(key)] = str(value)
+        request_kwargs: Dict[str, Any] = {
+            "params": params,
+            "headers": merged_headers,
+            "auth": self.auth,
+            "timeout": self.timeout_seconds,
+        }
+        method_upper = str(method or "GET").strip().upper() or "GET"
+        if method_upper != "GET":
+            request_kwargs["json"] = body or {}
+        return requests.request(
+            method_upper,
             url,
-            params=params,
-            headers=self.headers,
-            auth=self.auth,
-            timeout=5,
+            **request_kwargs,
         )
+
+    def _request_named_endpoint(self, endpoint_name: str, **context: Any) -> requests.Response:
+        spec = dict((self.endpoint_config or {}).get(endpoint_name) or {})
+        return self._request_from_spec(spec, **context)
+
+    def _request_from_spec(self, spec: Dict[str, Any], **context: Any) -> requests.Response:
+        request_spec = dict(spec or {})
+        path = self._render_template_value(request_spec.get("url") or request_spec.get("path") or "", context)
+        method = str(request_spec.get("method") or "GET").strip().upper() or "GET"
+        params = self._render_template_payload(request_spec.get("params") or {}, context)
+        body = self._render_template_payload(request_spec.get("body") or {}, context)
+        headers = self._render_template_payload(request_spec.get("headers") or {}, context)
+        return self._request(path, method=method, params=params, body=body, headers=headers)
+
+    def _get_dataset_response(self) -> Any:
+        if self._dataset_response_cache is not None:
+            return self._dataset_response_cache
+        request_spec = dict((self.dataset_config or {}).get("request") or {})
+        path = str(request_spec.get("path") or "").strip() or "/api/Resource/dataset"
+        method = str(request_spec.get("method") or "POST").strip().upper() or "POST"
+        params = request_spec.get("params") or {}
+        body = request_spec.get("body") or {}
+        response = self._request(path, method=method, params=params, body=body)
+        response.raise_for_status()
+        self._dataset_response_cache = response.json()
+        return self._dataset_response_cache
+
+    def _select_dataset_payload(self, resource_name: str, **context: Any) -> Any:
+        response_payload = self._get_dataset_response()
+        payload_paths = dict((self.dataset_config or {}).get("payload_paths") or {})
+        payload_path = self._render_template_value(payload_paths.get(resource_name) or "", context)
+        if payload_path:
+            selected = self._extract_json_path(response_payload, str(payload_path))
+            if selected not in (None, ""):
+                return selected
+
+        records_path = self._render_template_value((self.dataset_config or {}).get("response_items_path") or "", context)
+        records_payload = self._extract_json_path(response_payload, str(records_path)) if records_path else response_payload
+        if isinstance(records_payload, dict):
+            direct_match = records_payload.get(resource_name)
+            if direct_match not in (None, ""):
+                return direct_match
+            return records_payload
+
+        if not isinstance(records_payload, list):
+            return {}
+
+        resource_field = str((self.dataset_config or {}).get("resource_field") or "").strip()
+        resource_values = dict((self.dataset_config or {}).get("resource_values") or {})
+        expected_resource = self._render_template_value(resource_values.get(resource_name) or resource_name, context)
+        filters = self._render_template_payload(
+            dict(((self.dataset_config or {}).get("record_filters") or {}).get(resource_name) or {}),
+            context,
+        )
+
+        matches: List[Dict[str, Any]] = []
+        for item in records_payload:
+            if not isinstance(item, dict):
+                continue
+            if resource_field:
+                actual_resource = self._lookup_record_value(item, resource_field)
+                if actual_resource is None:
+                    continue
+                if SchemaMapper.normalize_key(actual_resource) != SchemaMapper.normalize_key(expected_resource):
+                    continue
+            if not self._record_matches(item, filters):
+                continue
+            matches.append(item)
+
+        if not matches:
+            return {}
+        return matches[0] if len(matches) == 1 else matches
+
+    @staticmethod
+    def _coerce_payload_to_mapping(payload: Any) -> Dict[str, Any]:
+        if isinstance(payload, dict):
+            return payload
+        if isinstance(payload, list):
+            dict_items = [item for item in payload if isinstance(item, dict)]
+            if len(dict_items) == 1:
+                return dict_items[0]
+        return {}
+
+    def _resolve_generic_payload(self, resource_name: str, **context: Any) -> Any:
+        resource_spec = dict((self.resource_config or {}).get(resource_name) or {})
+        request_spec = dict(resource_spec.get("request") or {})
+        if not request_spec:
+            return {}
+        response = self._request_from_spec(request_spec, **context)
+        response.raise_for_status()
+        payload = response.json()
+        response_path = self._render_template_value(resource_spec.get("response_path") or "", context)
+        if response_path:
+            payload = self._extract_json_path(payload, str(response_path))
+        filters = self._render_template_payload(resource_spec.get("record_filters") or {}, context)
+        if isinstance(payload, list):
+            matches = [item for item in payload if isinstance(item, dict) and self._record_matches(item, filters)]
+            if matches:
+                return matches[0] if len(matches) == 1 else matches
+        return payload
+
+    def _resolve_resource_payload(self, resource_name: str, **context: Any) -> Any:
+        if self.integration_mode == "dataset":
+            return self._select_dataset_payload(resource_name, **context)
+        if self.integration_mode == "generic":
+            return self._resolve_generic_payload(resource_name, **context)
+        response = self._request_named_endpoint(resource_name, **context)
+        response.raise_for_status()
+        return response.json()
+
+    def _resource_allows_llm_extract(self, resource_name: str) -> bool:
+        spec = dict((self.resource_config or {}).get(resource_name) or {})
+        return bool(spec.get("allow_llm_extract", True))
+
+    @staticmethod
+    def _compact_json_for_llm(payload: Any) -> str:
+        try:
+            serialized = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            serialized = str(payload)
+        serialized = serialized.strip()
+        max_chars = 18000
+        return serialized[:max_chars]
+
+    def _llm_extract_generic_resource(
+        self,
+        resource_name: str,
+        payload: Any,
+        schema_model: Any,
+        context_note: str = "",
+    ) -> Dict[str, Any]:
+        prompt_map = {
+            "firm_profile": (
+                "Extract the writer firm's official identity and contact details from this JSON payload. "
+                "Map only fields clearly supported by the payload."
+            ),
+            "project_standards": (
+                "Extract the delivery methodology, team composition, and commercial terms from this JSON payload "
+                "for proposal generation."
+            ),
+            "client_relationship": (
+                "Extract the client relationship summary and relationship status from this JSON payload."
+            ),
+        }
+        instruction = prompt_map.get(resource_name, "Extract the most relevant structured fields from this JSON payload.")
+        payload_text = self._compact_json_for_llm(payload)
+        prompt = f"""
+You are an internal API schema adapter for a proposal generator.
+{instruction}
+{f"Context: {context_note}" if context_note else ""}
+
+Rules:
+- Read the payload as arbitrary JSON from an unknown internal API.
+- Infer only what is reasonably supported by the payload.
+- If a field is missing, return an empty string or empty list.
+- Respond ONLY with valid JSON matching the requested schema.
+
+JSON PAYLOAD:
+{payload_text}
+        """.strip()
+        try:
+            response = Client(host=OLLAMA_HOST).chat(
+                model=LLM_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                options={"temperature": 0.0},
+            )
+            raw_text = str(((response or {}).get("message") or {}).get("content") or "").strip()
+            match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+            parsed = json.loads(match.group(0) if match else raw_text)
+            validated = schema_model.model_validate(parsed)
+            return validated.model_dump()
+        except Exception as exc:
+            logger.warning("Generic internal API extraction failed for %s: %s", resource_name, exc)
+            return {}
 
     def uses_demo_logic(self) -> bool:
         return self.demo_mode or self.data_acquisition_mode == "demo"
@@ -180,6 +467,10 @@ class FirmAPIClient:
             "team": team,
             "commercial": commercial,
         }
+
+    @staticmethod
+    def _is_weak_project_standards(payload: Dict[str, str]) -> bool:
+        return all(str(payload.get(key) or "").strip() in {"", "TBD"} for key in ("methodology", "team", "commercial"))
 
     @staticmethod
     def _normalize_relationship_mode(value: Any) -> str:
@@ -204,6 +495,10 @@ class FirmAPIClient:
         }
 
     @staticmethod
+    def _is_weak_client_relationship(payload: Dict[str, Any]) -> bool:
+        return not str(payload.get("summary") or "").strip() and not bool(payload.get("verified"))
+
+    @staticmethod
     def _empty_relationship_context(source: str = "internal_api") -> Dict[str, Any]:
         return {
             "summary": "",
@@ -222,10 +517,19 @@ class FirmAPIClient:
             demo_standards = MOCK_FIRM_STANDARDS.get(project_type, MOCK_FIRM_STANDARDS.get("Implementation"))
             return self._normalize_project_standards(demo_standards)
         try:
-            res = self._request(f"/standards/{project_type}")
-            res.raise_for_status()
-            return self._normalize_project_standards(res.json())
-        except requests.RequestException as e:
+            payload = self._resolve_resource_payload("project_standards", project_type=project_type)
+            normalized = self._normalize_project_standards(self._coerce_payload_to_mapping(payload))
+            if self.integration_mode == "generic" and self._is_weak_project_standards(normalized) and self._resource_allows_llm_extract("project_standards"):
+                extracted = self._llm_extract_generic_resource(
+                    "project_standards",
+                    payload,
+                    GenericProjectStandardsSchema,
+                    context_note=f"project_type={project_type}",
+                )
+                if extracted:
+                    normalized = self._normalize_project_standards(extracted)
+            return normalized
+        except (requests.RequestException, ValueError) as e:
             logger.error(f"Internal API Error: {e}")
             return self._normalize_project_standards({})
 
@@ -248,14 +552,29 @@ class FirmAPIClient:
         )
         return cls._normalize_firm_profile(base_profile)
 
+    @staticmethod
+    def _looks_like_missing_profile(profile: Dict[str, str]) -> bool:
+        if not isinstance(profile, dict):
+            return True
+        meaningful_keys = ("office_address", "email", "phone", "website", "contact_info")
+        return not any(str(profile.get(key) or "").strip() for key in meaningful_keys)
+
     def get_firm_profile(self) -> Dict[str, str]:
         if self.demo_mode:
             return self._default_firm_profile()
         try:
-            res = self._request("/firm-profile")
-            res.raise_for_status()
-            return self._normalize_firm_profile(res.json())
-        except requests.RequestException as e:
+            payload = self._resolve_resource_payload("firm_profile")
+            normalized = self._normalize_firm_profile(self._coerce_payload_to_mapping(payload))
+            if self.integration_mode == "generic" and self._looks_like_missing_profile(normalized) and self._resource_allows_llm_extract("firm_profile"):
+                extracted = self._llm_extract_generic_resource(
+                    "firm_profile",
+                    payload,
+                    GenericFirmProfileSchema,
+                )
+                if extracted:
+                    normalized = self._normalize_firm_profile(extracted)
+            return normalized
+        except (requests.RequestException, ValueError) as e:
             logger.error(f"Internal API Error: {e}")
             if self.uses_demo_logic():
                 return self._build_profile_from_osint()
@@ -273,10 +592,19 @@ class FirmAPIClient:
             }
 
         try:
-            res = self._request("/client-relationship", params={"client_name": client_name})
-            res.raise_for_status()
-            return self._normalize_client_relationship(res.json())
-        except requests.RequestException as e:
+            payload = self._resolve_resource_payload("client_relationship", client_name=client_name)
+            normalized = self._normalize_client_relationship(self._coerce_payload_to_mapping(payload))
+            if self.integration_mode == "generic" and self._is_weak_client_relationship(normalized) and self._resource_allows_llm_extract("client_relationship"):
+                extracted = self._llm_extract_generic_resource(
+                    "client_relationship",
+                    payload,
+                    GenericClientRelationshipSchema,
+                    context_note=f"client_name={client_name}",
+                )
+                if extracted:
+                    normalized = self._normalize_client_relationship(extracted)
+            return normalized
+        except (requests.RequestException, ValueError) as e:
             logger.error(f"Internal API Error: {e}")
             return self._empty_relationship_context()
 

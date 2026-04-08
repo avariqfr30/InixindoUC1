@@ -1,9 +1,44 @@
 """Runtime and prompt configuration for the proposal generator."""
+import json
 import os
 from pathlib import Path
+from typing import Any, Dict
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_DIR.parent
+
+
+def _load_json_file(path_value: str) -> Dict[str, Any]:
+    path = Path(str(path_value or "").strip()).expanduser()
+    if not path_value or not path.exists() or not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _load_json_env(name: str) -> Dict[str, Any]:
+    raw = str(os.getenv(name, "") or "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = dict(base or {})
+    for key, value in (override or {}).items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(current, value)
+        else:
+            merged[key] = value
+    return merged
 
 # Backend mode and internal API settings.
 DEMO_MODE = os.getenv("DEMO_MODE", "true").strip().lower() in {"1", "true", "yes", "on"}
@@ -14,6 +49,121 @@ FIRM_API_AUTH_MODE = os.getenv("FIRM_API_AUTH_MODE", "bearer").strip().lower() o
 API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "isi_token_disini_nanti")
 FIRM_API_USERNAME = os.getenv("FIRM_API_USERNAME", "").strip()
 FIRM_API_PASSWORD = os.getenv("FIRM_API_PASSWORD", "").strip()
+FIRM_API_TIMEOUT_SECONDS = max(3, int(os.getenv("FIRM_API_TIMEOUT_SECONDS", "8")))
+FIRM_API_CONFIG_FILE = os.getenv("FIRM_API_CONFIG_FILE", "").strip()
+
+DEFAULT_FIRM_API_ENDPOINT_CONFIG: Dict[str, Any] = {
+    "firm_profile": {
+        "path": "/firm-profile",
+        "method": "GET",
+        "params": {},
+        "body": {},
+    },
+    "project_standards": {
+        "path": "/standards/{project_type}",
+        "method": "GET",
+        "params": {},
+        "body": {},
+    },
+    "client_relationship": {
+        "path": "/client-relationship",
+        "method": "GET",
+        "params": {"client_name": "{client_name}"},
+        "body": {},
+    },
+}
+
+DEFAULT_FIRM_API_DATASET_CONFIG: Dict[str, Any] = {
+    "request": {
+        "path": "/api/Resource/dataset",
+        "method": "POST",
+        "params": {},
+        "body": {"dataset": "ReferenceDataset"},
+    },
+    "response_items_path": "",
+    "payload_paths": {
+        "firm_profile": "",
+        "project_standards": "",
+        "client_relationship": "",
+    },
+    "resource_field": "resource_type",
+    "resource_values": {
+        "firm_profile": "firm_profile",
+        "project_standards": "project_standards",
+        "client_relationship": "client_relationship",
+    },
+    "record_filters": {
+        "project_standards": {"project_type": "{project_type}"},
+        "client_relationship": {"client_name": "{client_name}"},
+    },
+}
+
+DEFAULT_FIRM_API_RESOURCE_CONFIG: Dict[str, Any] = {
+    "firm_profile": {
+        "request": {
+            "path": "/firm-profile",
+            "method": "GET",
+            "params": {},
+            "body": {},
+            "headers": {},
+        },
+        "response_path": "",
+        "record_filters": {},
+        "allow_llm_extract": True,
+    },
+    "project_standards": {
+        "request": {
+            "path": "/standards/{project_type}",
+            "method": "GET",
+            "params": {},
+            "body": {},
+            "headers": {},
+        },
+        "response_path": "",
+        "record_filters": {},
+        "allow_llm_extract": True,
+    },
+    "client_relationship": {
+        "request": {
+            "path": "/client-relationship",
+            "method": "GET",
+            "params": {"client_name": "{client_name}"},
+            "body": {},
+            "headers": {},
+        },
+        "response_path": "",
+        "record_filters": {},
+        "allow_llm_extract": True,
+    },
+}
+
+_firm_api_file_config = _load_json_file(FIRM_API_CONFIG_FILE)
+FIRM_API_INTEGRATION_MODE = str(
+    os.getenv("FIRM_API_INTEGRATION_MODE", _firm_api_file_config.get("mode", "rest")) or "rest"
+).strip().lower() or "rest"
+if FIRM_API_INTEGRATION_MODE not in {"rest", "dataset", "generic"}:
+    FIRM_API_INTEGRATION_MODE = "rest"
+FIRM_API_ENDPOINT_CONFIG = _deep_merge(
+    DEFAULT_FIRM_API_ENDPOINT_CONFIG,
+    _deep_merge(
+        _firm_api_file_config.get("endpoints", {}) if isinstance(_firm_api_file_config.get("endpoints"), dict) else {},
+        _load_json_env("FIRM_API_ENDPOINT_CONFIG"),
+    ),
+)
+FIRM_API_DATASET_CONFIG = _deep_merge(
+    DEFAULT_FIRM_API_DATASET_CONFIG,
+    _deep_merge(
+        _firm_api_file_config.get("dataset", {}) if isinstance(_firm_api_file_config.get("dataset"), dict) else {},
+        _load_json_env("FIRM_API_DATASET_CONFIG"),
+    ),
+)
+FIRM_API_RESOURCE_CONFIG = _deep_merge(
+    DEFAULT_FIRM_API_RESOURCE_CONFIG,
+    _deep_merge(
+        _firm_api_file_config.get("resources", {}) if isinstance(_firm_api_file_config.get("resources"), dict) else {},
+        _load_json_env("FIRM_API_RESOURCE_CONFIG"),
+    ),
+)
 
 # External service configuration.
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "SERPER_API")
