@@ -256,6 +256,7 @@ class FirmAPIClient:
         params: Optional[Dict[str, Any]] = None,
         body: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, Any]] = None,
+        body_encoding: str = "json",
     ) -> requests.Response:
         url = str(path or "").strip()
         if not re.match(r"^https?://", url, flags=re.IGNORECASE):
@@ -272,7 +273,11 @@ class FirmAPIClient:
         }
         method_upper = str(method or "GET").strip().upper() or "GET"
         if method_upper != "GET":
-            request_kwargs["json"] = body or {}
+            encoding = str(body_encoding or "json").strip().lower() or "json"
+            if encoding == "form":
+                request_kwargs["data"] = body or {}
+            else:
+                request_kwargs["json"] = body or {}
         return requests.request(
             method_upper,
             url,
@@ -290,7 +295,15 @@ class FirmAPIClient:
         params = self._render_template_payload(request_spec.get("params") or {}, context)
         body = self._render_template_payload(request_spec.get("body") or {}, context)
         headers = self._render_template_payload(request_spec.get("headers") or {}, context)
-        return self._request(path, method=method, params=params, body=body, headers=headers)
+        body_encoding = self._render_template_value(request_spec.get("body_encoding") or "json", context)
+        return self._request(
+            path,
+            method=method,
+            params=params,
+            body=body,
+            headers=headers,
+            body_encoding=str(body_encoding or "json"),
+        )
 
     def _get_dataset_response(self) -> Any:
         if self._dataset_response_cache is not None:
@@ -300,7 +313,8 @@ class FirmAPIClient:
         method = str(request_spec.get("method") or "POST").strip().upper() or "POST"
         params = request_spec.get("params") or {}
         body = request_spec.get("body") or {}
-        response = self._request(path, method=method, params=params, body=body)
+        body_encoding = str(request_spec.get("body_encoding") or "json").strip().lower() or "json"
+        response = self._request(path, method=method, params=params, body=body, body_encoding=body_encoding)
         response.raise_for_status()
         self._dataset_response_cache = response.json()
         return self._dataset_response_cache
