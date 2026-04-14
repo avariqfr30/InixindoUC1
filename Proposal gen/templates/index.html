@@ -112,7 +112,7 @@
 
             <div class="finance-panel">
                 <label for="input-kak-files">Dokumen KAK / TOR</label>
-                <p class="small-note">Unggah KAK/TOR untuk membantu sistem membaca inisiatif, jenis proposal, durasi, biaya, dan framework. Hasil pembacaan ini bisa dipakai sebagai titik awal pengisian form.</p>
+                <p class="small-note">Unggah KAK/TOR untuk membantu sistem membaca inisiatif, jenis proposal, durasi, biaya, dan framework. Hasil pembacaan ini dipakai sebagai titik awal pengisian form, sementara struktur proposal tetap mengikuti standar perusahaan.</p>
                 <div class="upload-row">
                     <input type="file" id="input-kak-files" accept=".docx,.pdf,.txt,.md" multiple />
                     <button type="button" id="btn-upload-kak-files" class="secondary">Upload KAK / TOR</button>
@@ -794,9 +794,6 @@
                     ui.selPerusahaan.add(new Option(payload.nama_perusahaan, payload.nama_perusahaan));
                 }
                 ui.selPerusahaan.value = payload.nama_perusahaan;
-            }
-            if (payload.mode_proposal && (!onlyEmpty || !ui.selModeProposal.value)) {
-                ui.selModeProposal.value = payload.mode_proposal;
             }
             if (payload.jenis_proposal && (!onlyEmpty || !ui.selProposal.value)) {
                 ui.selProposal.value = payload.jenis_proposal;

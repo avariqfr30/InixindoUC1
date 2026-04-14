@@ -2347,7 +2347,6 @@ class AppStateStore:
 
         suggestions = {
             "nama_perusahaan": company,
-            "mode_proposal": "kak_response",
             "jenis_proposal": service_type,
             "jenis_proyek": project_type,
             "konteks_organisasi": context_text,

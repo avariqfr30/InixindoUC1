@@ -574,11 +574,6 @@ PROPOSAL_MODES = [
         "label": "Proposal Penawaran Pekerjaan Canvasing",
         "description": "Mode penawaran yang lebih persuasif, ringkas, dan kuat pada konteks kebutuhan klien."
     },
-    {
-        "value": "kak_response",
-        "label": "Proposal Penawaran Tanggapan Kerangka Acuan Kerja (KAK)",
-        "description": "Mode tanggapan yang lebih formal, menekankan kesesuaian pendekatan, ruang lingkup, dan komitmen kerja."
-    },
 ]
 
 # Fallback firm data used in demo mode.
