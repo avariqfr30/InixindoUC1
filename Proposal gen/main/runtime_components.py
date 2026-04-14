@@ -1666,10 +1666,12 @@ class AppStateStore:
         self.supporting_docs_dir = self.asset_root / "supporting_documents"
         self.portfolio_docs_dir = self.supporting_docs_dir / "portfolio"
         self.credentials_docs_dir = self.supporting_docs_dir / "credentials"
+        self.kak_docs_dir = self.supporting_docs_dir / "kak"
         self.generated_dir = Path(GENERATED_OUTPUT_DIR)
         self.templates_dir.mkdir(parents=True, exist_ok=True)
         self.portfolio_docs_dir.mkdir(parents=True, exist_ok=True)
         self.credentials_docs_dir.mkdir(parents=True, exist_ok=True)
+        self.kak_docs_dir.mkdir(parents=True, exist_ok=True)
         self.generated_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self._bootstrap_generated_history()
@@ -1899,6 +1901,10 @@ class AppStateStore:
             "credentials": "credentials",
             "sertifikasi": "credentials",
             "kapabilitas": "credentials",
+            "kak": "kak",
+            "tor": "kak",
+            "kerangka_acuan_kerja": "kak",
+            "kerangka_acuan": "kak",
         }
         if normalized not in aliases:
             raise ValueError("Jenis dokumen pendukung tidak dikenal.")
@@ -1906,7 +1912,11 @@ class AppStateStore:
 
     def _supporting_dir_for_type(self, document_type: str) -> Path:
         normalized = self._normalize_document_type(document_type)
-        return self.portfolio_docs_dir if normalized == "portfolio" else self.credentials_docs_dir
+        if normalized == "portfolio":
+            return self.portfolio_docs_dir
+        if normalized == "credentials":
+            return self.credentials_docs_dir
+        return self.kak_docs_dir
 
     @staticmethod
     def _read_text_bytes(raw_bytes: bytes) -> str:
@@ -2085,6 +2095,282 @@ class AppStateStore:
         chunks = [chunk for chunk in chunks if chunk]
         return "\n".join(chunks).strip()
 
+    @staticmethod
+    def _first_non_empty_match(text: str, patterns: List[str], flags: int = re.IGNORECASE) -> str:
+        source = str(text or "")
+        for pattern in patterns:
+            match = re.search(pattern, source, flags)
+            if match:
+                value = re.sub(r"\s+", " ", str(match.group(1) or "")).strip(" -:;,.")
+                if value:
+                    return value
+        return ""
+
+    @staticmethod
+    def _best_money_signal(text: str) -> str:
+        matches = re.findall(
+            r"(Rp\.?\s?[\d.,]+(?:\s?(?:miliar|juta|triliun))?)",
+            str(text or ""),
+            flags=re.IGNORECASE,
+        )
+        cleaned = []
+        for match in matches:
+            value = re.sub(r"\s+", " ", match).strip()
+            if value and value.lower() not in {item.lower() for item in cleaned}:
+                cleaned.append(value)
+        return cleaned[0] if cleaned else ""
+
+    @staticmethod
+    def _best_duration_signal(text: str) -> str:
+        patterns = [
+            r"(?:jangka waktu(?:\s+pelaksanaan)?|durasi|masa pelaksanaan|waktu pelaksanaan)\s*[:\-]?\s*([^\n.;]{3,60})",
+            r"(?:selama|dalam kurun waktu)\s*[:\-]?\s*(\d+\s*(?:hari|minggu|bulan|tahun)(?:\s*(?:kalender|kerja))?)",
+            r"(\d+\s*(?:hari|minggu|bulan|tahun)(?:\s*(?:kalender|kerja))?)",
+        ]
+        value = AppStateStore._first_non_empty_match(text, patterns)
+        value = re.sub(r"^(?:pelaksanaan|jangka waktu|durasi)\s*[:\-]?\s*", "", value, flags=re.IGNORECASE)
+        return value.strip(" :;-.,")
+
+    @staticmethod
+    def _extract_first_section(text: str, labels: List[str], max_lines: int = 3) -> str:
+        source = str(text or "")
+        label_blob = "|".join(re.escape(item) for item in labels if item)
+        if not label_blob:
+            return ""
+        pattern = re.compile(
+            rf"(?:^|\n)\s*(?:{label_blob})\s*[:\-]?\s*(.+?)(?=\n\s*[A-Z][^\n]{{0,80}}[:\-]|\n\s*\d+[\).\s]|\Z)",
+            re.IGNORECASE | re.DOTALL,
+        )
+        match = pattern.search(source)
+        if not match:
+            return ""
+        raw = re.sub(r"\n{2,}", "\n", str(match.group(1) or "")).strip()
+        lines = [re.sub(r"\s+", " ", line).strip(" -•\t") for line in raw.splitlines() if re.sub(r"\s+", " ", line).strip()]
+        if not lines:
+            return ""
+        return " ".join(lines[:max_lines]).strip()
+
+    @staticmethod
+    def _extract_kak_frameworks(text: str) -> List[str]:
+        source = str(text or "")
+        known = [
+            ("ITIL", r"\bitil\b"),
+            ("TOGAF", r"\btogaf\b"),
+            ("COBIT", r"\bcobit\b"),
+            ("ISO 27001", r"\biso\s*27001\b"),
+            ("ISO 20000", r"\biso\s*20000\b"),
+            ("ISO 9001", r"\biso\s*9001\b"),
+            ("NIST", r"\bnist\b"),
+            ("POJK", r"\bpojk\b"),
+            ("OJK", r"\bojk\b"),
+            ("UU PDP", r"\bpdp\b"),
+            ("DAMA", r"\bdama\b"),
+            ("TM Forum", r"\btm\s*forum\b"),
+            ("Responsible AI", r"\bresponsible ai\b|\bai governance\b|\bai rmf\b"),
+            ("Regulasi", r"\bregulasi\b|\bkepatuhan\b"),
+        ]
+        hits: List[str] = []
+        for label, pattern in known:
+            if re.search(pattern, source, re.IGNORECASE):
+                hits.append(label)
+        return hits[:6]
+
+    @classmethod
+    def _detect_service_type(cls, text: str) -> str:
+        source = str(text or "").lower()
+        has_explicit_training = any(
+            token in source for token in ["pelatihan", "training", "bimbingan teknis", "bootcamp", "kelas", "kurikulum"]
+        )
+        has_workshop = "workshop" in source
+        has_consulting = any(
+            token in source
+            for token in [
+                "konsultan", "konsultansi", "pendampingan", "assessment",
+                "kajian", "review", "penyusunan", "roadmap", "tata kelola",
+            ]
+        )
+        if has_consulting and has_explicit_training:
+            return "Training dan Konsultan"
+        if has_consulting:
+            return "Konsultan"
+        if has_explicit_training or has_workshop:
+            return "Training"
+        return "Konsultan"
+
+    @classmethod
+    def _detect_project_type(cls, text: str) -> str:
+        source = str(text or "").lower()
+        scores = {
+            "Diagnostic": 0,
+            "Strategic": 0,
+            "Transformation": 0,
+            "Implementation": 0,
+        }
+        keyword_map = {
+            "Diagnostic": ["assessment", "as is", "gap analysis", "diagnostic", "evaluasi", "kajian awal", "baseline"],
+            "Strategic": ["roadmap", "strategi", "blueprint", "target operating model", "arah kebijakan", "rencana strategis", "tata kelola", "governance", "operating cadence", "decision forum"],
+            "Transformation": ["transformasi", "redesign", "perubahan", "operating model", "change management"],
+            "Implementation": ["implementasi", "deployment", "rollout", "go-live", "uat", "konfigurasi", "pendampingan pelaksanaan"],
+        }
+        for project_type, keywords in keyword_map.items():
+            scores[project_type] = sum(1 for keyword in keywords if keyword in source)
+        priority = {"Strategic": 4, "Transformation": 3, "Implementation": 2, "Diagnostic": 1}
+        best_type = max(scores.items(), key=lambda item: (item[1], priority.get(item[0], 0)))[0]
+        return best_type if scores[best_type] > 0 else "Implementation"
+
+    @classmethod
+    def _detect_need_classification(cls, text: str) -> str:
+        source = str(text or "").lower()
+        needs: List[str] = []
+        if any(token in source for token in ["masalah", "kendala", "hambatan", "gap", "isu", "belum", "tidak sinkron"]):
+            needs.append("Problem")
+        if any(token in source for token in ["optimalisasi", "peningkatan", "peluang", "opportunity", "improvement"]):
+            needs.append("Opportunity")
+        if any(token in source for token in ["wajib", "ketentuan", "kepatuhan", "regulasi", "mandat", "pojk", "ojk", "peraturan"]):
+            needs.append("Directive")
+        if not needs:
+            needs.append("Problem")
+        order = ["Problem", "Opportunity", "Directive"]
+        return ", ".join(item for item in order if item in needs)
+
+    @classmethod
+    def _infer_company_from_kak(cls, text: str, company_candidates: Optional[List[str]] = None) -> str:
+        source = str(text or "")
+        candidates = [str(item).strip() for item in (company_candidates or []) if str(item).strip()]
+        for candidate in sorted(candidates, key=len, reverse=True):
+            if re.search(re.escape(candidate), source, re.IGNORECASE):
+                return candidate
+        guessed = cls._first_non_empty_match(
+            source,
+            [
+                r"(?:nama perusahaan|instansi|satuan kerja|klien|pemberi kerja)\s*[:\-]\s*([^\n]{3,120})",
+                r"\b(PT\.?\s+[A-Z][^\n]{3,80})",
+            ],
+        )
+        return guessed
+
+    @classmethod
+    def _summarize_kak_analysis(cls, suggestions: Dict[str, str], source_name: str) -> str:
+        bits = []
+        if suggestions.get("konteks_organisasi"):
+            bits.append(f"inisiatif {suggestions['konteks_organisasi']}")
+        if suggestions.get("jenis_proposal"):
+            bits.append(f"layanan {suggestions['jenis_proposal']}")
+        if suggestions.get("jenis_proyek"):
+            bits.append(f"tipe proyek {suggestions['jenis_proyek']}")
+        if suggestions.get("estimasi_waktu"):
+            bits.append(f"durasi {suggestions['estimasi_waktu']}")
+        if suggestions.get("estimasi_biaya"):
+            bits.append(f"anggaran {suggestions['estimasi_biaya']}")
+        if suggestions.get("potensi_framework"):
+            bits.append(f"framework {suggestions['potensi_framework']}")
+        joined = "; ".join(bits) if bits else "belum ada field utama yang berhasil dibaca"
+        return f"Pembacaan KAK dari {source_name} menangkap {joined}."
+
+    def get_latest_kak_context(
+        self,
+        company_candidates: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        documents = self.list_supporting_documents("kak")
+        result: Dict[str, Any] = {
+            "documents": documents,
+            "analysis": {
+                "available": False,
+                "source_document": "",
+                "summary": "Belum ada dokumen KAK/TOR yang dibaca.",
+                "suggestions": {},
+                "warnings": [],
+            },
+        }
+        if not documents:
+            return result
+
+        latest = documents[0]
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT extracted_text
+                FROM supporting_documents
+                WHERE id = ?
+                """,
+                (str(latest.get("id") or ""),),
+            ).fetchone()
+        text = str((row["extracted_text"] if row else "") or "").strip()
+        if not text:
+            result["analysis"] = {
+                "available": False,
+                "source_document": latest.get("original_name", ""),
+                "summary": "Dokumen KAK/TOR sudah diunggah, tetapi teksnya belum berhasil dibaca.",
+                "suggestions": {},
+                "warnings": ["Teks KAK belum bisa diekstrak dari file yang diunggah."],
+            }
+            return result
+
+        objective = self._extract_first_section(
+            text,
+            ["maksud dan tujuan", "tujuan", "objective", "sasaran"],
+            max_lines=3,
+        )
+        initiative = self._first_non_empty_match(
+            text,
+            [
+                r"(?:nama|judul|paket|objek)\s*(?:pekerjaan|pengadaan|jasa)?\s*[:\-]\s*([^\n]{6,180})",
+                r"(?:pekerjaan|kegiatan)\s*[:\-]\s*([^\n]{6,180})",
+            ],
+        )
+        if not initiative:
+            lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines() if re.sub(r"\s+", " ", line).strip()]
+            for line in lines[:12]:
+                if 5 <= len(line.split()) <= 22 and not re.search(r"^(bab|pasal|latar belakang|maksud dan tujuan|ruang lingkup)\b", line, re.IGNORECASE):
+                    initiative = line
+                    break
+        context_text = " ".join(item for item in [initiative, objective] if item).strip() or initiative or objective
+        problem_excerpt = self._extract_first_section(
+            text,
+            ["latar belakang", "permasalahan", "isu utama", "tantangan", "kondisi eksisting"],
+            max_lines=4,
+        )
+        budget = self._best_money_signal(text)
+        duration = self._best_duration_signal(text)
+        frameworks = self._extract_kak_frameworks(text)
+        service_type = self._detect_service_type(text)
+        project_type = self._detect_project_type(text)
+        need_classification = self._detect_need_classification(text)
+        company = self._infer_company_from_kak(text, company_candidates=company_candidates)
+        suggestion_warnings: List[str] = []
+        if not budget:
+            suggestion_warnings.append("Nilai anggaran tidak terbaca jelas dari KAK.")
+        if not duration:
+            suggestion_warnings.append("Durasi pelaksanaan tidak terbaca jelas dari KAK.")
+        if not frameworks:
+            suggestion_warnings.append("Framework/acuan belum terbaca eksplisit; user mungkin masih perlu mengisi manual.")
+
+        suggestions = {
+            "nama_perusahaan": company,
+            "mode_proposal": "kak_response",
+            "jenis_proposal": service_type,
+            "jenis_proyek": project_type,
+            "konteks_organisasi": context_text,
+            "permasalahan": problem_excerpt,
+            "klasifikasi_kebutuhan": need_classification,
+            "estimasi_waktu": duration,
+            "estimasi_biaya": budget,
+            "potensi_framework": ", ".join(frameworks),
+        }
+        suggestions = {key: value for key, value in suggestions.items() if str(value or "").strip()}
+
+        result["analysis"] = {
+            "available": True,
+            "source_document": latest.get("original_name", ""),
+            "summary": self._summarize_kak_analysis(suggestions, latest.get("original_name", "dokumen KAK")),
+            "suggestions": suggestions,
+            "warnings": suggestion_warnings,
+            "initiative_title": initiative,
+            "objective_excerpt": objective,
+            "problem_excerpt": problem_excerpt,
+        }
+        return result
+
     @classmethod
     def _fallback_portfolio_rows_from_text(cls, text: str) -> List[Dict[str, str]]:
         rows: List[Dict[str, str]] = []
@@ -2124,6 +2410,7 @@ class AppStateStore:
             "has_active_template": bool(template_path and Path(template_path).exists()),
             "portfolio_documents": self.list_supporting_documents("portfolio"),
             "credential_documents": self.list_supporting_documents("credentials"),
+            "kak_documents": self.list_supporting_documents("kak"),
         }
 
     def save_settings(self, internal_portfolio: str = "", internal_credentials: str = "") -> Dict[str, Any]:

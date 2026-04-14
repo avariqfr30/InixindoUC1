@@ -648,29 +648,33 @@ UNIVERSAL_STRUCTURE = [
         "length_intent": "Klasifikasikan kebutuhan klien ke dalam problem/opportunity/directive, kerucutkan kebutuhan utama yang benar-benar diselesaikan, lalu tetapkan tujuan proyek dan jenis proyek yang paling tepat. (Target: 700 words)."
     },
     {
-        "id": "c_4", "title": "BAB IV – PENDEKATAN",
-        "subs": ["4.1 Acuan Prinsip/Kerangka/Teori/Regulasi", "4.2 Standar Penyelesaian Masalah"],
-        "keywords": "approach framework principle theory regulation standard",
-        "length_intent": "Uraikan acuan dan prinsip yang digunakan (framework/teori/regulasi/standar) sebagai landasan menyelesaikan masalah klien. (Target: 700 words)."
+        "id": "c_7", "title": "BAB IV – RUANG LINGKUP PEKERJAAN",
+        "subs": ["4.1 Lingkup Pekerjaan Utama", "4.2 Batasan Pekerjaan dan Asumsi"],
+        "keywords": "scope work deliverables boundaries assumptions",
+        "length_intent": "Jelaskan ruang lingkup pekerjaan yang dikerjakan, bentuk keluaran tiap area kerja, serta batasan dan asumsi utama agar ekspektasi klien tetap jelas dan menjadi acuan bab pendekatan serta metodologi. (Target: 700 words)."
     },
     {
-        "id": "c_5", "title": "BAB V – METODOLOGI",
-        "subs": ["5.1 Alasan Pemilihan Metodologi", "5.2 Langkah Kerja dengan Kerangka Acuan Terpilih"],
+        "id": "c_4", "title": "BAB V – PENDEKATAN",
+        "subs": ["5.1 Acuan Prinsip/Kerangka/Teori/Regulasi", "5.2 Standar Penyelesaian Masalah"],
+        "keywords": "approach framework principle theory regulation standard",
+        "length_intent": "Uraikan acuan dan prinsip yang digunakan (framework/teori/regulasi/standar) sebagai landasan menyelesaikan masalah klien, dengan tetap merujuk pada ruang lingkup yang sudah dipilih. (Target: 700 words)."
+    },
+    {
+        "id": "c_5", "title": "BAB VI – METODOLOGI",
+        "subs": [
+            "6.1 Alasan Pemilihan Metodologi",
+            "6.2 Cara Framework Diterapkan dalam Metodologi",
+            "6.3 Langkah Kerja dengan Kerangka Acuan Terpilih",
+        ],
         "keywords": "methodology rationale implementation steps framework",
-        "length_intent": "Jelaskan mengapa metodologi tersebut dipilih dan bagaimana langkah kerja detail menggunakan framework tersebut. (Target: 800 words).",
+        "length_intent": "Jelaskan mengapa metodologi tersebut dipilih dan bagaimana langkah kerja detail menggunakan framework tersebut berdasarkan ruang lingkup dan pendekatan yang sudah ditegaskan sebelumnya. (Target: 850 words).",
         "visual_intent": "flowchart"
     },
     {
-        "id": "c_6", "title": "BAB VI – SOLUTION DESIGN",
-        "subs": ["6.1 Solusi/Output Metodologi yang Dibangun", "6.2 Bentuk Keluaran dan Kesesuaian Solusi"],
+        "id": "c_6", "title": "BAB VII – SOLUTION DESIGN",
+        "subs": ["7.1 Solusi/Output Metodologi yang Dibangun", "7.2 Bentuk Keluaran dan Kesesuaian Solusi"],
         "keywords": "solution design output deliverables target state",
         "length_intent": "Jelaskan desain solusi (output metodologi) yang akan dibangun atau diterapkan, termasuk bentuk keluaran seperti dokumen, pendampingan, kegiatan, atau implementation support agar kebutuhan klien dapat tercapai. (Target: 800 words)."
-    },
-    {
-        "id": "c_7", "title": "BAB VII – RUANG LINGKUP PEKERJAAN",
-        "subs": ["7.1 Lingkup Pekerjaan Utama", "7.2 Batasan Pekerjaan dan Asumsi"],
-        "keywords": "scope work deliverables boundaries assumptions",
-        "length_intent": "Jelaskan ruang lingkup pekerjaan yang dikerjakan, bentuk keluaran tiap area kerja, serta batasan dan asumsi utama agar ekspektasi klien tetap jelas. (Target: 650 words)."
     },
     {
         "id": "c_8", "title": "BAB VIII – TIMELINE PEKERJAAN",

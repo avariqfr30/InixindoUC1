@@ -77,6 +77,9 @@
         .document-item strong { display: block; color: #0f172a; font-size: 0.9rem; margin-bottom: 4px; }
         .document-meta-note { font-size: 0.8rem; color: #64748b; line-height: 1.45; }
         .document-item button { width: auto; margin: 0; }
+        .kak-summary-box { background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 0.86rem; line-height: 1.5; }
+        .kak-summary-box strong { color: #7c2d12; }
+        .kak-warning-list { margin: 8px 0 0 18px; padding: 0; color: #9a3412; font-size: 0.82rem; }
         
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
@@ -106,6 +109,22 @@
             
             <label for="select-perusahaan">Nama Perusahaan Klien</label>
             <select id="select-perusahaan"></select>
+
+            <div class="finance-panel">
+                <label for="input-kak-files">Dokumen KAK / TOR</label>
+                <p class="small-note">Unggah KAK/TOR untuk membantu sistem membaca inisiatif, jenis proposal, durasi, biaya, dan framework. Hasil pembacaan ini bisa dipakai sebagai titik awal pengisian form.</p>
+                <div class="upload-row">
+                    <input type="file" id="input-kak-files" accept=".docx,.pdf,.txt,.md" multiple />
+                    <button type="button" id="btn-upload-kak-files" class="secondary">Upload KAK / TOR</button>
+                </div>
+                <div id="kak-summary" class="kak-summary-box">Belum ada dokumen KAK/TOR yang dibaca.</div>
+                <div class="modal-actions" style="margin-bottom: 10px;">
+                    <button type="button" id="btn-apply-kak" class="secondary" disabled>Gunakan Hasil Pembacaan KAK</button>
+                </div>
+                <div id="kak-doc-list" class="document-list">
+                    <div class="template-status">Belum ada dokumen KAK/TOR yang diunggah.</div>
+                </div>
+            </div>
             
             <div id="container-dynamic" class="hidden">
                 <label for="select-mode-proposal">Jenis Dokumen Proposal</label>
@@ -304,13 +323,19 @@
             templateStatus: document.getElementById('template-status'),
             btnSaveSettings: document.getElementById('btn-save-settings'),
             btnUploadTemplate: document.getElementById('btn-upload-template'),
-            btnClearTemplate: document.getElementById('btn-clear-template')
+            btnClearTemplate: document.getElementById('btn-clear-template'),
+            kakFiles: document.getElementById('input-kak-files'),
+            btnUploadKakFiles: document.getElementById('btn-upload-kak-files'),
+            kakDocList: document.getElementById('kak-doc-list'),
+            kakSummary: document.getElementById('kak-summary'),
+            btnApplyKak: document.getElementById('btn-apply-kak')
         };
         let budgetAnalyzeInFlight = false;
         let proposalJobInFlight = false;
         let jobPollIntervalMs = 2000;
         let prefetchTimer = null;
         let lastPrefetchKey = '';
+        let latestKakSuggestions = null;
         const richEditors = new Map();
 
         function escapeHtml(value) {
@@ -602,6 +627,7 @@
         }
         init();
         initRichEditors();
+        loadKakContext();
 
         const openModal = (el) => el.classList.add('active');
         const closeModal = (el) => el.classList.remove('active');
@@ -635,6 +661,12 @@
         }
 
         function applyPayload(payload = {}) {
+            if (payload.nama_perusahaan) {
+                const exists = Array.from(ui.selPerusahaan.options).some(option => option.value === payload.nama_perusahaan);
+                if (!exists) {
+                    ui.selPerusahaan.add(new Option(payload.nama_perusahaan, payload.nama_perusahaan));
+                }
+            }
             ui.selPerusahaan.value = payload.nama_perusahaan || '';
             ui.selModeProposal.value = payload.mode_proposal || '';
             ui.selProposal.value = payload.jenis_proposal || '';
@@ -708,6 +740,95 @@
             `).join('');
         }
 
+        function renderKakSummary(analysis = {}) {
+            if (!analysis || !analysis.available) {
+                ui.kakSummary.textContent = analysis.summary || 'Belum ada dokumen KAK/TOR yang dibaca.';
+                latestKakSuggestions = null;
+                ui.btnApplyKak.disabled = true;
+                return;
+            }
+            const warnings = Array.isArray(analysis.warnings) ? analysis.warnings.filter(Boolean) : [];
+            const suggestionLines = Object.entries(analysis.suggestions || {})
+                .filter(([, value]) => String(value || '').trim())
+                .map(([key, value]) => `<li><strong>${escapeHtml(key)}</strong>: ${escapeHtml(value)}</li>`)
+                .join('');
+            const warningLines = warnings.length
+                ? `<ul class="kak-warning-list">${warnings.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+                : '';
+            const suggestionList = suggestionLines
+                ? `<ul class="kak-warning-list">${suggestionLines}</ul>`
+                : '';
+            ui.kakSummary.innerHTML = `
+                <strong>${escapeHtml(analysis.source_document || 'Dokumen KAK/TOR')}</strong><br />
+                ${escapeHtml(analysis.summary || '')}
+                ${suggestionList}
+                ${warningLines}
+            `;
+            latestKakSuggestions = analysis.suggestions || null;
+            ui.btnApplyKak.disabled = !latestKakSuggestions || !Object.keys(latestKakSuggestions).length;
+        }
+
+        async function loadKakContext() {
+            try {
+                const res = await fetch('/api/kak-context');
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Pembacaan KAK/TOR belum tersedia.');
+                renderSupportingDocuments(
+                    ui.kakDocList,
+                    data.documents || [],
+                    'Belum ada dokumen KAK/TOR yang diunggah.'
+                );
+                renderKakSummary(data.analysis || {});
+            } catch (err) {
+                ui.kakDocList.innerHTML = '<div class="template-status">Dokumen KAK/TOR belum bisa dimuat.</div>';
+                renderKakSummary({ available: false, summary: err.message || 'Pembacaan KAK/TOR belum tersedia.' });
+            }
+        }
+
+        function applyKakSuggestions(suggestions = {}, onlyEmpty = false) {
+            const payload = suggestions || {};
+            if (!Object.keys(payload).length) return;
+            if (payload.nama_perusahaan && (!onlyEmpty || !ui.selPerusahaan.value)) {
+                const exists = Array.from(ui.selPerusahaan.options).some(option => option.value === payload.nama_perusahaan);
+                if (!exists) {
+                    ui.selPerusahaan.add(new Option(payload.nama_perusahaan, payload.nama_perusahaan));
+                }
+                ui.selPerusahaan.value = payload.nama_perusahaan;
+            }
+            if (payload.mode_proposal && (!onlyEmpty || !ui.selModeProposal.value)) {
+                ui.selModeProposal.value = payload.mode_proposal;
+            }
+            if (payload.jenis_proposal && (!onlyEmpty || !ui.selProposal.value)) {
+                ui.selProposal.value = payload.jenis_proposal;
+            }
+            if (payload.jenis_proyek && (!onlyEmpty || !ui.selProyek.value)) {
+                ui.selProyek.value = payload.jenis_proyek;
+            }
+            if (payload.konteks_organisasi && (!onlyEmpty || !ui.inpKonteks.value.trim())) {
+                setRichEditorValue(ui.inpKonteks, payload.konteks_organisasi);
+            }
+            if (payload.permasalahan && (!onlyEmpty || !ui.inpPermasalahan.value.trim())) {
+                setRichEditorValue(ui.inpPermasalahan, payload.permasalahan);
+            }
+            if (payload.klasifikasi_kebutuhan && (!onlyEmpty || !getChecked(ui.groupKebutuhan))) {
+                setCheckedValues(ui.groupKebutuhan, payload.klasifikasi_kebutuhan);
+            }
+            if (payload.estimasi_waktu && (!onlyEmpty || !ui.inpWaktu.value.trim())) {
+                ui.inpWaktu.value = payload.estimasi_waktu;
+            }
+            if (payload.estimasi_biaya && (!onlyEmpty || !ui.inpBiaya.value.trim())) {
+                ui.inpBiaya.value = payload.estimasi_biaya;
+            }
+            if (payload.potensi_framework && (!onlyEmpty || !getFinalFrameworks())) {
+                applyFrameworkValue(payload.potensi_framework);
+            }
+            ui.containerDynamic.classList.remove('hidden');
+            ui.financeResult.classList.add('hidden');
+            ui.previewPanel.classList.add('hidden');
+            updateActionState();
+            schedulePrefetch(true);
+        }
+
         async function loadSettings() {
             try {
                 const res = await fetch('/api/settings');
@@ -724,12 +845,18 @@
                     data.credential_documents || [],
                     'Belum ada file pendukung kapabilitas yang diunggah.'
                 );
+                renderSupportingDocuments(
+                    ui.kakDocList,
+                    data.kak_documents || [],
+                    'Belum ada dokumen KAK/TOR yang diunggah.'
+                );
                 ui.templateStatus.textContent = data.has_active_template
                     ? `Template aktif: ${data.active_template_name || 'blanko proposal'}`
                     : 'Belum ada template blanko aktif.';
             } catch (_) {
                 ui.portfolioDocList.innerHTML = '<div class="template-status">File pendukung portofolio belum bisa dimuat.</div>';
                 ui.credentialDocList.innerHTML = '<div class="template-status">File pendukung kapabilitas belum bisa dimuat.</div>';
+                ui.kakDocList.innerHTML = '<div class="template-status">Dokumen KAK/TOR belum bisa dimuat.</div>';
                 ui.templateStatus.textContent = 'Pengaturan belum bisa dimuat.';
             }
         }
@@ -765,6 +892,7 @@
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'File pendukung belum berhasil dihapus.');
                 await loadSettings();
+                await loadKakContext();
             } catch (err) {
                 alert(err.message || 'File pendukung belum berhasil dihapus.');
             }
@@ -810,6 +938,7 @@
 
         ui.portfolioDocList.addEventListener('click', handleSupportingDocumentClick);
         ui.credentialDocList.addEventListener('click', handleSupportingDocumentClick);
+        ui.kakDocList.addEventListener('click', handleSupportingDocumentClick);
 
         ui.selPerusahaan.addEventListener('change', () => {
             ui.containerDynamic.classList.remove('hidden');
@@ -860,6 +989,23 @@
 
         ui.btnUploadCredentialFiles.addEventListener('click', async () => {
             await uploadSupportingDocuments('credentials', ui.settingsCredentialFiles);
+        });
+
+        ui.btnUploadKakFiles.addEventListener('click', async () => {
+            await uploadSupportingDocuments('kak', ui.kakFiles);
+            await loadKakContext();
+            if (latestKakSuggestions) {
+                applyKakSuggestions(latestKakSuggestions, true);
+            }
+        });
+
+        ui.btnApplyKak.addEventListener('click', () => {
+            if (!latestKakSuggestions) {
+                alert('Belum ada hasil pembacaan KAK/TOR yang bisa dipakai.');
+                return;
+            }
+            applyKakSuggestions(latestKakSuggestions, false);
+            alert('Hasil pembacaan KAK/TOR sudah diterapkan ke form.');
         });
 
         ui.btnUploadTemplate.addEventListener('click', async () => {

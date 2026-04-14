@@ -447,21 +447,24 @@ class ProposalEngineMixin:
             chapter["id"] for chapter in selected_chapters
             if self._use_structured_chapter(chapter["id"])
         }
-        context_futures = {
-            chapter['id']: self.io_pool.submit(
-                self._build_chapter_prompt,
-                chapter, client, project, budget, service_type, project_goal, project_type, timeline,
-                notes, regulations, firm_data, firm_profile, research_bundle, personalization_pack, value_map, proposal_contract, proposal_mode,
-                chapter_targets.get(chapter['id'], self._target_words(chapter))
-            )
-            for chapter in selected_chapters
-            if chapter['id'] not in structured_ids
-        }
+        kak_context_base = self._build_kak_context_base(
+            project=project,
+            project_goal=project_goal,
+            notes=notes,
+            regulations=regulations,
+            timeline=timeline,
+        ) if self._normalize_proposal_mode(proposal_mode) == "kak_response" else ""
 
         chapter_map = {chapter['id']: chapter for chapter in selected_chapters}
         chapter_prompts: Dict[str, str] = {}
         chapter_outputs: Dict[str, str] = {}
         for chapter in selected_chapters:
+            chapter_chain_context = self._build_chapter_chain_context(
+                chapter=chapter,
+                selected_chapters=selected_chapters,
+                chapter_outputs=chapter_outputs,
+                proposal_mode=proposal_mode,
+            )
             if chapter['id'] in structured_ids:
                 rendered = self._render_structured_chapter(
                     chapter=chapter,
@@ -476,9 +479,12 @@ class ProposalEngineMixin:
                     regulations=regulations,
                     firm_data=firm_data,
                     firm_profile=firm_profile,
+                    research_bundle=research_bundle,
                     personalization_pack=personalization_pack,
                     value_map=value_map,
                     proposal_mode=proposal_mode,
+                    chapter_chain_context=chapter_chain_context,
+                    kak_context_base=kak_context_base,
                 )
                 rendered = self._tighten_structured_chapter(
                     chapter=chapter,
@@ -511,7 +517,28 @@ class ProposalEngineMixin:
                         )
                 chapter_outputs[chapter['id']] = cleaned_content
                 continue
-            ctx = context_futures[chapter['id']].result()
+            ctx = self._build_chapter_prompt(
+                chapter,
+                client,
+                project,
+                budget,
+                service_type,
+                project_goal,
+                project_type,
+                timeline,
+                notes,
+                regulations,
+                firm_data,
+                firm_profile,
+                research_bundle,
+                personalization_pack,
+                value_map,
+                proposal_contract,
+                proposal_mode,
+                chapter_targets.get(chapter['id'], self._target_words(chapter)),
+                chapter_chain_context=chapter_chain_context,
+                kak_context_base=kak_context_base,
+            )
             if not ctx['success']:
                 continue
             chapter_prompts[chapter['id']] = ctx['prompt']

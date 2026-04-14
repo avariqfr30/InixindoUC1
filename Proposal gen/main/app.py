@@ -573,6 +573,13 @@ def get_companies():
     return jsonify(sorted(companies))
 
 
+def _company_candidates() -> list[str]:
+    if knowledge_base.df is None or knowledge_base.df.empty or 'entity' not in knowledge_base.df.columns:
+        return []
+    companies = knowledge_base.df['entity'].dropna().astype(str).str.strip().unique().tolist()
+    return sorted([c for c in companies if c.lower() != 'nan' and c])
+
+
 @app.route('/api/suggest-budget', methods=['POST'])
 def suggest_budget():
     """Estimate pricing tiers from public financial signals."""
@@ -630,6 +637,11 @@ def prefetch_context():
     data = request.json or {}
     status = _warm_request_context(data)
     return jsonify({"status": status})
+
+
+@app.route('/api/kak-context')
+def get_kak_context():
+    return jsonify(app_state_store.get_latest_kak_context(company_candidates=_company_candidates()))
 
 
 @app.route('/generate', methods=['POST'])
