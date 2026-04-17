@@ -177,6 +177,8 @@ PROJECT_CSV_PATH = Path(os.getenv("PROJECT_CSV_PATH", str(PROJECT_ROOT / "db.csv
 APP_STATE_DB_PATH = Path(os.getenv("APP_STATE_DB_PATH", str(PROJECT_ROOT / "app_state.db"))).expanduser()
 APP_ASSET_ROOT = Path(os.getenv("APP_ASSET_ROOT", str(PROJECT_ROOT / "app_assets"))).expanduser()
 GENERATED_OUTPUT_DIR = Path(os.getenv("GENERATED_OUTPUT_DIR", str(PROJECT_ROOT / "generated"))).expanduser()
+VECTOR_STORE_DIR = Path(os.getenv("VECTOR_STORE_DIR", str(PROJECT_ROOT / ".chroma"))).expanduser()
+KB_SYNC_STATE_PATH = Path(os.getenv("KB_SYNC_STATE_PATH", str(PROJECT_ROOT / ".kb_vector_state.json"))).expanduser()
 DB_URI = f"sqlite:///{PROJECT_DB_PATH}"
 
 # Low-level shared testing runtime.
@@ -190,6 +192,10 @@ MAX_GENERATION_BACKLOG = max(MAX_ACTIVE_GENERATIONS, int(os.getenv("MAX_GENERATI
 JOB_RETENTION_SECONDS = max(300, int(os.getenv("JOB_RETENTION_SECONDS", "1800")))
 JOB_POLL_INTERVAL_MS = max(1000, int(os.getenv("JOB_POLL_INTERVAL_MS", "2000")))
 RESEARCH_CACHE_TTL_SECONDS = max(300, int(os.getenv("RESEARCH_CACHE_TTL_SECONDS", "1800")))
+KB_EMBED_TIMEOUT_SECONDS = max(60, int(os.getenv("KB_EMBED_TIMEOUT_SECONDS", "180")))
+KB_UPSERT_BATCH_SIZE = max(1, int(os.getenv("KB_UPSERT_BATCH_SIZE", "16")))
+KB_STARTUP_RETRY_DELAY_SECONDS = max(5, int(os.getenv("KB_STARTUP_RETRY_DELAY_SECONDS", "20")))
+KB_STARTUP_MAX_RETRIES = max(1, int(os.getenv("KB_STARTUP_MAX_RETRIES", "4")))
 APP_HOST = os.getenv("APP_HOST", "0.0.0.0").strip() or "0.0.0.0"
 APP_PORT = max(1, int(os.getenv("APP_PORT", "5500")))
 APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "proposal-gen-dev-secret-change-me").strip() or "proposal-gen-dev-secret-change-me"

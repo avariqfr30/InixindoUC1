@@ -500,9 +500,12 @@ def ready():
             and not knowledge_base.df.empty
             and "entity" in knowledge_base.df.columns
             and "topic" in knowledge_base.df.columns
+            and getattr(knowledge_base, "vector_ready", False)
             and not getattr(knowledge_base, "last_refresh_error", "")
         ),
         "error": getattr(knowledge_base, "last_refresh_error", ""),
+        "sync_in_progress": getattr(knowledge_base, "sync_in_progress", False),
+        "vector_store_dir": str(getattr(knowledge_base, "vector_store_dir", "")),
     }
 
     app_state_ok = False
