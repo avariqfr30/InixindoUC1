@@ -664,11 +664,10 @@ UNIVERSAL_STRUCTURE = [
         "id": "c_5", "title": "BAB VI – METODOLOGI",
         "subs": [
             "6.1 Alasan Pemilihan Metodologi",
-            "6.2 Cara Framework Diterapkan dalam Metodologi",
-            "6.3 Langkah Kerja dengan Kerangka Acuan Terpilih",
+            "6.2 Langkah Kerja dengan Kerangka Acuan Terpilih",
         ],
         "keywords": "methodology rationale implementation steps framework",
-        "length_intent": "Jelaskan mengapa metodologi tersebut dipilih dan bagaimana langkah kerja detail menggunakan framework tersebut berdasarkan ruang lingkup dan pendekatan yang sudah ditegaskan sebelumnya. (Target: 850 words).",
+        "length_intent": "Jelaskan mengapa metodologi tersebut dipilih dan bagaimana langkah kerja detail menggunakan framework tersebut berdasarkan ruang lingkup dan pendekatan yang sudah ditegaskan sebelumnya, tanpa menambah sub-bab di luar struktur standar perusahaan. (Target: 850 words).",
         "visual_intent": "flowchart"
     },
     {

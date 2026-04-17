@@ -1432,6 +1432,8 @@ class ProposalSupportMixin:
         text = self._prune_empty_markdown_sections(text)
         if not text:
             return ""
+        text = text.replace("…", " ")
+        text = re.sub(r"\.{3,}", ".", text)
         return re.sub(r"\n{3,}", "\n\n", text).strip()
 
     @classmethod
@@ -1465,30 +1467,26 @@ class ProposalSupportMixin:
         chapter_id: str,
         proposal_mode: str = "canvassing",
     ) -> str:
-        if cls._normalize_proposal_mode(proposal_mode) == "kak_response":
-            transitions = {
-                "k_2": "Pembacaan KAK pada bab ini menjadi dasar penajaman pendekatan, metodologi, dan rincian pelaksanaan pada bab-bab setelahnya.",
-                "k_3": "Pendekatan dan metodologi pada bab ini harus langsung diturunkan dari pembacaan KAK, lalu menjadi acuan untuk program kerja, struktur tim, dan deliverable.",
-                "k_4": "Program kerja pada bab ini menerjemahkan pendekatan menjadi ritme pelaksanaan yang akan dipakai sebagai dasar pengendalian tim dan keluaran.",
-                "k_5": "Struktur tim pada bab ini harus konsisten dengan program kerja dan menjadi dasar akuntabilitas pelaksanaan serta mutu keluaran.",
-                "k_6": "Rincian deliverable pada bab ini harus tetap mengikuti pemahaman KAK, metodologi, dan susunan tim yang sudah diputuskan sebelumnya.",
-            }
-        else:
-            transitions = {
-                "c_1": "Konteks klien pada bab ini menjadi dasar pembacaan masalah dan prioritas kebutuhan pada bab berikutnya.",
-                "c_2": "Rumusan masalah pada bab ini harus menjadi dasar klasifikasi kebutuhan dan penentuan fokus kerja pada bab berikutnya.",
-                "c_3": "Penajaman kebutuhan pada bab ini harus langsung diterjemahkan menjadi ruang lingkup kerja yang dipilih secara sadar.",
-                "c_7": "Ruang lingkup pada bab ini harus menjadi acuan langsung bagi pendekatan dan metodologi, sehingga solusi tidak bergerak di luar batas kerja yang disepakati.",
-                "c_4": "Pendekatan pada bab ini harus dibangun di atas ruang lingkup yang sudah dipilih, lalu menjadi landasan metodologi pelaksanaan.",
-                "c_5": "Metodologi pada bab ini harus menerjemahkan ruang lingkup dan pendekatan menjadi langkah kerja yang akan dipakai dalam solution design, timeline, dan governance.",
-                "c_6": "Desain solusi pada bab ini harus tetap setia pada ruang lingkup, pendekatan, dan metodologi, lalu menjadi acuan bentuk deliverable dan ritme pelaksanaan.",
-                "c_8": "Timeline pada bab ini harus menjadi acuan tata kelola, penugasan tim, dan quality gate pada tahap pelaksanaan.",
-                "c_9": "Tata kelola pada bab ini harus menjaga scope, timeline, dan keputusan eksekusi tetap sinkron sampai fase komersial dan delivery.",
-                "c_10": "Profil perusahaan pada bab ini harus memperkuat keyakinan bahwa pendekatan, metodologi, dan scope yang diusulkan memang dapat dijalankan.",
-                "c_11": "Struktur tim pada bab ini harus menunjukkan siapa yang menjalankan metodologi, menjaga governance, dan menerima accountability setiap fase.",
-                "c_12": "Model pembiayaan pada bab ini harus tetap konsisten terhadap ruang lingkup, timeline, tata kelola, dan bentuk deliverable yang sudah dijelaskan sebelumnya.",
-            }
-        return transitions.get(chapter_id, "")
+        hidden_guidance = {
+            "c_1": "Jaga agar konteks bisnis, motif permintaan jasa, dan istilah kunci tetap konsisten.",
+            "c_2": "Turunkan masalah menjadi kebutuhan kerja yang konkret tanpa menyebut nomor bab atau urutan pembahasan.",
+            "c_3": "Kunci prioritas kebutuhan agar ruang lingkup dan metode tetap fokus pada inti pekerjaan.",
+            "c_7": "Pastikan batas scope, asumsi, dan bentuk keluaran cukup jelas untuk menjadi fondasi pendekatan dan metode.",
+            "c_4": "Gunakan acuan dan prinsip sebagai landasan kerja yang konsisten, bukan daftar referensi.",
+            "c_5": "Turunkan pendekatan menjadi langkah kerja, quality gate, dan keputusan operasional yang konkret.",
+            "c_6": "Pastikan desain solusi tetap konsisten dengan scope, pendekatan, dan metode yang sudah dipilih.",
+            "c_8": "Ikat jadwal, deliverable, dan ritme pelaksanaan ke keputusan serta kontrol yang realistis.",
+            "c_9": "Jaga sinkronisasi antara kontrol proyek, keputusan, dan akuntabilitas pelaksanaan.",
+            "c_10": "Tampilkan kapabilitas sebagai bukti kesiapan delivery, bukan promosi umum.",
+            "c_11": "Pastikan peran tim dan akuntabilitas mudah ditelusuri dari metode dan governance.",
+            "c_12": "Jaga konsistensi model pembiayaan terhadap scope, timeline, dan bentuk deliverable.",
+            "k_2": "Gunakan hasil pembacaan KAK sebagai dasar penajaman isi, tanpa menyebut urutan bab secara eksplisit.",
+            "k_3": "Turunkan pembacaan KAK menjadi acuan kerja dan metode yang nyata, tanpa meta-narasi.",
+            "k_4": "Uraikan ritme kerja sebagai konsekuensi logis dari metode, bukan sebagai penjelasan struktur dokumen.",
+            "k_5": "Pastikan struktur tim terlihat sebagai alat delivery dan kontrol mutu yang konkret.",
+            "k_6": "Tampilkan deliverable sebagai hasil kerja yang dapat dipakai, bukan penjelasan tentang bab lain.",
+        }
+        return hidden_guidance.get(chapter_id, "")
 
     @classmethod
     def _chapter_output_brief(
@@ -1531,26 +1529,21 @@ class ProposalSupportMixin:
 
         if prior_chapters:
             prior = prior_chapters[-1]
-            prior_title = prior.get("title", "")
             prior_brief = self._chapter_output_brief(chapter_outputs.get(prior.get("id", ""), ""))
             if prior_brief:
-                lines.append(f"Bab sebelumnya yang wajib dijadikan dasar adalah {prior_title}: {prior_brief}.")
-            else:
-                lines.append(f"Bab sebelumnya yang wajib dijadikan dasar adalah {prior_title}.")
+                lines.append(f"Pertahankan kesinambungan istilah, keputusan, dan fokus kerja berikut: {prior_brief}.")
 
         transition = self._chapter_transition_sentence(chapter_id, proposal_mode)
         if transition:
             lines.append(transition)
 
         if next_chapter:
-            lines.append(
-                f"Bab ini harus menghasilkan keputusan, batas kerja, atau logika pelaksanaan yang bisa langsung dipakai oleh {next_chapter.get('title', '')}."
-            )
+            lines.append("Akhiri pembahasan dengan keputusan, batas kerja, atau logika pelaksanaan yang cukup konkret untuk tahap berikutnya.")
 
         if self._normalize_proposal_mode(proposal_mode) == "kak_response" and chapter_id not in {"k_1", "k_2"}:
             kak_brief = self._chapter_output_brief(chapter_outputs.get("k_2", ""))
             if kak_brief:
-                lines.append(f"Dasar sharpening dari pembacaan KAK yang wajib dijaga adalah: {kak_brief}.")
+                lines.append(f"Jaga konteks dasar hasil pembacaan KAK berikut: {kak_brief}.")
 
         return " ".join(line.strip() for line in lines if line.strip()).strip()
 
@@ -2531,9 +2524,9 @@ class ProposalSupportMixin:
             if relationship_mode == "existing"
             else f"Inisiatif ini membutuhkan mitra yang mampu membaca konteks awal secara rapi, proporsional, dan langsung mengarah pada prioritas kerja."
         )
-        chapter_transition = self._chapter_transition_sentence(chapter.get("id", ""), proposal_mode)
-        chain_clause = f" {chapter_chain_context}" if chapter_chain_context else ""
-        kak_clause = f" Dasar sharpening KAK yang tetap dijaga pada bab ini adalah {kak_context_base}" if kak_context_base and normalized_mode == "kak_response" else ""
+        chapter_transition = ""
+        chain_clause = ""
+        kak_clause = ""
         framework_osint_context = self._summarize_phrase(
             research_bundle.get("regulations", ""),
             "",
@@ -3042,7 +3035,6 @@ class ProposalSupportMixin:
                 f"3. Metodologi ini cukup fleksibel untuk merespons perubahan prioritas, tetapi tetap disiplin terhadap akuntabilitas hasil.\n"
                 f"- Dengan metodologi seperti ini, forum kerja {client} bisa fokus pada keputusan penting, bukan menghabiskan energi untuk merapikan ulang arah kerja setiap saat.\n"
                 f"- Metodologi ini juga memudahkan penempatan peninjau mutu, penerimaan keluaran, dan kontrol perubahan sejak awal.\n\n"
-                f"## {self._chapter_subtitle(chapter, 1, '6.2 Cara Framework Diterapkan dalam Metodologi')}\n"
                 f"Framework yang dipilih tidak berhenti sebagai referensi, tetapi diterjemahkan ke peran kerja yang bisa dibaca sponsor dan tim pelaksana. "
                 f"Dengan cara ini, {client} dapat melihat framework mana yang dipakai untuk membentuk keputusan, dokumen kerja, kontrol mutu, dan gerbang penerimaan selama engagement berjalan.\n\n"
                 "| Framework / Acuan | Cara Diterapkan | Artefak atau Output yang Dipengaruhi | Fase Penggunaan Dominan |\n"
@@ -3052,7 +3044,7 @@ class ProposalSupportMixin:
                 f"Untuk framework yang bersifat custom atau internal, penerapannya tetap diturunkan menjadi checklist, kriteria desain, dan acceptance yang dapat diuji pada fase yang relevan.\n"
                 f"- Prinsip utamanya adalah setiap acuan harus punya jejak pada keputusan, dokumen, atau quality gate yang nyata.\n"
                 f"- Dengan begitu, sponsor {client} dapat menilai apakah framework yang disebut benar-benar membantu eksekusi, bukan hanya menjadi label metodologis.\n\n"
-                f"## {self._chapter_subtitle(chapter, 2, '6.3 Langkah Kerja dengan Kerangka Acuan Terpilih')}\n"
+                f"## {self._chapter_subtitle(chapter, 1, '6.2 Langkah Kerja dengan Kerangka Acuan Terpilih')}\n"
                 f"Langkah kerja berikut dipakai untuk menerjemahkan pendekatan ke ritme pelaksanaan yang lebih konkret:\n\n"
                 "| Fase | Periode | Tujuan Kerja | Keluaran Utama | Gerbang Mutu |\n"
                 "| --- | --- | --- | --- | --- |\n"

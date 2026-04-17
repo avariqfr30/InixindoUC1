@@ -2723,6 +2723,8 @@ class AppStateStore:
             line = re.sub(r"\s+", " ", line)
             if len(line.split()) < 4:
                 continue
+            if re.search(r"\b(belum pernah|tidak pernah|n/a|none)\b", line, re.IGNORECASE):
+                continue
             normalized = SchemaMapper.normalize_key(line)
             if not normalized or normalized in seen:
                 continue
@@ -2736,13 +2738,103 @@ class AppStateStore:
                 {
                     "area": line[:160],
                     "relevansi": "relevan untuk menunjukkan pengalaman serupa dan kesiapan pelaksanaan pekerjaan",
-                    "bukti": "dokumen portofolio internal perusahaan penyusun",
+                    "bukti": "ringkasan portofolio internal dan pengalaman sejenis perusahaan penyusun",
                     "nilai_tambah": "memperkuat kredibilitas proposal dan membantu klien melihat bukti kemampuan secara lebih konkret",
                 }
             )
             if len(rows) >= 4:
                 break
         return rows
+
+    @staticmethod
+    def _dedupe_phrases(items: List[str], limit: int = 6) -> List[str]:
+        seen: Set[str] = set()
+        result: List[str] = []
+        for item in items:
+            clean = re.sub(r"\s+", " ", str(item or "")).strip(" -;|,.:")
+            if not clean:
+                continue
+            key = clean.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(clean)
+            if len(result) >= limit:
+                break
+        return result
+
+    @staticmethod
+    def _summarize_profile_blob(text: str, fallback: str, max_items: int = 4) -> str:
+        source = str(text or "")
+        if not source.strip():
+            return fallback
+        normalized = source.replace("|", "\n").replace(";", "\n")
+        candidates: List[str] = []
+        for raw_line in normalized.splitlines():
+            line = re.sub(r"^\s*[-*•\d.]+\s*", "", raw_line).strip()
+            line = re.sub(r"\s+", " ", line)
+            if len(line.split()) < 4:
+                continue
+            if re.search(
+                r"\b(no|nama tenaga|posisi diusulkan|tingkat pendidikan|lama pengalaman|peran dalam penugasan|tahun)\b",
+                line,
+                re.IGNORECASE,
+            ):
+                continue
+            if re.search(r"\b(belum pernah|tidak pernah|n/a|none)\b", line, re.IGNORECASE):
+                continue
+            candidates.append(line[:180])
+        picked = AppStateStore._dedupe_phrases(candidates, limit=max_items)
+        if not picked:
+            return fallback
+        return "; ".join(picked)
+
+    @classmethod
+    def _summarize_credential_blob(cls, text: str, fallback: str) -> str:
+        source = str(text or "")
+        if not source.strip():
+            return fallback
+        certifications = re.findall(
+            r"\b(?:TOGAF|COBIT(?:\s*\d+)?|ITIL(?:\s*[A-Za-z0-9.+-]+)?|ISO\s*\/?\s*IEC?\s*\d+|ISO\s*\d+|CEH|CISA|CHFI|CCNA|CAPM|Project\+|Lead Auditor ISO 27001|Microsoft Certified Database Administrator)\b",
+            source,
+            flags=re.IGNORECASE,
+        )
+        certification_list = cls._dedupe_phrases(certifications, limit=6)
+
+        role_signals: List[str] = []
+        role_map = [
+            (r"\bproject manager\b|\bpmo\b", "project management"),
+            (r"\bsecurity\b|\bethical hacker\b|\bincident handler\b|\bforensic\b", "cyber security"),
+            (r"\bgovernance\b|\bcobit\b|\biso\b", "IT governance"),
+            (r"\bnetwork\b|\bccna\b", "network & infrastructure"),
+            (r"\bprivacy\b|\bpdp\b|\bropa\b|\bdpia\b", "data privacy & compliance"),
+            (r"\btechnical writer\b|\bdokumentasi\b", "documentation support"),
+        ]
+        for pattern, label in role_map:
+            if re.search(pattern, source, re.IGNORECASE):
+                role_signals.append(label)
+        role_list = cls._dedupe_phrases(role_signals, limit=4)
+
+        parts: List[str] = []
+        if role_list:
+            parts.append(f"Kapabilitas tim mencakup {', '.join(role_list)}")
+        if certification_list:
+            parts.append(f"Sertifikasi inti meliputi {', '.join(certification_list)}")
+        if parts:
+            return ". ".join(parts) + "."
+        return cls._summarize_profile_blob(source, fallback, max_items=3)
+
+    @classmethod
+    def _summarize_portfolio_blob(cls, text: str, fallback: str) -> str:
+        source = str(text or "")
+        if not source.strip():
+            return fallback
+        if "|" in source:
+            rows = cls._parse_structured_portfolio_rows(source)
+            areas = cls._dedupe_phrases([row.get("area", "") for row in rows], limit=4)
+            if areas:
+                return f"Pengalaman perusahaan mencakup {', '.join(areas)}."
+        return cls._summarize_profile_blob(source, fallback, max_items=3)
 
     def get_settings(self) -> Dict[str, Any]:
         template_path = self.get_template_path()
@@ -2840,7 +2932,10 @@ class AppStateStore:
         ]
         portfolio_text = " ; ".join([item for item in portfolio_bits if item])
         if portfolio_text:
-            profile["portfolio_highlights"] = portfolio_text
+            profile["portfolio_highlights"] = self._summarize_portfolio_blob(
+                portfolio_text,
+                str(profile.get("portfolio_highlights") or "").strip() or "Pengalaman perusahaan disesuaikan dengan kebutuhan proyek klien.",
+            )
         credential_bits = [
             str(profile.get("credential_highlights") or "").strip(),
             internal_credentials.strip(),
@@ -2848,7 +2943,10 @@ class AppStateStore:
         ]
         credential_text = " ; ".join([item for item in credential_bits if item])
         if credential_text:
-            profile["credential_highlights"] = credential_text
+            profile["credential_highlights"] = self._summarize_credential_blob(
+                credential_text,
+                str(profile.get("credential_highlights") or "").strip() or "Kapabilitas inti dan sertifikasi relevan perusahaan penyusun.",
+            )
         structured_rows = self._parse_structured_portfolio_rows(internal_portfolio)
         if not structured_rows and "|" in portfolio_docs_text:
             structured_rows = self._parse_structured_portfolio_rows(portfolio_docs_text)
