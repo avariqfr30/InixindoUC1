@@ -1825,7 +1825,33 @@ class ProposalSupportMixin:
         return rows
 
     @staticmethod
+    def _framework_tldr(item: str, ai_mode: bool = False) -> str:
+        lowered = (item or "").strip().lower()
+        if "cobit" in lowered:
+            return "COBIT membantu menata keputusan, kontrol, dan akuntabilitas tata kelola agar delivery tidak bergerak tanpa arah."
+        if "itil" in lowered:
+            return "ITIL membantu merapikan alur layanan, incident, perubahan, dan mutu operasi agar eksekusi lebih stabil."
+        if "togaf" in lowered:
+            return "TOGAF membantu menyusun arah arsitektur target dan peta perubahan agar keputusan desain tidak terputus dari roadmap."
+        if "dama" in lowered:
+            return "DAMA membantu menata tata kelola data, kualitas data, dan peran pengelolanya agar keputusan berbasis data lebih dapat dipercaya."
+        if "tm forum" in lowered:
+            return "TM Forum membantu menyelaraskan proses layanan, operasi, dan model kapabilitas industri agar perbaikan tidak parsial."
+        if any(token in lowered for token in ["iso", "pojk", "ojk", "nist", "regulasi", "kepatuhan"]):
+            return "Acuan ini menetapkan batas kepatuhan, kontrol minimum, dan mutu yang wajib dijaga selama pekerjaan berjalan."
+        if "ai" in lowered or "model" in lowered or "data" in lowered:
+            return (
+                "Acuan ini membantu menjaga kesiapan data, akuntabilitas keputusan, dan kontrol penerapan solusi sebelum diperluas."
+                if ai_mode
+                else "Acuan ini membantu menjaga keputusan berbasis data tetap punya kontrol, akuntabilitas, dan kualitas hasil yang memadai."
+            )
+        if "standar" in lowered or "framework" in lowered:
+            return "Acuan ini memberi bahasa kerja yang seragam agar keputusan, desain, dan kontrol pelaksanaan tidak berjalan sporadis."
+        return "Acuan ini memberi pegangan praktis agar keputusan, langkah kerja, dan mutu hasil tetap konsisten dari awal sampai akhir."
+
+    @classmethod
     def _framework_reference_rows(
+        cls,
         regulations: str,
         project_type: str,
         ai_mode: bool = False,
@@ -1855,6 +1881,7 @@ class ProposalSupportMixin:
         rows: List[Dict[str, str]] = []
         for item in selected[:4]:
             lowered = item.lower()
+            ringkas = cls._framework_tldr(item, ai_mode=ai_mode)
             if any(token in lowered for token in ["iso", "pojk", "ojk", "nist", "regulasi", "kepatuhan"]):
                 peran = "memberi batas kepatuhan, kontrol minimum, dan ekspektasi kualitas yang wajib dijaga"
             elif any(token in lowered for token in ["cobit", "itil", "togaf", "tm forum", "dama", "framework", "standar"]):
@@ -1874,6 +1901,7 @@ class ProposalSupportMixin:
             rows.append(
                 {
                     "acuan": item,
+                    "ringkas": ringkas,
                     "peran": peran,
                     "relevansi": relevansi,
                 }
@@ -2546,7 +2574,7 @@ class ProposalSupportMixin:
             if framework_osint_context else ""
         )
         framework_rows = "\n".join(
-            f"| {item['acuan']} | {item['peran']} | {item['relevansi']} |"
+            f"| {item['acuan']} | {item['ringkas']} | {item['relevansi']} |"
             for item in self._framework_reference_rows(
                 regulations,
                 project_type,
@@ -2684,7 +2712,7 @@ class ProposalSupportMixin:
                     f"Kerangka yang dipilih juga harus mampu menjaga konsistensi antara kebutuhan {client}, ruang lingkup pekerjaan, dan bentuk keluaran yang dijanjikan.\n"
                     "1. Kerangka acuan dipilih berdasarkan relevansi terhadap tujuan pekerjaan, kompleksitas lingkup, dan kebutuhan tata kelola.\n"
                     "2. Kerangka acuan dipakai sebagai pedoman agar analisis, keputusan, dan keluaran pekerjaan mempunyai standar yang konsisten.\n"
-                    "| Kerangka / Acuan | Peran dalam Pekerjaan | Relevansi bagi Klien |\n"
+                    "| Kerangka / Acuan | Ringkasnya | Mengapa Dipakai pada Pekerjaan Ini |\n"
                     "| --- | --- | --- |\n"
                     f"{framework_rows}\n"
                     f"{ai_kak_note}\n\n"
@@ -3002,7 +3030,7 @@ class ProposalSupportMixin:
                 f"Pemilihan acuan untuk {client} diarahkan agar kebutuhan {short_goal.lower()} dapat ditangani dengan bahasa kerja yang tetap konsisten terhadap {term_line}. "
                 f"Acuan ini sengaja dibangun di atas ruang lingkup yang sudah dipilih, sehingga pendekatan tidak bergerak di luar batas kerja yang sudah disepakati. "
                 f"Artinya, acuan dipilih bukan karena popularitasnya, tetapi karena benar-benar membantu menyusun urutan keputusan, menjaga kualitas keluaran, dan menempatkan kontrol yang proporsional sejak awal.\n\n"
-                "| Acuan | Peran dalam Proposal | Relevansi bagi Klien |\n"
+                "| Acuan | Ringkasnya | Mengapa Dipakai pada Proyek Ini |\n"
                 "| --- | --- | --- |\n"
                 f"{framework_rows}\n\n"
                 f"Dengan acuan seperti di atas, {client} memperoleh pegangan yang jelas mengenai standar apa yang dipakai untuk menguji apakah solusi yang diusulkan memang selaras dengan konteks, risiko, dan ekspektasi hasil bisnis.\n\n"
