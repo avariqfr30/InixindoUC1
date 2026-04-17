@@ -97,9 +97,7 @@ class ProposalEngineMixin:
         words = re.findall(r"\S+", text)
         if len(words) <= max_words:
             return " ".join(words)
-        head = " ".join(words[:110])
-        tail = " ".join(words[-60:])
-        return f"{head} ... {tail}"
+        return " ".join(words[:max_words]).rstrip(".,;:")
 
     def _apply_global_coherence(
         self,

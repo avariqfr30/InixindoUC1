@@ -986,6 +986,15 @@ class KnowledgeBase:
 
 # Public research helper (Serper & LLM Extractors).
 class Researcher:
+    CONTEXT_STOPWORDS = {
+        "yang", "dengan", "untuk", "dari", "pada", "dan", "atau", "agar", "sebagai",
+        "dalam", "akan", "lebih", "oleh", "serta", "suatu", "para", "bagi", "atas",
+        "this", "that", "from", "with", "into", "their", "client", "proposal",
+        "project", "service", "mode", "response", "canvassing", "kak", "kerangka",
+        "acuan", "kerja", "jenis", "proyek", "proposal", "perusahaan", "klien",
+        "pekerjaan", "kebutuhan", "inisiatif", "prioritas", "terukur",
+    }
+
     @staticmethod
     def _has_serper_key() -> bool:
         key = (SERPER_API_KEY or "").strip()
@@ -1047,16 +1056,24 @@ class Researcher:
             
             if "NOT_FOUND" in data.insight.upper() or not data.insight:
                 return ""
-            return data.insight
+            return Researcher._clean_osint_fact(data.insight)
         except Exception as e:
             logger.warning(f"Insight extraction failed for {url}: {e}")
             return ""
 
     @staticmethod
+    def _clean_osint_fact(text: str) -> str:
+        cleaned = str(text or "").replace("\xa0", " ").replace("…", " ")
+        cleaned = re.sub(r"https?://\S+|www\.\S+", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\.{3,}", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" -|,;:")
+        return cleaned
+
+    @staticmethod
     def _format_source_evidence_item(item: Dict[str, Any], fact_override: str = "", index: int = 1) -> str:
         title = str(item.get("title", "") or "Sumber tanpa judul").strip()
         link = str(item.get("link", "") or "-").strip()
-        fact = str(fact_override or item.get("snippet", "") or "").strip()
+        fact = Researcher._clean_osint_fact(str(fact_override or item.get("snippet", "") or ""))
         if not fact:
             return ""
         source_name = Researcher._source_name(link)
@@ -1119,6 +1136,132 @@ class Researcher:
     def _normalize_text(text: str) -> str:
         normalized = re.sub(r"[^a-z0-9]+", " ", (text or "").lower())
         return re.sub(r"\s+", " ", normalized).strip()
+
+    @classmethod
+    def _infer_industry_from_context(cls, client_name: str, ai_context: str = "", regulations: str = "") -> str:
+        combined = " ".join([client_name or "", ai_context or "", regulations or ""]).lower()
+        rules = [
+            ("Perbankan", ["bank", "bri", "bca", "mandiri", "bni", "btn", "fintech", "kredit", "asset management"]),
+            ("Telekomunikasi", ["telkom", "telkomsel", "indosat", "xl", "axiata", "operator"]),
+            ("Energi & Utilitas", ["pertamina", "pln", "energi", "listrik", "oil", "gas"]),
+            ("Ritel & E-Commerce", ["tokopedia", "e-commerce", "retail", "marketplace", "goto", "alfamart", "alfamidi"]),
+            ("Transportasi & Aviasi", ["garuda", "aviation", "airline", "logistik", "transport", "bluebird"]),
+            ("Pemerintah & BUMN", ["kementerian", "dinas", "pemprov", "pemkab", "bumn", "spbe"]),
+            ("Manufaktur & Tambang", ["manufaktur", "adaro", "antam", "vale", "smelter", "mining"]),
+        ]
+        for label, tokens in rules:
+            if any(token in combined for token in tokens):
+                return label
+        return "Lintas Industri"
+
+    @staticmethod
+    def _industry_query_terms(industry: str) -> List[str]:
+        terms_map = {
+            "Perbankan": ["manajemen investasi", "operasional investasi", "kepatuhan POJK", "service reliability"],
+            "Telekomunikasi": ["service assurance", "network reliability", "customer experience"],
+            "Energi & Utilitas": ["operational reliability", "governance", "asset integrity"],
+            "Ritel & E-Commerce": ["omnichannel", "operational governance", "customer experience"],
+            "Transportasi & Aviasi": ["operational control", "service reliability", "customer experience"],
+            "Pemerintah & BUMN": ["tata kelola", "akuntabilitas", "audit trail", "layanan publik"],
+            "Manufaktur & Tambang": ["production governance", "operational reliability", "safety compliance"],
+        }
+        return terms_map.get(industry, ["tata kelola", "operational excellence", "business value"])
+
+    @classmethod
+    def _context_terms(cls, text: str, excluded_terms: Optional[List[str]] = None, max_terms: int = 8) -> List[str]:
+        excluded: Set[str] = set()
+        for item in (excluded_terms or []):
+            normalized = cls._normalize_text(item)
+            if not normalized:
+                continue
+            excluded.add(normalized)
+            excluded.update(normalized.split())
+        tokens: List[str] = []
+        seen: Set[str] = set()
+        for token in re.findall(r"[A-Za-z]{4,}", (text or "").lower()):
+            normalized = cls._normalize_text(token)
+            if (
+                not normalized
+                or normalized in seen
+                or normalized in cls.CONTEXT_STOPWORDS
+                or normalized in excluded
+            ):
+                continue
+            seen.add(normalized)
+            tokens.append(token)
+            if len(tokens) >= max_terms:
+                break
+        return tokens
+
+    @staticmethod
+    def _framework_terms(regulations: str, max_items: int = 4) -> List[str]:
+        cleaned: List[str] = []
+        seen: Set[str] = set()
+        for part in re.split(r"[\n,;|/]+", str(regulations or "")):
+            value = re.sub(r"\s+", " ", part).strip(" -.:")
+            if not value:
+                continue
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(value)
+            if len(cleaned) >= max_items:
+                break
+        return cleaned
+
+    @staticmethod
+    def _focus_phrase(ai_context: str, max_words: int = 10) -> str:
+        source = str(ai_context or "").replace("\r", "\n")
+        line = re.split(r"[\n.;]+", source, maxsplit=1)[0]
+        line = re.sub(r"\s+", " ", line).strip(" -|,:")
+        if not line:
+            return ""
+        words = line.split()
+        if len(words) > max_words:
+            words = words[:max_words]
+        return " ".join(words).strip(" ,;:-")
+
+    @staticmethod
+    def _query_or_clause(terms: List[str], max_items: int = 4) -> str:
+        cleaned: List[str] = []
+        seen: Set[str] = set()
+        for term in terms or []:
+            value = re.sub(r"\s+", " ", str(term or "").strip())
+            if not value:
+                continue
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(f'"{value}"' if " " in value else value)
+            if len(cleaned) >= max_items:
+                break
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        return "(" + " OR ".join(cleaned) + ")"
+
+    @classmethod
+    def _build_query_plan(cls, client_name: str, ai_context: str = "", regulations: str = "") -> Dict[str, Any]:
+        entity_terms = cls._entity_tokens(client_name)
+        focus_phrase = cls._focus_phrase(ai_context)
+        framework_terms = cls._framework_terms(regulations)
+        industry = cls._infer_industry_from_context(client_name, ai_context, regulations)
+        industry_terms = cls._industry_query_terms(industry)
+        focus_terms = cls._context_terms(
+            ai_context,
+            excluded_terms=[client_name, focus_phrase, *framework_terms, *entity_terms],
+            max_terms=8,
+        )
+        return {
+            "focus_phrase": focus_phrase,
+            "focus_terms": focus_terms,
+            "framework_terms": framework_terms,
+            "industry": industry,
+            "industry_terms": industry_terms,
+        }
 
     @staticmethod
     def _entity_tokens(entity_name: str) -> List[str]:
@@ -1233,7 +1376,7 @@ class Researcher:
         lines = []
         for i, item in enumerate(items, start=1):
             title = item.get('title', 'Sumber tanpa judul')
-            snippet = (item.get('snippet', '') or '').strip()
+            snippet = Researcher._clean_osint_fact(str(item.get('snippet', '') or ''))
             link = item.get('link', '-')
             if not snippet: continue
             source_name = Researcher._source_name(link)
@@ -1247,15 +1390,28 @@ class Researcher:
 
     @staticmethod
     @osint_cache.memoize(expire=86400)
-    def get_latest_client_news(client_name: str) -> str:
+    def get_latest_client_news(client_name: str, ai_context: str = "", regulations: str = "") -> str:
         current_year = datetime.now().year
-        res = Researcher.search(f'"{client_name}" berita inovasi OR transformasi digital {current_year}', limit=5, recency_bucket="month")
+        plan = Researcher._build_query_plan(client_name, ai_context, regulations)
+        context_clause = Researcher._query_or_clause(
+            [plan.get("focus_phrase", ""), *plan.get("focus_terms", [])[:3], *plan.get("framework_terms", [])[:2], *plan.get("industry_terms", [])[:2]],
+            max_items=5,
+        )
+        query = f'"{client_name}" berita inovasi OR transformasi digital OR inisiatif strategis'
+        if context_clause:
+            query = f'"{client_name}" {context_clause} berita inovasi OR transformasi digital OR inisiatif strategis'
+        query = f"{query} {current_year}"
+        res = Researcher.search(query, limit=5, recency_bucket="month")
         filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=2)
         
         # Deep Scrape the #1 top news hit
         if filtered and filtered[0].get("link"):
             top_link = filtered[0]["link"]
-            goal = f"What is the company's latest major strategic initiative, digital transformation, or business innovation?"
+            focus_hint = plan.get("focus_phrase") or Researcher._query_or_clause(plan.get("framework_terms", []), max_items=2)
+            goal = (
+                f"What is the company's latest major strategic initiative, digital transformation, or business innovation"
+                f"{f' related to {focus_hint}' if focus_hint else ''}?"
+            )
             insight = Researcher.extract_insight_with_llm(top_link, goal)
             if insight:
                 source = Researcher._source_name(top_link)
@@ -1277,17 +1433,28 @@ class Researcher:
 
     @staticmethod
     @osint_cache.memoize(expire=86400)
-    def get_client_ai_posture(client_name: str, ai_context: str = "") -> str:
+    def get_client_ai_posture(client_name: str, ai_context: str = "", regulations: str = "") -> str:
         current_year = datetime.now().year
-        context_terms = " ".join(re.findall(r"[A-Za-z]{4,}", (ai_context or "").lower())[:8])
-        query = f'"{client_name}" AI OR artificial intelligence OR generative AI OR machine learning OR data platform {context_terms} {current_year}'
+        plan = Researcher._build_query_plan(client_name, ai_context, regulations)
+        context_clause = Researcher._query_or_clause(
+            [*plan.get("focus_terms", [])[:3], *plan.get("framework_terms", [])[:2], *plan.get("industry_terms", [])[:2]],
+            max_items=5,
+        )
+        query = f'"{client_name}" AI OR artificial intelligence OR generative AI OR machine learning OR data platform'
+        if context_clause:
+            query = f'{query} {context_clause}'
+        query = f"{query} {current_year}"
         res = Researcher.search(query, limit=5, recency_bucket="year")
         filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=3)
         
         # Deep Scrape the #1 AI posture link
         if filtered and filtered[0].get("link"):
             top_link = filtered[0]["link"]
-            goal = f"What is {client_name}'s current maturity level or stated plans regarding Artificial Intelligence, Data, or Machine Learning?"
+            focus_hint = plan.get("focus_phrase") or Researcher._query_or_clause(plan.get("focus_terms", []), max_items=3)
+            goal = (
+                f"What is {client_name}'s current maturity level or stated plans regarding Artificial Intelligence, Data, or Machine Learning"
+                f"{f' for initiatives related to {focus_hint}' if focus_hint else ''}?"
+            )
             insight = Researcher.extract_insight_with_llm(top_link, goal)
             if insight:
                 source = Researcher._source_name(top_link)
@@ -1331,33 +1498,66 @@ class Researcher:
     # Standard Snippet Methods (Kept for speed)
     @staticmethod
     @osint_cache.memoize(expire=86400)
-    def get_entity_profile(entity_name: str) -> str:
+    def get_entity_profile(entity_name: str, ai_context: str = "", regulations: str = "") -> str:
         current_year = datetime.now().year
         strict_entity = Researcher._normalize_text(entity_name) == Researcher._normalize_text(WRITER_FIRM_NAME)
-        res = Researcher.search(f'"{entity_name}" profil perusahaan OR "tentang kami" {current_year}', limit=6, recency_bucket="year")
+        plan = Researcher._build_query_plan(entity_name, ai_context, regulations)
+        context_clause = Researcher._query_or_clause(
+            [*plan.get("industry_terms", [])[:2], *plan.get("framework_terms", [])[:2], *plan.get("focus_terms", [])[:2]],
+            max_items=4,
+        )
+        query = f'"{entity_name}" profil perusahaan OR "tentang kami" OR layanan utama'
+        if context_clause:
+            query = f'"{entity_name}" {context_clause} profil perusahaan OR "tentang kami" OR layanan utama'
+        query = f"{query} {current_year}"
+        res = Researcher.search(query, limit=6, recency_bucket="year")
         filtered = Researcher._filter_recent_entity_results(res, entity_name, max_age_years=3, strict_entity=strict_entity)
         return Researcher._format_evidence(filtered[:3], label="OSINT_PROFILE", fallback="Data profil terbatas.")
 
     @staticmethod
     @osint_cache.memoize(expire=86400)
-    def get_client_track_record(client_name: str) -> str:
-        res = Researcher.search(f'"{client_name}" pencapaian OR kinerja OR penghargaan', limit=6, recency_bucket="year")
+    def get_client_track_record(client_name: str, ai_context: str = "", regulations: str = "") -> str:
+        plan = Researcher._build_query_plan(client_name, ai_context, regulations)
+        context_clause = Researcher._query_or_clause(
+            [plan.get("focus_phrase", ""), *plan.get("focus_terms", [])[:3], *plan.get("industry_terms", [])[:2]],
+            max_items=5,
+        )
+        query = f'"{client_name}" pencapaian OR kinerja OR penghargaan OR implementasi OR transformasi'
+        if context_clause:
+            query = f'"{client_name}" {context_clause} pencapaian OR kinerja OR penghargaan OR implementasi OR transformasi'
+        res = Researcher.search(query, limit=6, recency_bucket="year")
         filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=3)
         return Researcher._format_evidence(filtered[:3], label="OSINT_TRACK", fallback="Track record terbatas.")
 
     @staticmethod
     @osint_cache.memoize(expire=86400)
-    def get_client_writer_collaboration(client_name: str, writer_firm_name: str = WRITER_FIRM_NAME) -> str:
+    def get_client_writer_collaboration(client_name: str, writer_firm_name: str = WRITER_FIRM_NAME, ai_context: str = "", regulations: str = "") -> str:
+        plan = Researcher._build_query_plan(client_name, ai_context, regulations)
+        context_clause = Researcher._query_or_clause(
+            [plan.get("focus_phrase", ""), *plan.get("framework_terms", [])[:2], *plan.get("focus_terms", [])[:2]],
+            max_items=4,
+        )
         query = f'"{writer_firm_name}" "{client_name}" kerja sama OR proyek OR konsultasi'
+        if context_clause:
+            query = f'"{writer_firm_name}" "{client_name}" {context_clause} kerja sama OR proyek OR konsultasi'
         res = Researcher.search(query, limit=6, recency_bucket="year")
         filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=6)
         return Researcher._format_evidence(filtered[:2], label="OSINT_COLLAB", fallback="Belum ditemukan bukti publik kolaborasi.")
 
     @staticmethod
     @osint_cache.memoize(expire=86400)
-    def get_regulatory_data(regulations_string: str) -> str:
+    def get_regulatory_data(regulations_string: str, ai_context: str = "", client_name: str = "") -> str:
         if not regulations_string: return "Tidak ada regulasi spesifik dari input user."
-        query = f'Ringkasan implementasi standar {regulations_string.replace(",", " OR ")} site:.go.id OR site:iso.org'
+        plan = Researcher._build_query_plan(client_name, ai_context, regulations_string)
+        framework_clause = Researcher._query_or_clause(plan.get("framework_terms", []), max_items=4)
+        context_clause = Researcher._query_or_clause(
+            [plan.get("focus_phrase", ""), *plan.get("focus_terms", [])[:2], *plan.get("industry_terms", [])[:2]],
+            max_items=4,
+        )
+        query = f'Ringkasan implementasi standar {framework_clause or regulations_string.replace(",", " OR ")}'
+        if context_clause:
+            query = f"{query} {context_clause}"
+        query = f"{query} site:.go.id OR site:iso.org"
         res = Researcher.search(query, limit=5, recency_bucket="year")
         recent = [i for i in Researcher._sort_by_recency(res) if Researcher._is_recent(i, max_age_years=5)]
         trusted = [i for i in recent if any(str(i.get("link","")).endswith(sfx) for sfx in ("go.id", "iso.org", "ietf.org"))]

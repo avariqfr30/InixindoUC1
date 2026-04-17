@@ -1209,7 +1209,7 @@ class ProposalSupportMixin:
         words = text.split()
         if len(words) <= max_words:
             return text.rstrip(".")
-        return " ".join(words[:max_words]).rstrip(".,;:") + "..."
+        return " ".join(words[:max_words]).rstrip(".,;:")
 
     @staticmethod
     def _normalize_prose_fragment(raw_text: str) -> str:
@@ -1218,6 +1218,8 @@ class ProposalSupportMixin:
             return ""
 
         text = text.replace("\r", "\n")
+        text = text.replace("…", " ")
+        text = re.sub(r"\.{3,}", " ", text)
         text = re.sub(
             r"\((?:[A-Za-z0-9.-]+\.[A-Za-z]{2,}|Data Internal),\s*(?:\d{4}|n\.d\.)\)",
             "",
@@ -3472,20 +3474,21 @@ class ProposalSupportMixin:
     ) -> Dict[str, str]:
         ai_mode = self._ai_scope_signal_summary(ai_context, regulations).get("enabled", False)
         futures = {
-            "profile": self.io_pool.submit(Researcher.get_entity_profile, base_client),
-            "news": self.io_pool.submit(Researcher.get_latest_client_news, base_client),
-            "track_record": self.io_pool.submit(Researcher.get_client_track_record, base_client),
-            "regulations": self.io_pool.submit(Researcher.get_regulatory_data, regulations)
+            "profile": self.io_pool.submit(Researcher.get_entity_profile, base_client, ai_context, regulations),
+            "news": self.io_pool.submit(Researcher.get_latest_client_news, base_client, ai_context, regulations),
+            "track_record": self.io_pool.submit(Researcher.get_client_track_record, base_client, ai_context, regulations),
+            "regulations": self.io_pool.submit(Researcher.get_regulatory_data, regulations, ai_context, base_client)
         }
         if ai_mode:
             futures["ai_posture"] = self.io_pool.submit(
                 Researcher.get_client_ai_posture,
                 base_client,
                 ai_context,
+                regulations,
             )
         if include_collaboration:
             futures["collaboration"] = self.io_pool.submit(
-                Researcher.get_client_writer_collaboration, base_client, WRITER_FIRM_NAME
+                Researcher.get_client_writer_collaboration, base_client, WRITER_FIRM_NAME, ai_context, regulations
             )
         try:
             return {
