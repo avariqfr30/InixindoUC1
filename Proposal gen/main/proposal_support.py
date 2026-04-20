@@ -1854,7 +1854,8 @@ class ProposalSupportMixin:
 
     @staticmethod
     def _framework_tldr(item: str, ai_mode: bool = False) -> str:
-        lowered = (item or "").strip().lower()
+        item_clean = re.sub(r"\s+", " ", str(item or "").strip())
+        lowered = item_clean.lower()
         if "cobit" in lowered:
             return "COBIT membantu menata keputusan, kontrol, dan akuntabilitas tata kelola agar delivery tidak bergerak tanpa arah."
         if "itil" in lowered:
@@ -1875,6 +1876,8 @@ class ProposalSupportMixin:
             )
         if "standar" in lowered or "framework" in lowered:
             return "Acuan ini memberi bahasa kerja yang seragam agar keputusan, desain, dan kontrol pelaksanaan tidak berjalan sporadis."
+        if item_clean:
+            return f"{item_clean} dipakai sebagai acuan kerja agar keputusan, langkah kerja, dan mutu hasil tetap konsisten sepanjang proyek."
         return "Acuan ini memberi pegangan praktis agar keputusan, langkah kerja, dan mutu hasil tetap konsisten dari awal sampai akhir."
 
     @classmethod
@@ -1912,17 +1915,30 @@ class ProposalSupportMixin:
             ringkas = cls._framework_tldr(item, ai_mode=ai_mode)
             if any(token in lowered for token in ["iso", "pojk", "ojk", "nist", "regulasi", "kepatuhan"]):
                 peran = "memberi batas kepatuhan, kontrol minimum, dan ekspektasi kualitas yang wajib dijaga"
+                outcome_focus = "memastikan keputusan dan keluaran tetap patuh terhadap kewajiban formal"
             elif any(token in lowered for token in ["cobit", "itil", "togaf", "tm forum", "dama", "framework", "standar"]):
                 peran = "memberi struktur kerja agar desain, governance, dan prioritas implementasi tidak berjalan sporadis"
+                if "cobit" in lowered:
+                    outcome_focus = "menjaga keputusan tata kelola, akuntabilitas owner, dan kontrol delivery"
+                elif "itil" in lowered:
+                    outcome_focus = "menjaga stabilitas proses layanan, incident, dan quality gate operasional"
+                elif "togaf" in lowered:
+                    outcome_focus = "menjaga konsistensi target-state, arsitektur kerja, dan roadmap perubahan"
+                elif "dama" in lowered:
+                    outcome_focus = "menjaga kualitas data, ownership, dan kejelasan pengelolaan informasi"
+                else:
+                    outcome_focus = "menjaga konsistensi keputusan, desain, dan prioritas implementasi"
             elif "ai" in lowered or "model" in lowered or "data" in lowered:
                 peran = "menjaga kesiapan data, akuntabilitas keputusan, dan kelayakan solusi sebelum diperluas"
+                outcome_focus = "menjaga kesiapan adopsi agar rollout tidak melampaui kontrol organisasi"
             else:
                 peran = "menjadi acuan praktis untuk menjaga kualitas keputusan, konsistensi langkah kerja, dan kontrol hasil"
+                outcome_focus = f"membuat kerangka kerja {item} benar-benar operasional di lapangan"
 
             if ai_mode:
-                relevansi = "relevan untuk memastikan adopsi tetap feasible, terkontrol, dan dapat dipertanggungjawabkan"
+                relevansi = f"relevan untuk memastikan adopsi tetap feasible, terkontrol, dan dapat dipertanggungjawabkan, dengan fokus pada {outcome_focus}"
             else:
-                relevansi = f"relevan untuk proyek {project_type.lower()} agar arah kerja, prioritas, dan kualitas delivery tetap konsisten"
+                relevansi = f"relevan untuk proyek {project_type.lower()} karena membantu {outcome_focus}"
             if context_hint:
                 relevansi = f"{relevansi}, terutama ketika proyek perlu menjaga {context_hint.lower()}"
 

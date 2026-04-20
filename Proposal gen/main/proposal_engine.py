@@ -769,7 +769,9 @@ class ProposalEngineMixin:
         try:
             logo_stream, theme_color = logo_future.result(timeout=8)
         except Exception:
-            logo_stream, theme_color = None, DEFAULT_COLOR
+            logo_stream, theme_color = LogoManager._create_fallback_logo(base_client), DEFAULT_COLOR
+        if logo_stream is None:
+            logo_stream = LogoManager._create_fallback_logo(base_client)
 
         template_path = app_state_store.get_template_path() if app_state_store else ""
         doc, using_template = DocumentBuilder.create_base_document(template_path)

@@ -3764,6 +3764,7 @@ class DocumentBuilder:
         theme_color: Tuple[int, int, int],
         logo_stream: Optional[io.BytesIO] = None,
     ) -> None:
+        logo_added = False
         if logo_stream:
             try:
                 logo_stream.seek(0)
@@ -3772,12 +3773,25 @@ class DocumentBuilder:
                 cover_logo.paragraph_format.space_before = Pt(18)
                 cover_logo.paragraph_format.space_after = Pt(18)
                 cover_logo.add_run().add_picture(logo_stream, width=Inches(3.0))
+                logo_added = True
             except (UnrecognizedImageError, OSError, ValueError) as exc:
                 logger.warning("Logo skipped due to unsupported image format: %s", exc)
+        if not logo_added:
+            try:
+                fallback_logo = LogoManager._create_fallback_logo(client or "Klien")
+                fallback_logo.seek(0)
+                cover_logo = doc.add_paragraph()
+                cover_logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                cover_logo.paragraph_format.space_before = Pt(18)
+                cover_logo.paragraph_format.space_after = Pt(18)
+                cover_logo.add_run().add_picture(fallback_logo, width=Inches(2.4))
+                logo_added = True
+            except Exception as exc:
+                logger.warning("Fallback logo render failed: %s", exc)
 
         title = doc.add_paragraph()
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        title.paragraph_format.space_before = Pt(54 if not logo_stream else 0)
+        title.paragraph_format.space_before = Pt(54 if not logo_added else 0)
         title.paragraph_format.space_after = Pt(6)
         title_run = title.add_run("PROPOSAL STRATEGIS")
         DocumentBuilder._set_run_format(title_run, size=16, bold=True)
@@ -4057,6 +4071,10 @@ class DocumentBuilder:
                     )
             elif element.name == 'p':
                 p = doc.add_paragraph()
+                # Reset inherited paragraph indents from templates so plain
+                # paragraphs never render as accidental hanging indents.
+                p.paragraph_format.left_indent = Pt(0)
+                p.paragraph_format.first_line_indent = Pt(0)
                 DocumentBuilder._process_inline_html(p, element)
             elif element.name in ['ul', 'ol']:
                 direct_items = element.find_all('li', recursive=False)
@@ -4074,6 +4092,8 @@ class DocumentBuilder:
 
                     p.paragraph_format.space_before = Pt(0)
                     p.paragraph_format.space_after = Pt(4)
+                    p.paragraph_format.left_indent = Inches(0.25)
+                    p.paragraph_format.first_line_indent = Inches(-0.25)
                     if list_num_id is not None:
                         DocumentBuilder._apply_list_num_id(p, list_num_id, level=0)
                     elif use_manual_fallback:
@@ -4115,11 +4135,15 @@ class DocumentBuilder:
     @staticmethod
     def _normalize_markdown_blocks(raw_text: str) -> str:
         normalized: List[str] = []
-        ordered_pattern = re.compile(r'^\d+\.\s+')
-        bullet_pattern = re.compile(r'^[-*]\s+')
+        ordered_pattern = re.compile(r'^\d+[.)]\s+')
+        bullet_pattern = re.compile(r'^[-*•▪◦●]\s+')
 
         for raw_line in (raw_text or "").split('\n'):
             stripped = raw_line.strip()
+            if re.match(r'^\d+\)\s+', stripped):
+                stripped = re.sub(r'^(\d+)\)\s+', r'\1. ', stripped)
+            if re.match(r'^[-*•▪◦●]\s+', stripped):
+                stripped = re.sub(r'^[-*•▪◦●]\s+', '- ', stripped)
             previous = normalized[-1].strip() if normalized else ""
             is_ordered = bool(ordered_pattern.match(stripped))
             is_bullet = bool(bullet_pattern.match(stripped))
