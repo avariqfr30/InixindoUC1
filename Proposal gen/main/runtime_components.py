@@ -12,6 +12,49 @@ from ollama import Client
 osint_cache_dir = Path(APP_STATE_DB_PATH).parent / '.osint_cache'
 osint_cache = dc.Cache(str(osint_cache_dir))
 
+import functools
+
+def smart_osint_cache(expire_success=86400, expire_empty=3600, ignore_empty=True, inject_llm=False):
+    """
+    Production-grade decorator replacing manual cache management.
+    - ignore_empty: Bypasses cache if the function returns falsy (prevents caching API failures).
+    - bifurcated TTLs: Caches empty results for a shorter time if ignore_empty=False.
+    - inject_llm: Automatically hashes the LLM_MODEL into the key to respect model upgrades.
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key_parts = [func.__name__]
+            if inject_llm:
+                key_parts.append(str(LLM_MODEL))
+                
+            for arg in args:
+                if isinstance(arg, str):
+                    key_parts.append(" ".join(arg.lower().split()))
+                else:
+                    key_parts.append(str(arg))
+                    
+            for k, v in sorted(kwargs.items()):
+                val = " ".join(v.lower().split()) if isinstance(v, str) else str(v)
+                key_parts.append(f"{k}={val}")
+                
+            cache_key = ":".join(key_parts)
+            
+            cached = osint_cache.get(cache_key)
+            if cached is not None:
+                return cached
+                
+            result = func(*args, **kwargs)
+            
+            if not result and ignore_empty:
+                return result
+                
+            ttl = expire_success if result else expire_empty
+            osint_cache.set(cache_key, result, expire=ttl)
+            return result
+        return wrapper
+    return decorator
+
 # ==========================================
 # PYDANTIC SCHEMAS FOR BULLETPROOF LLM DATA
 # ==========================================
@@ -1063,7 +1106,7 @@ class Researcher:
         return key not in placeholder_keys
 
     @staticmethod
-    @osint_cache.memoize(expire=43200)
+    @smart_osint_cache(expire_success=43200, ignore_empty=True)
     def fetch_full_markdown(url: str) -> str:
         """Fetches the clean markdown text of any URL using Jina Reader."""
         if not url: return ""
@@ -1079,7 +1122,7 @@ class Researcher:
             return ""
 
     @staticmethod
-    @osint_cache.memoize(expire=43200)
+    @smart_osint_cache(expire_success=43200, ignore_empty=True, inject_llm=True)
     def extract_insight_with_llm(url: str, extraction_goal: str) -> str:
         """Universal Deep Scraper: Reads a URL and extracts a specific qualitative insight via Pydantic/LLM."""
         markdown_text = Researcher.fetch_full_markdown(url)
@@ -1166,7 +1209,7 @@ class Researcher:
         return "\n".join(parts)
 
     @staticmethod
-    @osint_cache.memoize(expire=86400)
+    @smart_osint_cache(expire_success=86400, expire_empty=3600, ignore_empty=False)
     def search(query: str, limit: int = 5, recency_bucket: str = "") -> List[Dict[str, Any]]:
         """General web search using Serper.dev"""
         if not Researcher._has_serper_key():
