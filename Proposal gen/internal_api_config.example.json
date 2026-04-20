@@ -1,29 +1,29 @@
 {
-  "mode": "generic",
+  "request_defaults": {
+    "url": "https://xxx.com/api/Resource/dataset",
+    "method": "POST",
+    "body_encoding": "form",
+    "params": {},
+    "headers": {}
+  },
   "resources": {
     "firm_profile": {
       "request": {
-        "url": "https://xxx.com/api/tag-firm-profile",
-        "method": "GET",
-        "params": {},
-        "body": {},
-        "headers": {}
+        "body": {
+          "dataset": "ReferenceAccount"
+        }
       },
-      "response_path": "data.profile",
+      "response_path": "data.dataset_result",
       "record_filters": {},
       "allow_llm_extract": true
     },
     "project_standards": {
       "request": {
-        "url": "https://xxx.com/api/tag-standards",
-        "method": "GET",
-        "params": {
-          "project_type": "{project_type}"
-        },
-        "body": {},
-        "headers": {}
+        "body": {
+          "dataset": "ProjectStandards"
+        }
       },
-      "response_path": "data.items",
+      "response_path": "data.dataset_result",
       "record_filters": {
         "project_type": "{project_type}"
       },
@@ -31,71 +31,15 @@
     },
     "client_relationship": {
       "request": {
-        "url": "https://xxx.com/api/tag-client-history",
-        "method": "POST",
-        "params": {},
         "body": {
-          "client_name": "{client_name}"
-        },
-        "headers": {}
+          "dataset": "ClientRelationship"
+        }
       },
-      "response_path": "result.records",
+      "response_path": "data.dataset_result",
       "record_filters": {
         "client_name": "{client_name}"
       },
       "allow_llm_extract": true
-    }
-  },
-  "endpoints": {
-    "firm_profile": {
-      "path": "/firm-profile",
-      "method": "GET",
-      "params": {},
-      "body": {}
-    },
-    "project_standards": {
-      "path": "/standards/{project_type}",
-      "method": "GET",
-      "params": {},
-      "body": {}
-    },
-    "client_relationship": {
-      "path": "/client-relationship",
-      "method": "GET",
-      "params": {
-        "client_name": "{client_name}"
-      },
-      "body": {}
-    }
-  },
-  "dataset": {
-    "request": {
-      "path": "/api/Resource/dataset",
-      "method": "POST",
-      "params": {},
-      "body": {
-        "dataset": "ReferenceDataset"
-      }
-    },
-    "response_items_path": "data",
-    "payload_paths": {
-      "firm_profile": "",
-      "project_standards": "",
-      "client_relationship": ""
-    },
-    "resource_field": "resource_type",
-    "resource_values": {
-      "firm_profile": "firm_profile",
-      "project_standards": "project_standards",
-      "client_relationship": "client_relationship"
-    },
-    "record_filters": {
-      "project_standards": {
-        "project_type": "{project_type}"
-      },
-      "client_relationship": {
-        "client_name": "{client_name}"
-      }
     }
   }
 }

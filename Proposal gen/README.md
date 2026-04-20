@@ -120,50 +120,43 @@ Pastikan Ollama berjalan sebelum aplikasi dijalankan.
 Contoh paling umum:
 
 ```bash
-export DEMO_MODE=true
-export DATA_ACQUISITION_MODE=demo
+export APP_PROFILE=demo
+export INTERNAL_DATA_SOURCE=demo
+export INTERNAL_DATA_FALLBACK=none
 export SERPER_API_KEY=isi_api_key
 ```
 
-Untuk mode implementasi bertahap:
+Untuk mode production:
 
 ```bash
-export DEMO_MODE=false
-export DATA_ACQUISITION_MODE=staged
-export FIRM_API_URL=https://api.perusahaan-anda.com/v1
-export FIRM_API_INTEGRATION_MODE=rest
-export FIRM_API_AUTH_MODE=bearer
-export API_AUTH_TOKEN=isi_token_internal_api
-export SERPER_API_KEY=isi_api_key
-```
-
-Jika internal API memakai Basic Auth:
-
-```bash
-export DEMO_MODE=false
-export DATA_ACQUISITION_MODE=staged
-export FIRM_API_URL=https://api.perusahaan-anda.com/v1
-export FIRM_API_INTEGRATION_MODE=rest
+export APP_PROFILE=production
+export INTERNAL_DATA_SOURCE=api
+export INTERNAL_DATA_FALLBACK=none
 export FIRM_API_AUTH_MODE=basic
 export FIRM_API_USERNAME=isi_username
 export FIRM_API_PASSWORD=isi_password
-export SERPER_API_KEY=isi_api_key
-```
-
-Jika ingin integrasi internal API lebih mudah dirawat, gunakan satu file konfigurasi JSON:
-
-```bash
-export DEMO_MODE=false
-export DATA_ACQUISITION_MODE=staged
 export FIRM_API_URL=https://api.perusahaan-anda.com
-export FIRM_API_INTEGRATION_MODE=generic
-export FIRM_API_AUTH_MODE=basic
-export FIRM_API_USERNAME=isi_username
-export FIRM_API_PASSWORD=isi_password
 export FIRM_API_CONFIG_FILE=/srv/apps/proposal-gen/internal_api_config.json
+export SERPER_API_KEY=isi_api_key
 ```
 
-Contoh file ada di [internal_api_config.example.json](./internal_api_config.example.json). Dengan pendekatan ini, perubahan path, full URL endpoint, method, query param, body request, response path, atau mode dataset bisa dilakukan di satu file tanpa mengubah adapter Python.
+Jika ingin mode production tetap bisa lanjut ketika API internal sedang bermasalah, aktifkan fallback demo secara eksplisit:
+
+```bash
+export APP_PROFILE=production
+export INTERNAL_DATA_SOURCE=api
+export INTERNAL_DATA_FALLBACK=demo
+```
+
+Contoh file ada di [internal_api_config.example.json](./internal_api_config.example.json). Dengan pendekatan ini, operator cukup mengganti satu file konfigurasi resource dan kredensial env tanpa perlu memahami mode `rest`, `dataset`, atau `generic`.
+
+Jika operator tidak ingin mengedit `.env` manual, gunakan helper berikut:
+
+```bash
+python scripts/profilectl.py demo --env-file .env
+python scripts/profilectl.py production --env-file .env --api-config /srv/apps/proposal-gen/internal_api_config.json
+python scripts/profilectl.py production --env-file .env --api-config /srv/apps/proposal-gen/internal_api_config.json --fallback demo
+```
 
 ### 4. Jalankan aplikasi
 
@@ -179,44 +172,57 @@ http://127.0.0.1:5000
 
 ## Integrasi Internal API yang Disarankan
 
-Sekarang ada 2 mode integrasi:
+Operator seharusnya hanya perlu memahami 2 status:
 
-- `FIRM_API_INTEGRATION_MODE=rest`
-  Gunakan bila backend internal sudah punya endpoint terpisah per resource.
-- `FIRM_API_INTEGRATION_MODE=dataset`
-  Gunakan bila backend hanya punya satu endpoint dataset generik, misalnya `/api/Resource/dataset`.
-- `FIRM_API_INTEGRATION_MODE=generic`
-  Gunakan bila backend punya endpoint apa pun dengan shape JSON bebas, misalnya `https://xxx.com/api/tag`, dan Anda ingin aplikasi mengadaptasi payload itu ke workflow proposal.
+- `APP_PROFILE=demo`
+- `APP_PROFILE=production`
 
-Ketiganya memakai adapter yang sama di aplikasi, jadi logika proposal tidak perlu ikut diubah.
+Dan 2 knob internal data:
 
-### Mode REST
+- `INTERNAL_DATA_SOURCE=demo|api`
+- `INTERNAL_DATA_FALLBACK=none|demo`
 
-Jika aplikasi akan dipakai di tahap lanjut, sebaiknya internal API menyiapkan data berikut:
+Implementasi request API di bawahnya tetap mendukung pola lama (`rest`, `dataset`, `generic`) untuk kompatibilitas, tetapi itu sekarang dianggap detail implementasi, bukan hal yang wajib dipahami operator.
 
-- `/firm-profile`
-- `/standards/{project_type}`
-- `/client-relationship?client_name=...`
+### Bentuk konfigurasi yang disarankan
 
-Tujuannya agar aplikasi dapat:
-- menampilkan identitas firma penulis proposal dengan akurat
-- menggunakan metodologi dan standar delivery internal
-- membedakan klien baru dan klien existing berdasarkan data internal
+Gunakan satu file resource manifest yang mendefinisikan:
 
-### Mode Dataset
+- `request_defaults`
+- `resources.firm_profile`
+- `resources.project_standards`
+- `resources.client_relationship`
 
-Jika backend saat ini baru menyediakan satu endpoint generik seperti:
+Setiap resource cukup menjelaskan:
 
-- `POST /api/Resource/dataset`
+- request yang harus dipanggil
+- bagian response yang dipakai
+- filter record bila perlu
+- apakah LLM fallback diizinkan
 
-maka aplikasi bisa diarahkan ke mode dataset. Konfigurasi JSON cukup menjelaskan:
+### Doctor command
 
-- path endpoint dataset
-- method request
-- payload default seperti `{"dataset":"ReferenceDataset"}`
-- lokasi array record di response
-- nama field penanda resource
-- filter untuk `project_type` dan `client_name`
+Sebelum berpindah dari demo ke production, jalankan:
+
+```bash
+python -m main.doctor --format text
+```
+
+Atau versi JSON:
+
+```bash
+python -m main.doctor --format json
+```
+
+Command ini memeriksa:
+
+- profile aktif
+- internal data source/fallback
+- file config API
+- konektivitas Ollama
+- kecukupan `firm_profile`
+- kecukupan `project_standards`
+- kecukupan `client_relationship`
 
 Dengan begitu, saat struktur backend berubah, Anda cukup mengubah JSON config, bukan kelas adapter Python.
 

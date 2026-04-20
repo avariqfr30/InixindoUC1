@@ -161,13 +161,19 @@ class SchemaMapper:
 
 # Internal API adapter.
 class FirmAPIClient:
-    def __init__(self) -> None:
-        self.demo_mode = DEMO_MODE
-        self.data_acquisition_mode = DATA_ACQUISITION_MODE
+    def __init__(self, force_source: str = "") -> None:
+        normalized_force_source = str(force_source or "").strip().lower()
+        if normalized_force_source not in {"demo", "api"}:
+            normalized_force_source = INTERNAL_DATA_SOURCE
+        self.app_profile = APP_PROFILE
+        self.internal_data_source = normalized_force_source
+        self.demo_mode = normalized_force_source == "demo"
+        self.data_acquisition_mode = "demo" if self.demo_mode else "staged"
         self.base_url = FIRM_API_URL.rstrip("/")
         self.timeout_seconds = FIRM_API_TIMEOUT_SECONDS
         self.integration_mode = FIRM_API_INTEGRATION_MODE
         self.auth_mode = (FIRM_API_AUTH_MODE or "bearer").strip().lower()
+        self.request_defaults = dict(FIRM_API_REQUEST_DEFAULTS or {})
         self.endpoint_config = dict(FIRM_API_ENDPOINT_CONFIG or {})
         self.dataset_config = dict(FIRM_API_DATASET_CONFIG or {})
         self.resource_config = dict(FIRM_API_RESOURCE_CONFIG or {})
@@ -249,6 +255,17 @@ class FirmAPIClient:
             return False
         return True
 
+    @classmethod
+    def _merge_spec(cls, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+        merged: Dict[str, Any] = dict(base or {})
+        for key, value in (override or {}).items():
+            current = merged.get(key)
+            if isinstance(current, dict) and isinstance(value, dict):
+                merged[key] = cls._merge_spec(current, value)
+            else:
+                merged[key] = value
+        return merged
+
     def _request(
         self,
         path: str,
@@ -289,7 +306,7 @@ class FirmAPIClient:
         return self._request_from_spec(spec, **context)
 
     def _request_from_spec(self, spec: Dict[str, Any], **context: Any) -> requests.Response:
-        request_spec = dict(spec or {})
+        request_spec = self._merge_spec(self.request_defaults, dict(spec or {}))
         path = self._render_template_value(request_spec.get("url") or request_spec.get("path") or "", context)
         method = str(request_spec.get("method") or "GET").strip().upper() or "GET"
         params = self._render_template_payload(request_spec.get("params") or {}, context)
@@ -308,7 +325,7 @@ class FirmAPIClient:
     def _get_dataset_response(self) -> Any:
         if self._dataset_response_cache is not None:
             return self._dataset_response_cache
-        request_spec = dict((self.dataset_config or {}).get("request") or {})
+        request_spec = self._merge_spec(self.request_defaults, dict((self.dataset_config or {}).get("request") or {}))
         path = str(request_spec.get("path") or "").strip() or "/api/Resource/dataset"
         method = str(request_spec.get("method") or "POST").strip().upper() or "POST"
         params = request_spec.get("params") or {}
@@ -375,6 +392,11 @@ class FirmAPIClient:
                 return dict_items[0]
         return {}
 
+    @staticmethod
+    def _resource_has_request(resource_spec: Dict[str, Any]) -> bool:
+        request_spec = dict((resource_spec or {}).get("request") or {})
+        return bool(str(request_spec.get("url") or request_spec.get("path") or "").strip())
+
     def _resolve_generic_payload(self, resource_name: str, **context: Any) -> Any:
         resource_spec = dict((self.resource_config or {}).get(resource_name) or {})
         request_spec = dict(resource_spec.get("request") or {})
@@ -394,6 +416,9 @@ class FirmAPIClient:
         return payload
 
     def _resolve_resource_payload(self, resource_name: str, **context: Any) -> Any:
+        resource_spec = dict((self.resource_config or {}).get(resource_name) or {})
+        if self._resource_has_request(resource_spec):
+            return self._resolve_generic_payload(resource_name, **context)
         if self.integration_mode == "dataset":
             return self._select_dataset_payload(resource_name, **context)
         if self.integration_mode == "generic":
@@ -469,6 +494,17 @@ JSON PAYLOAD:
 
     def uses_demo_logic(self) -> bool:
         return self.demo_mode or self.data_acquisition_mode == "demo"
+
+    def describe_runtime(self) -> Dict[str, Any]:
+        return {
+            "provider": "api",
+            "app_profile": self.app_profile,
+            "internal_data_source": self.internal_data_source,
+            "integration_mode": self.integration_mode,
+            "auth_mode": self.auth_mode,
+            "base_url": self.base_url,
+            "config_file": FIRM_API_CONFIG_FILE,
+        }
 
     @staticmethod
     def _normalize_project_standards(raw_payload: Optional[Dict[str, Any]]) -> Dict[str, str]:
@@ -872,6 +908,150 @@ JSON PAYLOAD:
                 "portfolio_highlights": WRITER_FIRM_PORTFOLIO,
             }
         )
+
+
+class DemoDataProvider:
+    def __init__(self) -> None:
+        self.app_profile = APP_PROFILE
+        self.internal_data_source = "demo"
+        self.demo_mode = True
+        self.data_acquisition_mode = "demo"
+
+    def uses_demo_logic(self) -> bool:
+        return True
+
+    def describe_runtime(self) -> Dict[str, Any]:
+        return {
+            "provider": "demo",
+            "app_profile": self.app_profile,
+            "internal_data_source": self.internal_data_source,
+            "integration_mode": "demo",
+            "auth_mode": "none",
+            "base_url": "",
+            "config_file": FIRM_API_CONFIG_FILE,
+        }
+
+    def get_project_standards(self, project_type: str) -> Dict[str, str]:
+        logger.info("Using demo standards for project type: %s", project_type)
+        demo_standards = MOCK_FIRM_STANDARDS.get(project_type, MOCK_FIRM_STANDARDS.get("Implementation"))
+        return FirmAPIClient._normalize_project_standards(demo_standards)
+
+    def get_firm_profile(self) -> Dict[str, str]:
+        return FirmAPIClient._default_firm_profile()
+
+    def get_client_relationship(self, client_name: str) -> Dict[str, Any]:
+        summary = Researcher.get_client_writer_collaboration(client_name, WRITER_FIRM_NAME)
+        has_evidence = FirmAPIClient._has_osint_evidence(summary)
+        return {
+            "summary": summary,
+            "mode": "existing" if has_evidence else "new",
+            "source": "osint",
+            "verified": has_evidence,
+        }
+
+
+class InternalDataClient:
+    def __init__(self) -> None:
+        self.app_profile = APP_PROFILE
+        self.internal_data_source = INTERNAL_DATA_SOURCE
+        self.internal_data_fallback = INTERNAL_DATA_FALLBACK
+        self.api_provider = FirmAPIClient(force_source="api")
+        self.demo_provider = DemoDataProvider()
+        self.demo_mode = self.internal_data_source == "demo"
+        self.data_acquisition_mode = "demo" if self.demo_mode else "staged"
+
+    def uses_demo_logic(self) -> bool:
+        return self.internal_data_source == "demo"
+
+    def describe_runtime(self) -> Dict[str, Any]:
+        runtime = (
+            self.demo_provider.describe_runtime()
+            if self.internal_data_source == "demo"
+            else self.api_provider.describe_runtime()
+        )
+        runtime["fallback"] = self.internal_data_fallback
+        runtime["operator_mode"] = f"{self.internal_data_source}:{self.internal_data_fallback}"
+        return runtime
+
+    def _use_demo_fallback(self) -> bool:
+        return self.internal_data_fallback == "demo"
+
+    def get_project_standards(self, project_type: str) -> Dict[str, str]:
+        if self.internal_data_source == "demo":
+            return self.demo_provider.get_project_standards(project_type)
+        normalized = self.api_provider.get_project_standards(project_type)
+        if self._use_demo_fallback() and FirmAPIClient._is_weak_project_standards(normalized):
+            logger.warning("Internal data fallback triggered for project_standards(%s)", project_type)
+            return self.demo_provider.get_project_standards(project_type)
+        return normalized
+
+    def get_firm_profile(self) -> Dict[str, str]:
+        if self.internal_data_source == "demo":
+            return self.demo_provider.get_firm_profile()
+        normalized = self.api_provider.get_firm_profile()
+        if self._use_demo_fallback() and FirmAPIClient._looks_like_missing_profile(normalized):
+            logger.warning("Internal data fallback triggered for firm_profile")
+            return self.demo_provider.get_firm_profile()
+        return normalized
+
+    def get_client_relationship(self, client_name: str) -> Dict[str, Any]:
+        if self.internal_data_source == "demo":
+            return self.demo_provider.get_client_relationship(client_name)
+        normalized = self.api_provider.get_client_relationship(client_name)
+        if self._use_demo_fallback() and FirmAPIClient._is_weak_client_relationship(normalized):
+            logger.warning("Internal data fallback triggered for client_relationship(%s)", client_name)
+            return self.demo_provider.get_client_relationship(client_name)
+        return normalized
+
+    def doctor_snapshot(self, project_type: str = "Implementation", client_name: str = "PT Contoh Klien") -> Dict[str, Any]:
+        snapshot: Dict[str, Any] = {
+            "runtime": self.describe_runtime(),
+            "resources": {},
+        }
+        try:
+            firm_profile = self.get_firm_profile()
+            snapshot["resources"]["firm_profile"] = {
+                "ok": not FirmAPIClient._looks_like_missing_profile(firm_profile),
+                "fields": {
+                    "office_address": bool(str(firm_profile.get("office_address") or "").strip()),
+                    "email": bool(str(firm_profile.get("email") or "").strip()),
+                    "phone": bool(str(firm_profile.get("phone") or "").strip()),
+                    "website": bool(str(firm_profile.get("website") or "").strip()),
+                },
+            }
+        except Exception as exc:
+            snapshot["resources"]["firm_profile"] = {"ok": False, "error": str(exc)}
+
+        try:
+            standards = self.get_project_standards(project_type)
+            snapshot["resources"]["project_standards"] = {
+                "ok": not FirmAPIClient._is_weak_project_standards(standards),
+                "fields": {
+                    "methodology": bool(str(standards.get("methodology") or "").strip()),
+                    "team": bool(str(standards.get("team") or "").strip()),
+                    "commercial": bool(str(standards.get("commercial") or "").strip()),
+                },
+                "project_type": project_type,
+            }
+        except Exception as exc:
+            snapshot["resources"]["project_standards"] = {"ok": False, "project_type": project_type, "error": str(exc)}
+
+        try:
+            relationship = self.get_client_relationship(client_name)
+            snapshot["resources"]["client_relationship"] = {
+                "ok": bool(str(relationship.get("summary") or "").strip()) or bool(relationship.get("verified")),
+                "fields": {
+                    "summary": bool(str(relationship.get("summary") or "").strip()),
+                    "mode": bool(str(relationship.get("mode") or "").strip()),
+                    "verified": bool(relationship.get("verified")),
+                },
+                "client_name": client_name,
+            }
+        except Exception as exc:
+            snapshot["resources"]["client_relationship"] = {"ok": False, "client_name": client_name, "error": str(exc)}
+
+        snapshot["ok"] = all(bool(item.get("ok")) for item in snapshot["resources"].values())
+        return snapshot
 
 
 # Knowledge base and vector index.
@@ -2890,30 +3070,47 @@ class AppStateStore:
             if not line:
                 continue
             parts = [part.strip() for part in line.split("|")]
+            normalized_line = re.sub(r"\s+", " ", line).strip()
+            if re.search(r"\b(belum pernah|tidak pernah|n/a|none|not found)\b", normalized_line, re.IGNORECASE):
+                continue
+            if re.search(
+                r"\b(area pengalaman|relevansi|bukti kapabilitas|nilai tambah|portofolio|portfolio)\b",
+                normalized_line,
+                re.IGNORECASE,
+            ):
+                continue
             if len(parts) >= 4:
+                area, relevansi, bukti, nilai_tambah = [re.sub(r"\s+", " ", part).strip(" -;:") for part in parts[:4]]
+                if not area or len(re.findall(r"\w+", area)) < 3:
+                    continue
                 rows.append(
                     {
-                        "area": parts[0],
-                        "relevansi": parts[1],
-                        "bukti": parts[2],
-                        "nilai_tambah": parts[3],
+                        "area": area,
+                        "relevansi": relevansi,
+                        "bukti": bukti,
+                        "nilai_tambah": nilai_tambah,
                     }
                 )
             elif len(parts) == 3:
+                area, relevansi, bukti = [re.sub(r"\s+", " ", part).strip(" -;:") for part in parts[:3]]
+                if not area or len(re.findall(r"\w+", area)) < 3:
+                    continue
                 rows.append(
                     {
-                        "area": parts[0],
-                        "relevansi": parts[1],
-                        "bukti": parts[2],
+                        "area": area,
+                        "relevansi": relevansi,
+                        "bukti": bukti,
                         "nilai_tambah": "menambah keyakinan klien terhadap kesiapan delivery dan kualitas hasil kerja",
                     }
                 )
             else:
+                if len(re.findall(r"\w+", normalized_line)) < 5:
+                    continue
                 rows.append(
                     {
-                        "area": line,
+                        "area": normalized_line,
                         "relevansi": "relevan untuk inisiatif yang membutuhkan pengalaman delivery dan advisory yang serupa",
-                        "bukti": line,
+                        "bukti": normalized_line,
                         "nilai_tambah": "membantu proposal terasa lebih konkret dan kredibel",
                     }
                 )

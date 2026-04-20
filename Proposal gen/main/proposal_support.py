@@ -1221,6 +1221,12 @@ class ProposalSupportMixin:
         text = text.replace("…", " ")
         text = re.sub(r"\.{3,}", " ", text)
         text = re.sub(
+            r"Sumber eksternal\s+\d+\s*:\s*fakta=([^|]+)\|[^\n]*",
+            r"\1",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
             r"\((?:[A-Za-z0-9.-]+\.[A-Za-z]{2,}|Data Internal),\s*(?:\d{4}|n\.d\.)\)",
             "",
             text,
@@ -1255,6 +1261,28 @@ class ProposalSupportMixin:
         text = re.sub(r",\s*,+", ", ", text)
         text = re.sub(r"\s{2,}", " ", text)
         return text.strip(" ,;:.")
+
+    @classmethod
+    def _research_bundle_fact_summary(
+        cls,
+        research_bundle: Optional[Dict[str, Any]],
+        field: str,
+        fallback: str = "",
+        max_items: int = 2,
+        max_words: int = 18,
+    ) -> str:
+        facts: List[str] = []
+        for item in cls._research_bundle_sources(research_bundle, field, max_items=max_items):
+            fact = cls._sanitize_anchor_fact(item.get("fact", "") or "")
+            if fact:
+                facts.append(fact)
+        if not facts:
+            return fallback
+        return cls._summarize_phrase(
+            cls._human_join(facts, fallback=fallback, max_items=max_items),
+            fallback,
+            max_words=max_words,
+        )
 
     @staticmethod
     def _extract_first_external_anchor(personalization_pack: Optional[Dict[str, Any]]) -> Tuple[str, str]:
@@ -1894,9 +1922,9 @@ class ProposalSupportMixin:
             if ai_mode:
                 relevansi = "relevan untuk memastikan adopsi tetap feasible, terkontrol, dan dapat dipertanggungjawabkan"
             else:
-                relevansi = f"relevan untuk proyek {project_type.lower()} agar arah kerja tetap konsisten dari keputusan sampai eksekusi"
+                relevansi = f"relevan untuk proyek {project_type.lower()} agar arah kerja, prioritas, dan kualitas delivery tetap konsisten"
             if context_hint:
-                relevansi = f"{relevansi}, khususnya untuk menjaga {context_hint.lower()}"
+                relevansi = f"{relevansi}, terutama ketika proyek perlu menjaga {context_hint.lower()}"
 
             rows.append(
                 {
@@ -2154,16 +2182,28 @@ class ProposalSupportMixin:
         ]
         if internal_rows:
             normalized_rows: List[Dict[str, str]] = []
-            for item in internal_rows[:4]:
+            for item in internal_rows[:6]:
+                area = str(item.get("area") or "").strip()
+                relevansi = str(item.get("relevansi") or f"relevan untuk proyek {project_type.lower()} dengan layanan {service_type.lower()}").strip()
+                bukti = str(item.get("bukti") or "portofolio internal perusahaan penyusun").strip()
+                nilai_tambah = str(item.get("nilai_tambah") or "membantu klien melihat kesiapan eksekusi secara lebih konkret").strip()
+                joined = " ".join([area, relevansi, bukti, nilai_tambah]).lower()
+                if re.search(r"\b(belum pernah|tidak pernah|n/a|none|not found)\b", joined, re.IGNORECASE):
+                    continue
+                if area.lower() in {"area pengalaman", "pengalaman", "portfolio", "portofolio"}:
+                    continue
+                if len(re.findall(r"\w+", area)) < 3:
+                    continue
                 normalized_rows.append(
                     {
-                        "area": str(item.get("area") or "Pengalaman internal yang relevan").strip(),
-                        "relevansi": str(item.get("relevansi") or f"relevan untuk proyek {project_type.lower()} dengan layanan {service_type.lower()}").strip(),
-                        "bukti": str(item.get("bukti") or "portofolio internal perusahaan penyusun").strip(),
-                        "nilai_tambah": str(item.get("nilai_tambah") or "membantu klien melihat kesiapan eksekusi secara lebih konkret").strip(),
+                        "area": area or "Pengalaman internal yang relevan",
+                        "relevansi": relevansi,
+                        "bukti": bukti,
+                        "nilai_tambah": nilai_tambah,
                     }
                 )
-            return normalized_rows
+            if normalized_rows:
+                return normalized_rows[:4]
 
         profile_note = cls._summarize_phrase(
             firm_profile.get("portfolio_highlights", ""),
@@ -2555,19 +2595,20 @@ class ProposalSupportMixin:
         chapter_transition = ""
         chain_clause = ""
         kak_clause = ""
-        framework_osint_context = self._summarize_phrase(
-            research_bundle.get("regulations", ""),
+        framework_osint_context = self._research_bundle_fact_summary(
+            research_bundle,
+            "regulations",
             "",
-            max_words=28,
+            max_items=2,
+            max_words=18,
         )
         framework_context_hint = self._human_join(
             [
                 self._summarize_phrase(project_goal, "", max_words=10),
                 self._summarize_phrase(notes, "", max_words=10),
-                self._summarize_phrase(framework_osint_context, "", max_words=14),
             ],
             fallback=f"kebutuhan {client} dan disiplin delivery {project_type.lower()}",
-            max_items=3,
+            max_items=2,
         )
         framework_osint_line = (
             f" Pembacaan eksternal terhadap regulasi, acuan, atau standar yang relevan juga menegaskan {framework_osint_context.lower()}."
@@ -3212,7 +3253,7 @@ class ProposalSupportMixin:
                 f"- Keputusan yang mengubah arah program harus terdokumentasi dan ditautkan ke baseline kebutuhan {short_goal.lower()}.\n"
                 "- Batas waktu keputusan dan owner tindak lanjut ditetapkan di akhir setiap forum agar tidak muncul keputusan menggantung.\n"
                 f"- Semua notulen dan action log menjadi artefak kontrol yang dapat ditinjau ulang oleh sponsor {client}.\n"
-                f"- Struktur keputusan juga menjaga agar diskusi tentang KPI, risk appetite, dan kepatuhan POJK tidak terpisah dari diskusi delivery harian.\n\n"
+                f"- Struktur keputusan juga menjaga agar diskusi tentang KPI, risk appetite, kepatuhan, dan governance tidak terpisah dari diskusi delivery harian.\n\n"
                 "| Forum Tata Kelola | Frekuensi | Fokus Keputusan | Output Kontrol |\n"
                 "| --- | --- | --- | --- |\n"
                 f"{governance_rows}\n\n"
@@ -3220,7 +3261,7 @@ class ProposalSupportMixin:
                 f"Pengendalian proyek dilakukan lewat kombinasi dashboard progres, risk register, issue log, quality gate, dan acceptance deliverable. "
                 f"Model kontrol ini memastikan aktivitas delivery tetap terkunci pada hasil bisnis, bukan sekadar penyelesaian aktivitas administratif.\n"
                 f"Untuk {client}, pengendalian semacam ini penting karena program {short_project.lower()} berpotensi melibatkan banyak dependency dan keputusan cepat. "
-                f"Oleh sebab itu, indikator kontrol tidak cukup hanya melihat status task, tetapi juga harus membaca dampaknya pada target bisnis, pengalaman nasabah, dan risiko operasional. "
+                f"Oleh sebab itu, indikator kontrol tidak cukup hanya melihat status task, tetapi juga harus membaca dampaknya pada target bisnis, pengalaman pengguna/operasi, dan risiko operasional. "
                 f"Setiap forum kontrol diarahkan untuk menjawab tiga hal sekaligus: apakah deliverable sudah sesuai standar, apakah risiko sudah dimitigasi, dan apakah hasil kerja masih bergerak ke KPI yang disepakati.\n"
                 f"- Dashboard mingguan menyorot KPI inti, status milestone, isu utama, dan kebutuhan keputusan lanjutan yang memengaruhi {client}.\n"
                 "- Setiap deliverable utama melewati review kualitas, validasi stakeholder, dan sign-off sebelum dinyatakan selesai.\n"
@@ -3243,11 +3284,21 @@ class ProposalSupportMixin:
                     ai_mode=ai_mode,
                 )
             )
+            positioning_line = self._summarize_phrase(
+                value_map.get('positioning', ''),
+                'mitra delivery dan konsultasi yang terstruktur',
+                max_words=24,
+            )
+            if positioning_line.lower().startswith(WRITER_FIRM_NAME.lower()):
+                positioning_line = positioning_line[len(WRITER_FIRM_NAME):].strip(" ,-:;")
+                if positioning_line.lower().startswith("adalah "):
+                    positioning_line = positioning_line[7:].strip()
+            positioning_line = positioning_line or "mitra delivery dan konsultasi yang terstruktur"
             return (
                 f"Profil perusahaan tidak dimaksudkan sebagai brosur umum, melainkan sebagai bukti bahwa {WRITER_FIRM_NAME} memiliki modal kerja yang relevan untuk membantu {client}. "
                 f"Yang ditekankan bukan hanya deskripsi perusahaan, tetapi keterkaitan antara kapabilitas, pengalaman serupa, dan bentuk dukungan yang dibutuhkan oleh inisiatif {short_project.lower()}. {chapter_transition}{chain_clause} (Data Internal, {year}).\n\n"
                 "## 10.1 Relevansi Profil dan Kapabilitas Perusahaan\n"
-                f"{WRITER_FIRM_NAME} diposisikan sebagai {self._summarize_phrase(value_map.get('positioning', ''), 'mitra delivery dan konsultasi yang terstruktur', max_words=24)}. "
+                f"{WRITER_FIRM_NAME} diposisikan sebagai {positioning_line}. "
                 f"Posisi ini diperkuat oleh kemampuan untuk menghubungkan metodologi, governance, dan quality control ke kebutuhan nyata klien, terutama pada konteks {term_line}. "
                 f"Bagi {client}, kapabilitas semacam ini penting karena proposal yang baik harus bisa berubah menjadi keputusan dan pekerjaan yang sungguh berjalan, bukan berhenti pada narasi.\n"
                 f"1. Relevansi utama kami terletak pada kemampuan menerjemahkan kebutuhan bisnis ke model delivery yang rapi.\n"

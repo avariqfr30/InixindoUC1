@@ -41,9 +41,43 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return merged
 
 # Backend mode and internal API settings.
-DEMO_MODE = os.getenv("DEMO_MODE", "true").strip().lower() in {"1", "true", "yes", "on"}
-_raw_data_mode = os.getenv("DATA_ACQUISITION_MODE", "demo" if DEMO_MODE else "staged").strip().lower()
+def _normalize_app_profile(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"demo", "development", "dev", "testing", "test"}:
+        return "demo"
+    if normalized in {"production", "prod", "live", "staged", "stage"}:
+        return "production"
+    return ""
+
+
+def _normalize_internal_data_source(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"demo", "mock"}:
+        return "demo"
+    if normalized in {"api", "internal_api", "live"}:
+        return "api"
+    return ""
+
+
+def _normalize_internal_data_fallback(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"", "none", "off", "disabled"}:
+        return "none"
+    if normalized in {"demo", "mock"}:
+        return "demo"
+    return ""
+
+
+_legacy_demo_mode = os.getenv("DEMO_MODE", "true").strip().lower() in {"1", "true", "yes", "on"}
+_raw_data_mode = os.getenv("DATA_ACQUISITION_MODE", "demo" if _legacy_demo_mode else "staged").strip().lower()
 DATA_ACQUISITION_MODE = "demo" if _raw_data_mode in {"demo", "legacy", "current"} else "staged"
+_raw_app_profile = _normalize_app_profile(os.getenv("APP_PROFILE", ""))
+APP_PROFILE = _raw_app_profile or ("demo" if (_legacy_demo_mode or DATA_ACQUISITION_MODE == "demo") else "production")
+_raw_internal_data_source = _normalize_internal_data_source(os.getenv("INTERNAL_DATA_SOURCE", ""))
+INTERNAL_DATA_SOURCE = _raw_internal_data_source or ("demo" if (_legacy_demo_mode or DATA_ACQUISITION_MODE == "demo" or APP_PROFILE == "demo") else "api")
+_raw_internal_data_fallback = _normalize_internal_data_fallback(os.getenv("INTERNAL_DATA_FALLBACK", ""))
+INTERNAL_DATA_FALLBACK = _raw_internal_data_fallback or "none"
+DEMO_MODE = INTERNAL_DATA_SOURCE == "demo"
 FIRM_API_URL = os.getenv("FIRM_API_URL", "https://api.perusahaan-anda.com/v1").strip() or "https://api.perusahaan-anda.com/v1"
 FIRM_API_AUTH_MODE = os.getenv("FIRM_API_AUTH_MODE", "bearer").strip().lower() or "bearer"
 API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "isi_token_disini_nanti")
@@ -51,6 +85,13 @@ FIRM_API_USERNAME = os.getenv("FIRM_API_USERNAME", "").strip()
 FIRM_API_PASSWORD = os.getenv("FIRM_API_PASSWORD", "").strip()
 FIRM_API_TIMEOUT_SECONDS = max(3, int(os.getenv("FIRM_API_TIMEOUT_SECONDS", "8")))
 FIRM_API_CONFIG_FILE = os.getenv("FIRM_API_CONFIG_FILE", "").strip()
+DEFAULT_FIRM_API_REQUEST_DEFAULTS: Dict[str, Any] = {
+    "method": "GET",
+    "params": {},
+    "body": {},
+    "headers": {},
+    "body_encoding": "json",
+}
 
 DEFAULT_FIRM_API_ENDPOINT_CONFIG: Dict[str, Any] = {
     "firm_profile": {
@@ -143,6 +184,13 @@ FIRM_API_INTEGRATION_MODE = str(
 ).strip().lower() or "rest"
 if FIRM_API_INTEGRATION_MODE not in {"rest", "dataset", "generic"}:
     FIRM_API_INTEGRATION_MODE = "rest"
+FIRM_API_REQUEST_DEFAULTS = _deep_merge(
+    DEFAULT_FIRM_API_REQUEST_DEFAULTS,
+    _deep_merge(
+        _firm_api_file_config.get("request_defaults", {}) if isinstance(_firm_api_file_config.get("request_defaults"), dict) else {},
+        _load_json_env("FIRM_API_REQUEST_DEFAULTS"),
+    ),
+)
 FIRM_API_ENDPOINT_CONFIG = _deep_merge(
     DEFAULT_FIRM_API_ENDPOINT_CONFIG,
     _deep_merge(

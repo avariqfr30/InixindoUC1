@@ -559,6 +559,7 @@ def get_base_config():
         "suggestions": SMART_SUGGESTIONS,
         "data_acquisition_mode": proposal_generator.firm_api.data_acquisition_mode,
         "demo_mode": proposal_generator.firm_api.demo_mode,
+        "internal_data_runtime": proposal_generator.firm_api.describe_runtime(),
         "generation_profile": GENERATION_PROFILE,
         "job_poll_interval_ms": JOB_POLL_INTERVAL_MS,
         "max_active_generations": MAX_ACTIVE_GENERATIONS,

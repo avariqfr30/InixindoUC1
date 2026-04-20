@@ -3,7 +3,7 @@
 from .proposal_shared import *
 from .proposal_engine import ProposalEngineMixin
 from .proposal_support import ProposalSupportMixin
-from .runtime_components import FirmAPIClient, KnowledgeBase
+from .runtime_components import InternalDataClient, KnowledgeBase
 
 
 class ProposalGenerator(ProposalEngineMixin, ProposalSupportMixin):
@@ -111,7 +111,7 @@ class ProposalGenerator(ProposalEngineMixin, ProposalSupportMixin):
         self.ollama = Client(host=OLLAMA_HOST)
         self.kb = kb_instance
         self.io_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
-        self.firm_api = FirmAPIClient()
+        self.firm_api = InternalDataClient()
         self.generation_profile = GENERATION_PROFILE
         self._research_cache: Dict[str, Dict[str, str]] = {}
         self._research_cache_times: Dict[str, float] = {}
