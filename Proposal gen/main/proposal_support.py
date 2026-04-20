@@ -1867,8 +1867,12 @@ class ProposalSupportMixin:
         if "tm forum" in lowered:
             return "TM Forum membantu menyelaraskan proses layanan, operasi, dan model kapabilitas industri agar perbaikan tidak parsial."
         if any(token in lowered for token in ["iso", "pojk", "ojk", "nist", "regulasi", "kepatuhan"]):
+            if "ojk" in lowered or "pojk" in lowered:
+                return "Acuan OJK menetapkan batas kepatuhan, kontrol minimum, dan mutu dokumen yang wajib dijaga selama pekerjaan berjalan."
             return "Acuan ini menetapkan batas kepatuhan, kontrol minimum, dan mutu yang wajib dijaga selama pekerjaan berjalan."
-        if "ai" in lowered or "model" in lowered or "data" in lowered:
+        has_ai_terms = bool(re.search(r"\b(ai|artificial intelligence|machine learning|generative)\b", lowered))
+        has_data_terms = bool(re.search(r"\b(data|model)\b", lowered))
+        if has_ai_terms or has_data_terms:
             return (
                 "Acuan ini membantu menjaga kesiapan data, akuntabilitas keputusan, dan kontrol penerapan solusi sebelum diperluas."
                 if ai_mode
