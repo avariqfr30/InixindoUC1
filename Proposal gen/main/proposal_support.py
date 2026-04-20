@@ -318,7 +318,7 @@ class ProposalSupportMixin:
                 continue
             parts = re.split(r"\s*[|\n;]+\s*", text)
             for part in parts:
-                value = re.sub(r"^\d+\.\s*", "", part or "").strip(" ,;:-")
+                value = re.sub(r"^\d+\.\s*", "", part or "").strip(" ,;:.-")
                 if not value:
                     continue
                 key = value.lower()
@@ -1405,8 +1405,17 @@ class ProposalSupportMixin:
         text = self._prune_empty_markdown_sections(text)
         if not text:
             return ""
+        text = text.replace("\uf0b7", "- ")
+        text = re.sub(r"(?m)^\s*[▪◦●■□◆]+\s*", "- ", text)
+        text = re.sub(r"(?m)^\s*•\s+", "- ", text)
         text = text.replace("…", " ")
         text = re.sub(r"\.{3,}", ".", text)
+        text = re.sub(r"\.\s*\.", ".", text)
+        text = re.sub(r"([!?])\1+", r"\1", text)
+        text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+        text = re.sub(r",\s*\.", ".", text)
+        text = re.sub(r";\s*\.", ".", text)
+        text = re.sub(r":\s*\.", ".", text)
         return re.sub(r"\n{3,}", "\n\n", text).strip()
 
     @classmethod

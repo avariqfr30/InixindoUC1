@@ -4078,27 +4078,19 @@ class DocumentBuilder:
                 DocumentBuilder._process_inline_html(p, element)
             elif element.name in ['ul', 'ol']:
                 direct_items = element.find_all('li', recursive=False)
-                style_name = "List Number" if element.name == 'ol' else "List Bullet"
-                list_num_id = DocumentBuilder._create_list_num_id(doc, style_name)
+                is_ordered_list = element.name == 'ol'
                 for idx, li in enumerate(direct_items, start=1):
                     if not li.get_text(" ", strip=True):
                         continue
-                    use_manual_fallback = False
-                    try:
-                        p = doc.add_paragraph(style=style_name)
-                    except KeyError:
-                        p = doc.add_paragraph()
-                        use_manual_fallback = True
+                    p = doc.add_paragraph()
 
                     p.paragraph_format.space_before = Pt(0)
                     p.paragraph_format.space_after = Pt(4)
-                    p.paragraph_format.left_indent = Inches(0.25)
-                    p.paragraph_format.first_line_indent = Inches(-0.25)
-                    if list_num_id is not None:
-                        DocumentBuilder._apply_list_num_id(p, list_num_id, level=0)
-                    elif use_manual_fallback:
-                        marker = f"{idx}. " if element.name == 'ol' else "• "
-                        p.add_run(marker).bold = True
+                    p.paragraph_format.left_indent = Inches(0.28)
+                    p.paragraph_format.first_line_indent = Inches(-0.18)
+                    marker = f"{idx}. " if is_ordered_list else "- "
+                    marker_run = p.add_run(marker)
+                    marker_run.bold = True
                     DocumentBuilder._process_inline_html(p, li)
             elif element.name == 'table':
                 rows = element.find_all('tr')
