@@ -1,6 +1,7 @@
 """Proposal support logic: research assembly, structured chapters, quality checks, and acceptance."""
 
 import hashlib
+import diskcache as dc
 
 from .proposal_shared import *
 from .runtime_components import (
@@ -14,6 +15,9 @@ from .runtime_components import (
     StyleEngine,
 )
 
+bundle_cache_dir = Path(APP_STATE_DB_PATH).parent / ".research_bundle_cache"
+bundle_cache = dc.Cache(str(bundle_cache_dir))
+
 
 class ProposalSupportMixin:
     RESEARCH_BUNDLE_TEXT_FIELDS = (
@@ -25,16 +29,7 @@ class ProposalSupportMixin:
         "ai_posture",
     )
 
-    @staticmethod
-    def _research_bundle_cache_dir() -> Path:
-        cache_dir = Path(APP_STATE_DB_PATH).parent / ".research_bundle_cache"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir
-
-    @classmethod
-    def _research_bundle_cache_path(cls, key: str) -> Path:
-        digest = hashlib.sha256(str(key or "").encode("utf-8")).hexdigest()
-        return cls._research_bundle_cache_dir() / f"{digest}.json"
+    # Removed archaic manual file I/O cache methods.
 
     @classmethod
     def _build_structured_research_sources(cls, bundle: Optional[Dict[str, Any]]) -> Dict[str, List[Dict[str, str]]]:
@@ -75,43 +70,7 @@ class ProposalSupportMixin:
         }
         return normalized
 
-    @classmethod
-    def _load_persisted_research_bundle(cls, key: str) -> Optional[Dict[str, Any]]:
-        path = cls._research_bundle_cache_path(key)
-        if not path.exists():
-            return None
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            try:
-                path.unlink()
-            except Exception:
-                pass
-            return None
-
-        stored_at = float((payload or {}).get("stored_at", 0.0) or 0.0)
-        if not stored_at or (time.time() - stored_at) > RESEARCH_CACHE_TTL_SECONDS:
-            try:
-                path.unlink()
-            except Exception:
-                pass
-            return None
-
-        bundle = (payload or {}).get("bundle", {})
-        if not isinstance(bundle, dict):
-            return None
-        return cls._normalize_research_bundle(bundle)
-
-    @classmethod
-    def _persist_research_bundle(cls, key: str, bundle: Dict[str, Any]) -> None:
-        path = cls._research_bundle_cache_path(key)
-        payload = {
-            "stored_at": time.time(),
-            "bundle": cls._normalize_research_bundle(bundle),
-        }
-        tmp_path = path.with_suffix(".tmp")
-        tmp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        tmp_path.replace(path)
+    # Replaced persistence logic with diskcache
 
     @classmethod
     def _research_bundle_sources(cls, research_bundle: Optional[Dict[str, Any]], field: str, max_items: int = 3) -> List[Dict[str, str]]:
@@ -137,28 +96,14 @@ class ProposalSupportMixin:
         return cls._extract_osint_facts(text, max_items=max_items)
 
     def _get_cached_research_bundle(self, key: str) -> Optional[Dict[str, Any]]:
-        with self._cache_lock:
-            cached = self._research_cache.get(key)
-            cached_at = float(self._research_cache_times.get(key, 0.0) or 0.0)
-            if cached and cached_at and (time.time() - cached_at) <= RESEARCH_CACHE_TTL_SECONDS:
-                return self._normalize_research_bundle(cached)
-            if key in self._research_cache:
-                self._research_cache.pop(key, None)
-                self._research_cache_times.pop(key, None)
-        persisted = self._load_persisted_research_bundle(key)
-        if not persisted:
-            return None
-        with self._cache_lock:
-            self._cache_put(self._research_cache, key, persisted, max_size=96)
-            self._research_cache_times[key] = time.time()
-        return dict(persisted)
+        cached = bundle_cache.get(key)
+        if cached:
+            return self._normalize_research_bundle(cached)
+        return None
 
     def _store_research_bundle(self, key: str, bundle: Dict[str, Any]) -> Dict[str, Any]:
         normalized = self._normalize_research_bundle(bundle)
-        with self._cache_lock:
-            self._cache_put(self._research_cache, key, normalized, max_size=96)
-            self._research_cache_times[key] = time.time()
-        self._persist_research_bundle(key, normalized)
+        bundle_cache.set(key, normalized, expire=RESEARCH_CACHE_TTL_SECONDS)
         return dict(normalized)
 
     @classmethod
