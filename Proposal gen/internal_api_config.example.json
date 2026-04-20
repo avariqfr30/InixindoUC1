@@ -13,9 +13,19 @@
           "dataset": "ReferenceAccount"
         }
       },
-      "response_path": "data.dataset_result",
-      "record_filters": {},
-      "allow_llm_extract": true
+      "response_path": "data.dataset_result.0",
+      "field_mapping": {
+        "office_address": "company_address",
+        "email": "official_email",
+        "phone": "telephone",
+        "whatsapp": "whatsapp",
+        "website": "website_url",
+        "legal_name": "legal_name",
+        "operating_hours": "operating_hours",
+        "profile_summary": "profile_summary",
+        "credential_highlights": "credential_highlights",
+        "portfolio_highlights": "portfolio_highlights"
+      }
     },
     "project_standards": {
       "request": {
@@ -27,7 +37,11 @@
       "record_filters": {
         "project_type": "{project_type}"
       },
-      "allow_llm_extract": true
+      "field_mapping": {
+        "methodology": "delivery_methodology",
+        "team": "team_composition",
+        "commercial": "commercial_terms"
+      }
     },
     "client_relationship": {
       "request": {
@@ -39,7 +53,10 @@
       "record_filters": {
         "client_name": "{client_name}"
       },
-      "allow_llm_extract": true
+      "field_mapping": {
+        "summary": "relationship_summary",
+        "mode": "relationship_status"
+      }
     }
   }
 }

@@ -15,3 +15,4 @@ pillow
 pypdf
 pydantic
 diskcache
+jmespath

@@ -177,21 +177,40 @@ class FirmAPIClient:
         self.endpoint_config = dict(FIRM_API_ENDPOINT_CONFIG or {})
         self.dataset_config = dict(FIRM_API_DATASET_CONFIG or {})
         self.resource_config = dict(FIRM_API_RESOURCE_CONFIG or {})
-        self.headers = {"Accept": "application/json"}
-        self.auth: Optional[Tuple[str, str]] = None
-        self._dataset_response_cache: Optional[Any] = None
+        self.session = requests.Session()
+        self.session.headers.update({"Accept": "application/json"})
 
         if self.auth_mode == "basic":
             if FIRM_API_USERNAME and FIRM_API_PASSWORD:
-                self.auth = (FIRM_API_USERNAME, FIRM_API_PASSWORD)
+                self.session.auth = (FIRM_API_USERNAME, FIRM_API_PASSWORD)
         elif self.auth_mode == "bearer":
             token = str(API_AUTH_TOKEN or "").strip()
             if token and token != "isi_token_disini_nanti":
-                self.headers["Authorization"] = f"Bearer {token}"
+                self.session.headers.update({"Authorization": f"Bearer {token}"})
         elif self.auth_mode == "none":
             pass
         else:
             logger.warning("Unknown FIRM_API_AUTH_MODE=%s. Falling back to unauthenticated requests.", self.auth_mode)
+
+    @staticmethod
+    def _extract_with_jmespath(payload: Any, path: str) -> Any:
+        try:
+            import jmespath
+            return jmespath.search(path, payload)
+        except ImportError:
+            current = payload
+            for part in str(path or "").split("."):
+                if not part: continue
+                if isinstance(current, list):
+                    if not part.isdigit(): return None
+                    idx = int(part)
+                    if idx < 0 or idx >= len(current): return None
+                    current = current[idx]
+                elif isinstance(current, dict):
+                    current = current.get(part)
+                else:
+                    return None
+            return current
 
     @staticmethod
     def _render_template_value(value: Any, context: Dict[str, Any]) -> Any:
@@ -205,55 +224,10 @@ class FirmAPIClient:
     @classmethod
     def _render_template_payload(cls, payload: Any, context: Dict[str, Any]) -> Any:
         if isinstance(payload, dict):
-            return {key: cls._render_template_payload(value, context) for key, value in payload.items()}
+            return {k: cls._render_template_payload(v, context) for k, v in payload.items()}
         if isinstance(payload, list):
-            return [cls._render_template_payload(value, context) for value in payload]
+            return [cls._render_template_payload(v, context) for v in payload]
         return cls._render_template_value(payload, context)
-
-    @staticmethod
-    def _extract_json_path(payload: Any, path: str) -> Any:
-        current = payload
-        for raw_part in filter(None, str(path or "").split(".")):
-            if isinstance(current, list):
-                if not raw_part.isdigit():
-                    return None
-                index = int(raw_part)
-                if index < 0 or index >= len(current):
-                    return None
-                current = current[index]
-                continue
-            if isinstance(current, dict):
-                if raw_part not in current:
-                    return None
-                current = current[raw_part]
-                continue
-            return None
-        return current
-
-    @staticmethod
-    def _lookup_record_value(record: Dict[str, Any], field_name: str) -> Any:
-        if field_name in record:
-            return record[field_name]
-        normalized_key = SchemaMapper.normalize_key(field_name)
-        for key, value in record.items():
-            if SchemaMapper.normalize_key(key) == normalized_key:
-                return value
-        return None
-
-    @classmethod
-    def _record_matches(cls, record: Dict[str, Any], filters: Dict[str, Any]) -> bool:
-        for key, expected in (filters or {}).items():
-            if expected in (None, ""):
-                continue
-            actual = cls._lookup_record_value(record, str(key))
-            if actual is None:
-                return False
-            if str(actual).strip() == str(expected).strip():
-                continue
-            if SchemaMapper.normalize_key(actual) == SchemaMapper.normalize_key(expected):
-                continue
-            return False
-        return True
 
     @classmethod
     def _merge_spec(cls, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -266,231 +240,68 @@ class FirmAPIClient:
                 merged[key] = value
         return merged
 
-    def _request(
-        self,
-        path: str,
-        method: str = "GET",
-        params: Optional[Dict[str, Any]] = None,
-        body: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, Any]] = None,
-        body_encoding: str = "json",
-    ) -> requests.Response:
-        url = str(path or "").strip()
-        if not re.match(r"^https?://", url, flags=re.IGNORECASE):
-            url = f"{self.base_url}/{url.lstrip('/')}"
-        merged_headers = dict(self.headers)
-        for key, value in (headers or {}).items():
-            if value not in (None, ""):
-                merged_headers[str(key)] = str(value)
-        request_kwargs: Dict[str, Any] = {
-            "params": params,
-            "headers": merged_headers,
-            "auth": self.auth,
-            "timeout": self.timeout_seconds,
-        }
-        method_upper = str(method or "GET").strip().upper() or "GET"
-        if method_upper != "GET":
-            encoding = str(body_encoding or "json").strip().lower() or "json"
-            if encoding == "form":
-                request_kwargs["data"] = body or {}
-            else:
-                request_kwargs["json"] = body or {}
-        return requests.request(
-            method_upper,
-            url,
-            **request_kwargs,
-        )
-
-    def _request_named_endpoint(self, endpoint_name: str, **context: Any) -> requests.Response:
-        spec = dict((self.endpoint_config or {}).get(endpoint_name) or {})
-        return self._request_from_spec(spec, **context)
-
-    def _request_from_spec(self, spec: Dict[str, Any], **context: Any) -> requests.Response:
-        request_spec = self._merge_spec(self.request_defaults, dict(spec or {}))
+    def _request_from_spec(self, spec: Dict[str, Any], **context: Any) -> Any:
+        request_spec = self._merge_spec(self.request_defaults, dict(spec.get("request") or {}))
         path = self._render_template_value(request_spec.get("url") or request_spec.get("path") or "", context)
         method = str(request_spec.get("method") or "GET").strip().upper() or "GET"
         params = self._render_template_payload(request_spec.get("params") or {}, context)
         body = self._render_template_payload(request_spec.get("body") or {}, context)
-        headers = self._render_template_payload(request_spec.get("headers") or {}, context)
-        body_encoding = self._render_template_value(request_spec.get("body_encoding") or "json", context)
-        return self._request(
-            path,
-            method=method,
-            params=params,
-            body=body,
-            headers=headers,
-            body_encoding=str(body_encoding or "json"),
-        )
-
-    def _get_dataset_response(self) -> Any:
-        if self._dataset_response_cache is not None:
-            return self._dataset_response_cache
-        request_spec = self._merge_spec(self.request_defaults, dict((self.dataset_config or {}).get("request") or {}))
-        path = str(request_spec.get("path") or "").strip() or "/api/Resource/dataset"
-        method = str(request_spec.get("method") or "POST").strip().upper() or "POST"
-        params = request_spec.get("params") or {}
-        body = request_spec.get("body") or {}
-        body_encoding = str(request_spec.get("body_encoding") or "json").strip().lower() or "json"
-        response = self._request(path, method=method, params=params, body=body, body_encoding=body_encoding)
-        response.raise_for_status()
-        self._dataset_response_cache = response.json()
-        return self._dataset_response_cache
-
-    def _select_dataset_payload(self, resource_name: str, **context: Any) -> Any:
-        response_payload = self._get_dataset_response()
-        payload_paths = dict((self.dataset_config or {}).get("payload_paths") or {})
-        payload_path = self._render_template_value(payload_paths.get(resource_name) or "", context)
-        if payload_path:
-            selected = self._extract_json_path(response_payload, str(payload_path))
-            if selected not in (None, ""):
-                return selected
-
-        records_path = self._render_template_value((self.dataset_config or {}).get("response_items_path") or "", context)
-        records_payload = self._extract_json_path(response_payload, str(records_path)) if records_path else response_payload
-        if isinstance(records_payload, dict):
-            direct_match = records_payload.get(resource_name)
-            if direct_match not in (None, ""):
-                return direct_match
-            return records_payload
-
-        if not isinstance(records_payload, list):
-            return {}
-
-        resource_field = str((self.dataset_config or {}).get("resource_field") or "").strip()
-        resource_values = dict((self.dataset_config or {}).get("resource_values") or {})
-        expected_resource = self._render_template_value(resource_values.get(resource_name) or resource_name, context)
-        filters = self._render_template_payload(
-            dict(((self.dataset_config or {}).get("record_filters") or {}).get(resource_name) or {}),
-            context,
-        )
-
-        matches: List[Dict[str, Any]] = []
-        for item in records_payload:
-            if not isinstance(item, dict):
-                continue
-            if resource_field:
-                actual_resource = self._lookup_record_value(item, resource_field)
-                if actual_resource is None:
-                    continue
-                if SchemaMapper.normalize_key(actual_resource) != SchemaMapper.normalize_key(expected_resource):
-                    continue
-            if not self._record_matches(item, filters):
-                continue
-            matches.append(item)
-
-        if not matches:
-            return {}
-        return matches[0] if len(matches) == 1 else matches
-
-    @staticmethod
-    def _coerce_payload_to_mapping(payload: Any) -> Dict[str, Any]:
-        if isinstance(payload, dict):
-            return payload
-        if isinstance(payload, list):
-            dict_items = [item for item in payload if isinstance(item, dict)]
-            if len(dict_items) == 1:
-                return dict_items[0]
-        return {}
-
-    @staticmethod
-    def _resource_has_request(resource_spec: Dict[str, Any]) -> bool:
-        request_spec = dict((resource_spec or {}).get("request") or {})
-        return bool(str(request_spec.get("url") or request_spec.get("path") or "").strip())
-
-    def _resolve_generic_payload(self, resource_name: str, **context: Any) -> Any:
-        resource_spec = dict((self.resource_config or {}).get(resource_name) or {})
-        request_spec = dict(resource_spec.get("request") or {})
-        if not request_spec:
-            return {}
-        response = self._request_from_spec(request_spec, **context)
-        response.raise_for_status()
-        payload = response.json()
-        response_path = self._render_template_value(resource_spec.get("response_path") or "", context)
-        if response_path:
-            payload = self._extract_json_path(payload, str(response_path))
-        filters = self._render_template_payload(resource_spec.get("record_filters") or {}, context)
-        if isinstance(payload, list):
-            matches = [item for item in payload if isinstance(item, dict) and self._record_matches(item, filters)]
-            if matches:
-                return matches[0] if len(matches) == 1 else matches
-        return payload
-
-    def _resolve_resource_payload(self, resource_name: str, **context: Any) -> Any:
-        resource_spec = dict((self.resource_config or {}).get(resource_name) or {})
-        if self._resource_has_request(resource_spec):
-            return self._resolve_generic_payload(resource_name, **context)
-        if self.integration_mode == "dataset":
-            return self._select_dataset_payload(resource_name, **context)
-        if self.integration_mode == "generic":
-            return self._resolve_generic_payload(resource_name, **context)
-        response = self._request_named_endpoint(resource_name, **context)
+        
+        url = str(path or "").strip()
+        if not re.match(r"^https?://", url, flags=re.IGNORECASE):
+            url = f"{self.base_url}/{url.lstrip('/')}"
+            
+        kwargs = {"params": params, "timeout": self.timeout_seconds}
+        if method != "GET":
+            encoding = str(request_spec.get("body_encoding") or "json").strip().lower()
+            if encoding == "form":
+                kwargs["data"] = body or {}
+            else:
+                kwargs["json"] = body or {}
+                
+        response = self.session.request(method, url, **kwargs)
         response.raise_for_status()
         return response.json()
 
-    def _resource_allows_llm_extract(self, resource_name: str) -> bool:
-        spec = dict((self.resource_config or {}).get(resource_name) or {})
-        return bool(spec.get("allow_llm_extract", True))
-
-    @staticmethod
-    def _compact_json_for_llm(payload: Any) -> str:
-        try:
-            serialized = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
-        except Exception:
-            serialized = str(payload)
-        serialized = serialized.strip()
-        max_chars = 18000
-        return serialized[:max_chars]
-
-    def _llm_extract_generic_resource(
-        self,
-        resource_name: str,
-        payload: Any,
-        schema_model: Any,
-        context_note: str = "",
-    ) -> Dict[str, Any]:
-        prompt_map = {
-            "firm_profile": (
-                "Extract the writer firm's official identity and contact details from this JSON payload. "
-                "Map only fields clearly supported by the payload."
-            ),
-            "project_standards": (
-                "Extract the delivery methodology, team composition, and commercial terms from this JSON payload "
-                "for proposal generation."
-            ),
-            "client_relationship": (
-                "Extract the client relationship summary and relationship status from this JSON payload."
-            ),
-        }
-        instruction = prompt_map.get(resource_name, "Extract the most relevant structured fields from this JSON payload.")
-        payload_text = self._compact_json_for_llm(payload)
-        prompt = f"""
-You are an internal API schema adapter for a proposal generator.
-{instruction}
-{f"Context: {context_note}" if context_note else ""}
-
-Rules:
-- Read the payload as arbitrary JSON from an unknown internal API.
-- Infer only what is reasonably supported by the payload.
-- If a field is missing, return an empty string or empty list.
-- Respond ONLY with valid JSON matching the requested schema.
-
-JSON PAYLOAD:
-{payload_text}
-        """.strip()
-        try:
-            response = Client(host=OLLAMA_HOST).chat(
-                model=LLM_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                options={"temperature": 0.0},
-            )
-            raw_text = str(((response or {}).get("message") or {}).get("content") or "").strip()
-            match = re.search(r"\{.*\}", raw_text, re.DOTALL)
-            parsed = json.loads(match.group(0) if match else raw_text)
-            validated = schema_model.model_validate(parsed)
-            return validated.model_dump()
-        except Exception as exc:
-            logger.warning("Generic internal API extraction failed for %s: %s", resource_name, exc)
+    def _resolve_resource_payload(self, resource_name: str, **context: Any) -> Any:
+        resource_spec = dict((self.resource_config or {}).get(resource_name) or {})
+        if not resource_spec:
             return {}
+            
+        payload = self._request_from_spec(resource_spec, **context)
+        
+        response_path = self._render_template_value(resource_spec.get("response_path") or "", context)
+        if response_path:
+            payload = self._extract_with_jmespath(payload, response_path)
+            
+        filters = self._render_template_payload(resource_spec.get("record_filters") or {}, context)
+        if isinstance(payload, list) and filters:
+            matches = []
+            for item in payload:
+                if isinstance(item, dict):
+                    match = True
+                    for k, expected in filters.items():
+                        actual = item.get(k)
+                        if str(actual).strip().lower() != str(expected).strip().lower():
+                            match = False
+                            break
+                    if match:
+                        matches.append(item)
+            payload = matches[0] if len(matches) == 1 else matches
+            
+        field_mapping = resource_spec.get("field_mapping")
+        if not field_mapping:
+            return payload
+            
+        extracted = {}
+        target_payload = payload[0] if isinstance(payload, list) and payload else payload
+        if not isinstance(target_payload, dict):
+            return {}
+            
+        for target_field, json_path in field_mapping.items():
+            extracted[target_field] = self._extract_with_jmespath(target_payload, str(json_path))
+            
+        return extracted
 
     def uses_demo_logic(self) -> bool:
         return self.demo_mode or self.data_acquisition_mode == "demo"
@@ -507,15 +318,12 @@ JSON PAYLOAD:
         }
 
     @staticmethod
-    def _normalize_project_standards(raw_payload: Optional[Dict[str, Any]]) -> Dict[str, str]:
-        normalized = SchemaMapper.normalize_record(raw_payload, PROJECT_STANDARD_FIELD_ALIASES)
-        methodology = str(normalized.get("methodology") or "").strip() or "TBD"
-        team = str(normalized.get("team") or "").strip() or "TBD"
-        commercial = str(normalized.get("commercial") or "").strip() or "TBD"
+    def _normalize_project_standards(payload: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        raw = payload or {}
         return {
-            "methodology": methodology,
-            "team": team,
-            "commercial": commercial,
+            "methodology": str(raw.get("methodology") or "").strip() or "TBD",
+            "team": str(raw.get("team") or "").strip() or "TBD",
+            "commercial": str(raw.get("commercial") or "").strip() or "TBD",
         }
 
     @staticmethod
@@ -523,39 +331,8 @@ JSON PAYLOAD:
         return all(str(payload.get(key) or "").strip() in {"", "TBD"} for key in ("methodology", "team", "commercial"))
 
     @staticmethod
-    def _normalize_relationship_mode(value: Any) -> str:
-        normalized = SchemaMapper.normalize_key(value)
-        existing_markers = {
-            "existing", "active", "returning", "repeat", "renewal", "incumbent",
-            "prior", "previous", "historical", "yes", "true", "1"
-        }
-        return "existing" if normalized in existing_markers else "new"
-
-    @classmethod
-    def _normalize_client_relationship(cls, raw_payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        normalized = SchemaMapper.normalize_record(raw_payload, CLIENT_RELATIONSHIP_FIELD_ALIASES)
-        status_value = normalized.get("status", "")
-        summary = str(normalized.get("summary") or "").strip()
-        mode = cls._normalize_relationship_mode(status_value)
-        return {
-            "summary": summary,
-            "mode": mode,
-            "source": "internal_api",
-            "verified": bool(summary or str(status_value).strip()),
-        }
-
-    @staticmethod
-    def _is_weak_client_relationship(payload: Dict[str, Any]) -> bool:
-        return not str(payload.get("summary") or "").strip() and not bool(payload.get("verified"))
-
-    @staticmethod
     def _empty_relationship_context(source: str = "internal_api") -> Dict[str, Any]:
-        return {
-            "summary": "",
-            "mode": "new",
-            "source": source,
-            "verified": False,
-        }
+        return {"summary": "", "mode": "new", "source": source, "verified": False}
 
     @staticmethod
     def _has_osint_evidence(summary: str) -> bool:
@@ -568,18 +345,8 @@ JSON PAYLOAD:
             return self._normalize_project_standards(demo_standards)
         try:
             payload = self._resolve_resource_payload("project_standards", project_type=project_type)
-            normalized = self._normalize_project_standards(self._coerce_payload_to_mapping(payload))
-            if self.integration_mode == "generic" and self._is_weak_project_standards(normalized) and self._resource_allows_llm_extract("project_standards"):
-                extracted = self._llm_extract_generic_resource(
-                    "project_standards",
-                    payload,
-                    GenericProjectStandardsSchema,
-                    context_note=f"project_type={project_type}",
-                )
-                if extracted:
-                    normalized = self._normalize_project_standards(extracted)
-            return normalized
-        except (requests.RequestException, ValueError) as e:
+            return GenericProjectStandardsSchema.model_validate(payload).model_dump()
+        except Exception as e:
             logger.error(f"Internal API Error: {e}")
             return self._normalize_project_standards({})
 
@@ -594,67 +361,35 @@ JSON PAYLOAD:
         base_profile["legal_name"] = base_profile.get("legal_name") or WRITER_FIRM_LEGAL_NAME
         base_profile["operating_hours"] = base_profile.get("operating_hours") or WRITER_FIRM_OPERATING_HOURS
         base_profile["profile_summary"] = base_profile.get("profile_summary") or WRITER_FIRM_PROFILE_SUMMARY
-        base_profile["credential_highlights"] = (
-            base_profile.get("credential_highlights") or WRITER_FIRM_CREDENTIAL_HIGHLIGHTS
-        )
-        base_profile["official_source_urls"] = (
-            base_profile.get("official_source_urls") or WRITER_FIRM_SOURCE_URLS
-        )
-        return cls._normalize_firm_profile(base_profile)
+        base_profile["credential_highlights"] = base_profile.get("credential_highlights") or WRITER_FIRM_CREDENTIAL_HIGHLIGHTS
+        base_profile["official_source_urls"] = base_profile.get("official_source_urls") or WRITER_FIRM_SOURCE_URLS
+        return base_profile
 
     @staticmethod
     def _looks_like_missing_profile(profile: Dict[str, str]) -> bool:
-        if not isinstance(profile, dict):
-            return True
+        if not isinstance(profile, dict): return True
         meaningful_keys = ("office_address", "email", "phone", "website", "contact_info")
         return not any(str(profile.get(key) or "").strip() for key in meaningful_keys)
 
     def get_firm_profile(self) -> Dict[str, str]:
-        if self.demo_mode:
-            return self._default_firm_profile()
+        if self.demo_mode: return self._default_firm_profile()
         try:
             payload = self._resolve_resource_payload("firm_profile")
-            normalized = self._normalize_firm_profile(self._coerce_payload_to_mapping(payload))
-            if self.integration_mode == "generic" and self._looks_like_missing_profile(normalized) and self._resource_allows_llm_extract("firm_profile"):
-                extracted = self._llm_extract_generic_resource(
-                    "firm_profile",
-                    payload,
-                    GenericFirmProfileSchema,
-                )
-                if extracted:
-                    normalized = self._normalize_firm_profile(extracted)
-            return normalized
-        except (requests.RequestException, ValueError) as e:
+            return GenericFirmProfileSchema.model_validate(payload).model_dump()
+        except Exception as e:
             logger.error(f"Internal API Error: {e}")
-            if self.uses_demo_logic():
-                return self._build_profile_from_osint()
             return self._default_firm_profile()
 
     def get_client_relationship(self, client_name: str) -> Dict[str, Any]:
         if self.uses_demo_logic():
-            summary = Researcher.get_client_writer_collaboration(client_name, WRITER_FIRM_NAME)
-            has_evidence = self._has_osint_evidence(summary)
-            return {
-                "summary": summary,
-                "mode": "existing" if has_evidence else "new",
-                "source": "osint",
-                "verified": has_evidence,
-            }
-
+            return {"summary": "", "mode": "new", "source": "osint", "verified": False}
         try:
             payload = self._resolve_resource_payload("client_relationship", client_name=client_name)
-            normalized = self._normalize_client_relationship(self._coerce_payload_to_mapping(payload))
-            if self.integration_mode == "generic" and self._is_weak_client_relationship(normalized) and self._resource_allows_llm_extract("client_relationship"):
-                extracted = self._llm_extract_generic_resource(
-                    "client_relationship",
-                    payload,
-                    GenericClientRelationshipSchema,
-                    context_note=f"client_name={client_name}",
-                )
-                if extracted:
-                    normalized = self._normalize_client_relationship(extracted)
-            return normalized
-        except (requests.RequestException, ValueError) as e:
+            data = GenericClientRelationshipSchema.model_validate(payload).model_dump()
+            data["source"] = "internal_api"
+            data["verified"] = bool(data.get("summary"))
+            return data
+        except Exception as e:
             logger.error(f"Internal API Error: {e}")
             return self._empty_relationship_context()
 
