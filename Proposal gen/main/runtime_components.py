@@ -2041,6 +2041,35 @@ class AppStateStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_sessions (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    username_key TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_seen_at REAL NOT NULL,
+                    expires_at REAL NOT NULL,
+                    absolute_expires_at REAL NOT NULL,
+                    last_ip TEXT NOT NULL DEFAULT '',
+                    user_agent TEXT NOT NULL DEFAULT '',
+                    revoked_at REAL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_login_attempts (
+                    key TEXT PRIMARY KEY,
+                    username_key TEXT NOT NULL,
+                    remote_ip TEXT NOT NULL,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    window_started_at REAL NOT NULL DEFAULT 0,
+                    blocked_until REAL NOT NULL DEFAULT 0,
+                    updated_at REAL NOT NULL DEFAULT 0
+                )
+                """
+            )
             existing_columns = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(proposal_history)").fetchall()
@@ -2054,6 +2083,9 @@ class AppStateStore:
             for column_name, ddl in column_backfills.items():
                 if column_name not in existing_columns:
                     conn.execute(f"ALTER TABLE proposal_history ADD COLUMN {column_name} {ddl}")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_app_sessions_username_active ON app_sessions(username_key, revoked_at, expires_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_app_sessions_active ON app_sessions(revoked_at, expires_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_login_attempts_user_ip ON app_login_attempts(username_key, remote_ip)")
             conn.commit()
 
     def _bootstrap_generated_history(self) -> None:
@@ -2153,7 +2185,7 @@ class AppStateStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id, username, password_hash, created_at
+                SELECT id, username, username_key, password_hash, created_at
                 FROM app_users
                 WHERE username_key = ?
                 """,
@@ -2164,6 +2196,7 @@ class AppStateStore:
         return {
             "id": row["id"],
             "username": row["username"],
+            "username_key": row["username_key"],
             "password_hash": row["password_hash"],
             "created_at": float(row["created_at"] or 0.0),
         }
@@ -2192,6 +2225,363 @@ class AppStateStore:
             return True
         except sqlite3.IntegrityError:
             return False
+
+    @staticmethod
+    def _login_attempt_key(username_key: str, remote_ip: str) -> str:
+        return f"{username_key}|{remote_ip}"
+
+    def _cleanup_auth_state(self, now: Optional[float] = None) -> None:
+        current = float(now or time.time())
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM app_sessions WHERE revoked_at IS NOT NULL AND revoked_at <= ?",
+                (current - 86400.0,),
+            )
+            conn.execute(
+                "DELETE FROM app_sessions WHERE expires_at <= ? OR absolute_expires_at <= ?",
+                (current, current),
+            )
+            conn.execute(
+                "DELETE FROM app_login_attempts WHERE blocked_until <= ? AND (window_started_at <= ? OR attempt_count <= 0)",
+                (current, current - 86400.0),
+            )
+            conn.commit()
+
+    def count_active_sessions(self, username: str = "") -> int:
+        self._cleanup_auth_state()
+        now = time.time()
+        with self._connect() as conn:
+            if username:
+                username_key = self._username_key(username)
+                if not username_key:
+                    return 0
+                row = conn.execute(
+                    """
+                    SELECT COUNT(1) AS total
+                    FROM app_sessions
+                    WHERE username_key = ?
+                      AND revoked_at IS NULL
+                      AND expires_at > ?
+                      AND absolute_expires_at > ?
+                    """,
+                    (username_key, now, now),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(1) AS total
+                    FROM app_sessions
+                    WHERE revoked_at IS NULL
+                      AND expires_at > ?
+                      AND absolute_expires_at > ?
+                    """,
+                    (now, now),
+                ).fetchone()
+        return int(row["total"] if row else 0)
+
+    def _enforce_session_limits(
+        self,
+        username_key: str,
+        force_single_session: bool,
+        max_per_user: int,
+        max_global: int,
+        now: float,
+    ) -> None:
+        with self._connect() as conn:
+            if force_single_session:
+                conn.execute(
+                    """
+                    UPDATE app_sessions
+                    SET revoked_at = ?
+                    WHERE username_key = ?
+                      AND revoked_at IS NULL
+                      AND expires_at > ?
+                      AND absolute_expires_at > ?
+                    """,
+                    (now, username_key, now, now),
+                )
+            else:
+                active_user_rows = conn.execute(
+                    """
+                    SELECT id
+                    FROM app_sessions
+                    WHERE username_key = ?
+                      AND revoked_at IS NULL
+                      AND expires_at > ?
+                      AND absolute_expires_at > ?
+                    ORDER BY last_seen_at ASC, created_at ASC
+                    """,
+                    (username_key, now, now),
+                ).fetchall()
+                overflow = max(0, len(active_user_rows) - max(0, int(max_per_user) - 1))
+                for row in active_user_rows[:overflow]:
+                    conn.execute("UPDATE app_sessions SET revoked_at = ? WHERE id = ?", (now, row["id"]))
+
+            active_global_rows = conn.execute(
+                """
+                SELECT id
+                FROM app_sessions
+                WHERE revoked_at IS NULL
+                  AND expires_at > ?
+                  AND absolute_expires_at > ?
+                ORDER BY last_seen_at ASC, created_at ASC
+                """,
+                (now, now),
+            ).fetchall()
+            overflow_global = max(0, len(active_global_rows) - max(0, int(max_global) - 1))
+            for row in active_global_rows[:overflow_global]:
+                conn.execute("UPDATE app_sessions SET revoked_at = ? WHERE id = ?", (now, row["id"]))
+            conn.commit()
+
+    def create_user_session(
+        self,
+        username: str,
+        remote_ip: str = "",
+        user_agent: str = "",
+        idle_timeout_seconds: int = 2700,
+        absolute_timeout_seconds: int = 43200,
+        force_single_session: bool = True,
+        max_sessions_per_user: int = 1,
+        max_global_sessions: int = 30,
+    ) -> str:
+        user = self.get_user(username)
+        if not user:
+            return ""
+        now = time.time()
+        self._cleanup_auth_state(now)
+        username_key = str(user.get("username_key") or "")
+        if not username_key:
+            return ""
+
+        self._enforce_session_limits(
+            username_key=username_key,
+            force_single_session=bool(force_single_session),
+            max_per_user=max(1, int(max_sessions_per_user or 1)),
+            max_global=max(1, int(max_global_sessions or 1)),
+            now=now,
+        )
+
+        session_id = uuid.uuid4().hex
+        absolute_expires_at = now + max(60, int(absolute_timeout_seconds or 43200))
+        expires_at = min(
+            now + max(60, int(idle_timeout_seconds or 2700)),
+            absolute_expires_at,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_sessions(
+                    id, user_id, username_key, created_at, last_seen_at, expires_at, absolute_expires_at, last_ip, user_agent, revoked_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    session_id,
+                    str(user.get("id") or ""),
+                    username_key,
+                    now,
+                    now,
+                    expires_at,
+                    absolute_expires_at,
+                    str(remote_ip or "")[:96],
+                    str(user_agent or "")[:256],
+                ),
+            )
+            conn.commit()
+        return session_id
+
+    def touch_user_session(
+        self,
+        session_id: str,
+        username: str = "",
+        remote_ip: str = "",
+        idle_timeout_seconds: int = 2700,
+        touch_interval_seconds: int = 20,
+    ) -> bool:
+        normalized_session_id = str(session_id or "").strip()
+        if not normalized_session_id:
+            return False
+        username_key = self._username_key(username) if username else ""
+        now = time.time()
+        self._cleanup_auth_state(now)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, username_key, last_seen_at, expires_at, absolute_expires_at, revoked_at
+                FROM app_sessions
+                WHERE id = ?
+                """,
+                (normalized_session_id,),
+            ).fetchone()
+            if not row:
+                return False
+            if row["revoked_at"] is not None:
+                return False
+            if username_key and str(row["username_key"] or "") != username_key:
+                return False
+            if float(row["expires_at"] or 0.0) <= now or float(row["absolute_expires_at"] or 0.0) <= now:
+                conn.execute("UPDATE app_sessions SET revoked_at = ? WHERE id = ?", (now, normalized_session_id))
+                conn.commit()
+                return False
+
+            last_seen = float(row["last_seen_at"] or 0.0)
+            if (now - last_seen) >= max(1, int(touch_interval_seconds or 20)):
+                absolute_expires_at = float(row["absolute_expires_at"] or now)
+                next_expires = min(
+                    now + max(60, int(idle_timeout_seconds or 2700)),
+                    absolute_expires_at,
+                )
+                conn.execute(
+                    """
+                    UPDATE app_sessions
+                    SET last_seen_at = ?, expires_at = ?, last_ip = ?
+                    WHERE id = ?
+                    """,
+                    (now, next_expires, str(remote_ip or "")[:96], normalized_session_id),
+                )
+                conn.commit()
+        return True
+
+    def revoke_user_session(self, session_id: str) -> None:
+        normalized_session_id = str(session_id or "").strip()
+        if not normalized_session_id:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE app_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+                (time.time(), normalized_session_id),
+            )
+            conn.commit()
+
+    def active_session_snapshot(self, username: str = "") -> Dict[str, Any]:
+        self._cleanup_auth_state()
+        now = time.time()
+        snapshot: Dict[str, Any] = {
+            "global_active_sessions": 0,
+            "user_active_sessions": 0,
+        }
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(1) AS total
+                FROM app_sessions
+                WHERE revoked_at IS NULL
+                  AND expires_at > ?
+                  AND absolute_expires_at > ?
+                """,
+                (now, now),
+            ).fetchone()
+            snapshot["global_active_sessions"] = int(row["total"] if row else 0)
+            if username:
+                username_key = self._username_key(username)
+                if username_key:
+                    row_user = conn.execute(
+                        """
+                        SELECT COUNT(1) AS total
+                        FROM app_sessions
+                        WHERE username_key = ?
+                          AND revoked_at IS NULL
+                          AND expires_at > ?
+                          AND absolute_expires_at > ?
+                        """,
+                        (username_key, now, now),
+                    ).fetchone()
+                    snapshot["user_active_sessions"] = int(row_user["total"] if row_user else 0)
+        return snapshot
+
+    def get_login_block_seconds(self, username: str, remote_ip: str) -> int:
+        username_key = self._username_key(username)
+        ip = str(remote_ip or "").strip()[:96]
+        if not username_key:
+            return 0
+        key = self._login_attempt_key(username_key, ip)
+        now = time.time()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT blocked_until FROM app_login_attempts WHERE key = ?",
+                (key,),
+            ).fetchone()
+        if not row:
+            return 0
+        blocked_until = float(row["blocked_until"] or 0.0)
+        if blocked_until <= now:
+            return 0
+        return max(1, int(blocked_until - now))
+
+    def register_login_failure(
+        self,
+        username: str,
+        remote_ip: str,
+        window_seconds: int = 300,
+        max_attempts: int = 6,
+        block_seconds: int = 600,
+    ) -> int:
+        username_key = self._username_key(username)
+        ip = str(remote_ip or "").strip()[:96]
+        if not username_key:
+            return 0
+        key = self._login_attempt_key(username_key, ip)
+        now = time.time()
+        self._cleanup_auth_state(now)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT attempt_count, window_started_at, blocked_until
+                FROM app_login_attempts
+                WHERE key = ?
+                """,
+                (key,),
+            ).fetchone()
+            if row and float(row["blocked_until"] or 0.0) > now:
+                return max(1, int(float(row["blocked_until"]) - now))
+
+            if not row or (now - float(row["window_started_at"] or 0.0)) > max(30, int(window_seconds)):
+                attempt_count = 1
+                window_started_at = now
+            else:
+                attempt_count = int(row["attempt_count"] or 0) + 1
+                window_started_at = float(row["window_started_at"] or now)
+
+            blocked_until = 0.0
+            if attempt_count >= max(1, int(max_attempts)):
+                blocked_until = now + max(30, int(block_seconds))
+
+            conn.execute(
+                """
+                INSERT INTO app_login_attempts(
+                    key, username_key, remote_ip, attempt_count, window_started_at, blocked_until, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    attempt_count = excluded.attempt_count,
+                    window_started_at = excluded.window_started_at,
+                    blocked_until = excluded.blocked_until,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    key,
+                    username_key,
+                    ip,
+                    attempt_count,
+                    window_started_at,
+                    blocked_until,
+                    now,
+                ),
+            )
+            conn.commit()
+        if blocked_until > now:
+            return max(1, int(blocked_until - now))
+        return 0
+
+    def clear_login_failures(self, username: str, remote_ip: str) -> None:
+        username_key = self._username_key(username)
+        ip = str(remote_ip or "").strip()[:96]
+        if not username_key:
+            return
+        key = self._login_attempt_key(username_key, ip)
+        with self._connect() as conn:
+            conn.execute("DELETE FROM app_login_attempts WHERE key = ?", (key,))
+            conn.commit()
 
     @staticmethod
     def _normalize_document_type(value: str) -> str:

@@ -1,5 +1,6 @@
 """Flask entrypoint for the proposal generator app."""
 import concurrent.futures
+from datetime import timedelta
 from functools import wraps
 import hashlib
 import io
@@ -26,17 +27,26 @@ from .config import (
     APP_HOST,
     APP_PORT,
     APP_SECRET_KEY,
+    AUTH_FORCE_SINGLE_SESSION,
+    AUTH_MAX_GLOBAL_ACTIVE_SESSIONS,
+    AUTH_MAX_SESSIONS_PER_USER,
     DB_URI,
     GENERATION_PROFILE,
     JOB_POLL_INTERVAL_MS,
     JOB_RETENTION_SECONDS,
+    LOGIN_RATE_LIMIT_BLOCK_SECONDS,
+    LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS,
     MAX_ACTIVE_GENERATIONS,
     MAX_GENERATION_BACKLOG,
     OLLAMA_HOST,
     PROJECT_CSV_PATH,
     PROJECT_DB_PATH,
     PROPOSAL_MODES,
+    SESSION_ABSOLUTE_TIMEOUT_HOURS,
     SESSION_COOKIE_SECURE,
+    SESSION_IDLE_TIMEOUT_MINUTES,
+    SESSION_TOUCH_INTERVAL_SECONDS,
     SMART_SUGGESTIONS,
 )
 from .core import FinancialAnalyzer, KnowledgeBase, ProposalGenerator
@@ -72,6 +82,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=SESSION_COOKIE_SECURE,
+    PERMANENT_SESSION_LIFETIME=timedelta(minutes=SESSION_IDLE_TIMEOUT_MINUTES),
 )
 
 knowledge_base = KnowledgeBase(DB_URI)
@@ -310,8 +321,23 @@ def _current_username() -> str:
     return str(session.get("auth_username") or "").strip()
 
 
+def _current_session_id() -> str:
+    return str(session.get("auth_session_id") or "").strip()
+
+
+def _request_ip() -> str:
+    forwarded = str(request.headers.get("X-Forwarded-For", "") or "").strip()
+    if forwarded:
+        return forwarded.split(",")[0].strip()[:96]
+    return str(request.remote_addr or "").strip()[:96]
+
+
+def _request_user_agent() -> str:
+    return str(request.headers.get("User-Agent", "") or "").strip()[:256]
+
+
 def _is_authenticated() -> bool:
-    return bool(_current_username())
+    return bool(_current_username() and _current_session_id())
 
 
 def _is_api_request() -> bool:
@@ -330,13 +356,46 @@ def _login_redirect_target() -> str:
 
 
 def _set_authenticated_user(username: str) -> None:
+    normalized_username = str(username or "").strip()
+    if not normalized_username:
+        raise ValueError("Username is required.")
+    tracked_session_id = app_state_store.create_user_session(
+        username=normalized_username,
+        remote_ip=_request_ip(),
+        user_agent=_request_user_agent(),
+        idle_timeout_seconds=SESSION_IDLE_TIMEOUT_MINUTES * 60,
+        absolute_timeout_seconds=SESSION_ABSOLUTE_TIMEOUT_HOURS * 3600,
+        force_single_session=AUTH_FORCE_SINGLE_SESSION,
+        max_sessions_per_user=AUTH_MAX_SESSIONS_PER_USER,
+        max_global_sessions=AUTH_MAX_GLOBAL_ACTIVE_SESSIONS,
+    )
+    if not tracked_session_id:
+        raise RuntimeError("Unable to create authenticated session.")
     session.clear()
-    session["auth_username"] = str(username or "").strip()
+    session["auth_username"] = normalized_username
+    session["auth_session_id"] = tracked_session_id
     session.permanent = True
 
 
-def _clear_authenticated_user() -> None:
+def _clear_authenticated_user(revoke: bool = True) -> None:
+    tracked_session_id = _current_session_id()
+    if revoke and tracked_session_id:
+        app_state_store.revoke_user_session(tracked_session_id)
     session.clear()
+
+
+def _touch_active_auth_session() -> bool:
+    username = _current_username()
+    tracked_session_id = _current_session_id()
+    if not username or not tracked_session_id:
+        return False
+    return app_state_store.touch_user_session(
+        session_id=tracked_session_id,
+        username=username,
+        remote_ip=_request_ip(),
+        idle_timeout_seconds=SESSION_IDLE_TIMEOUT_MINUTES * 60,
+        touch_interval_seconds=SESSION_TOUCH_INTERVAL_SECONDS,
+    )
 
 
 def login_required(view_func):
@@ -353,9 +412,11 @@ def login_required(view_func):
 @app.before_request
 def _enforce_authentication():
     endpoint = request.endpoint or ""
-    if endpoint in PUBLIC_ENDPOINTS:
-        return None
     if _is_authenticated():
+        if _touch_active_auth_session():
+            return None
+        _clear_authenticated_user(revoke=False)
+    if endpoint in PUBLIC_ENDPOINTS:
         return None
     if _is_api_request():
         return jsonify({"error": "Authentication required."}), 401
@@ -414,7 +475,9 @@ def home():
 @app.route('/auth')
 def auth_page():
     if _is_authenticated():
-        return redirect(_login_redirect_target())
+        if _touch_active_auth_session():
+            return redirect(_login_redirect_target())
+        _clear_authenticated_user(revoke=False)
     return render_template(
         'auth.html',
         login_error=request.args.get("login_error", "").strip(),
@@ -429,15 +492,51 @@ def login():
     username = str(request.form.get("username") or "").strip()
     password = str(request.form.get("password") or "")
     next_target = _safe_next_target(request.form.get("next"))
+    remote_ip = _request_ip()
     if not username or not password:
         return redirect(url_for("auth_page", login_error="Username dan password wajib diisi.", next=next_target))
+    blocked_seconds = app_state_store.get_login_block_seconds(username=username, remote_ip=remote_ip)
+    if blocked_seconds > 0:
+        return redirect(
+            url_for(
+                "auth_page",
+                login_error=f"Terlalu banyak percobaan login. Coba lagi dalam {blocked_seconds} detik.",
+                next=next_target,
+            )
+        )
 
     user = app_state_store.get_user(username)
     password_hash = str((user or {}).get("password_hash") or "")
     if not user or not password_hash or not check_password_hash(password_hash, password):
+        blocked_after_fail = app_state_store.register_login_failure(
+            username=username,
+            remote_ip=remote_ip,
+            window_seconds=LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+            max_attempts=LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
+            block_seconds=LOGIN_RATE_LIMIT_BLOCK_SECONDS,
+        )
+        if blocked_after_fail > 0:
+            return redirect(
+                url_for(
+                    "auth_page",
+                    login_error=f"Terlalu banyak percobaan login. Coba lagi dalam {blocked_after_fail} detik.",
+                    next=next_target,
+                )
+            )
         return redirect(url_for("auth_page", login_error="Username atau password tidak cocok.", next=next_target))
 
-    _set_authenticated_user(str(user.get("username") or username))
+    app_state_store.clear_login_failures(username=username, remote_ip=remote_ip)
+    try:
+        _set_authenticated_user(str(user.get("username") or username))
+    except Exception:
+        logger.exception("Failed creating authenticated session for user=%s", username)
+        return redirect(
+            url_for(
+                "auth_page",
+                login_error="Sesi login gagal dibuat. Coba lagi beberapa saat.",
+                next=next_target,
+            )
+        )
     return redirect(next_target)
 
 
@@ -471,6 +570,25 @@ def signup():
 def logout():
     _clear_authenticated_user()
     return redirect(url_for("auth_page"))
+
+
+@app.route('/api/auth/session-status')
+@login_required
+def auth_session_status():
+    username = _current_username()
+    snapshot = app_state_store.active_session_snapshot(username=username)
+    return jsonify({
+        "username": username,
+        "session": {
+            "user_active_sessions": snapshot.get("user_active_sessions", 0),
+            "global_active_sessions": snapshot.get("global_active_sessions", 0),
+            "force_single_session": AUTH_FORCE_SINGLE_SESSION,
+            "max_per_user": AUTH_MAX_SESSIONS_PER_USER,
+            "max_global": AUTH_MAX_GLOBAL_ACTIVE_SESSIONS,
+            "idle_timeout_minutes": SESSION_IDLE_TIMEOUT_MINUTES,
+            "absolute_timeout_hours": SESSION_ABSOLUTE_TIMEOUT_HOURS,
+        },
+    })
 
 
 @app.route('/health')

@@ -248,6 +248,15 @@ APP_HOST = os.getenv("APP_HOST", "0.0.0.0").strip() or "0.0.0.0"
 APP_PORT = max(1, int(os.getenv("APP_PORT", "5500")))
 APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "proposal-gen-dev-secret-change-me").strip() or "proposal-gen-dev-secret-change-me"
 SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").strip().lower() in {"1", "true", "yes", "on"}
+SESSION_IDLE_TIMEOUT_MINUTES = max(5, int(os.getenv("SESSION_IDLE_TIMEOUT_MINUTES", "45")))
+SESSION_ABSOLUTE_TIMEOUT_HOURS = max(1, int(os.getenv("SESSION_ABSOLUTE_TIMEOUT_HOURS", "12")))
+SESSION_TOUCH_INTERVAL_SECONDS = max(5, int(os.getenv("SESSION_TOUCH_INTERVAL_SECONDS", "20")))
+AUTH_FORCE_SINGLE_SESSION = os.getenv("AUTH_FORCE_SINGLE_SESSION", "true").strip().lower() in {"1", "true", "yes", "on"}
+AUTH_MAX_SESSIONS_PER_USER = max(1, int(os.getenv("AUTH_MAX_SESSIONS_PER_USER", "2")))
+AUTH_MAX_GLOBAL_ACTIVE_SESSIONS = max(1, int(os.getenv("AUTH_MAX_GLOBAL_ACTIVE_SESSIONS", "30")))
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = max(30, int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "300")))
+LOGIN_RATE_LIMIT_MAX_ATTEMPTS = max(1, int(os.getenv("LOGIN_RATE_LIMIT_MAX_ATTEMPTS", "6")))
+LOGIN_RATE_LIMIT_BLOCK_SECONDS = max(30, int(os.getenv("LOGIN_RATE_LIMIT_BLOCK_SECONDS", "600")))
 
 # Document length guardrails.
 MAX_PROPOSAL_PAGES = 25
