@@ -186,6 +186,7 @@ scripts/deploy_sync.sh --mode inhouse
 
 Catatan:
 - `production` mengecualikan file example/test seperti `.env.example`, `internal_api_config.example.json`, folder `tests/`, folder `examples/`, dan pola `test_*.py` / `*_test.py`.
+- `production` juga menjalankan cleanup terarah di server untuk menghapus artifact test/example yang sudah terlanjur ada.
 - `inhouse` tidak memakai filter tambahan tersebut.
 
 ### 4. Jalankan aplikasi

@@ -130,8 +130,23 @@ if [[ "${DRY_RUN}" == "yes" ]]; then
 fi
 
 if [[ "${RESTART_SERVICE}" == "no" ]]; then
-  echo "[deploy_sync] sync complete. Service restart skipped."
+  if [[ "${MODE}" == "production" ]]; then
+    echo "[deploy_sync] sync complete. Reminder: production cleanup was skipped because --restart no."
+  else
+    echo "[deploy_sync] sync complete. Service restart skipped."
+  fi
   exit 0
+fi
+
+if [[ "${MODE}" == "production" ]]; then
+  ssh -i "${SSH_KEY}" "${REMOTE_HOST}" "bash -s" <<EOF
+set -euo pipefail
+cd "${REMOTE_DIR}"
+rm -f .env.example internal_api_config.example.json fix.py fix_file.py replace.py
+rm -rf tests test examples
+find main scripts templates -type f \\( -name 'test_*.py' -o -name '*_test.py' -o -name '*.example.*' \\) -delete 2>/dev/null || true
+EOF
+  echo "[deploy_sync] production cleanup complete (test/example artifacts removed)."
 fi
 
 ssh -i "${SSH_KEY}" "${REMOTE_HOST}" "bash -s" <<EOF
