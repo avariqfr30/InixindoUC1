@@ -7,6 +7,7 @@ SSH_KEY="${HOME}/Downloads/ai_adoption.pem"
 REMOTE_DIR="/srv/apps/proposal-gen"
 RESTART_SERVICE="yes"
 DRY_RUN="no"
+FORCE_PRODUCTION_CLEANUP="no"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -21,6 +22,7 @@ Options:
   --ssh-key <path>              SSH private key path (default: ~/Downloads/ai_adoption.pem)
   --remote-dir <path>           Remote app directory (default: /srv/apps/proposal-gen)
   --restart <yes|no>            Restart proposal-gen.service after sync (default: yes)
+  --force-production-cleanup    Force production cleanup even if remote APP_PROFILE is not production
   --dry-run                     Show rsync changes without applying
   --help                        Show this help
 USAGE
@@ -47,6 +49,10 @@ while [[ $# -gt 0 ]]; do
     --restart)
       RESTART_SERVICE="${2:-}"
       shift 2
+      ;;
+    --force-production-cleanup)
+      FORCE_PRODUCTION_CLEANUP="yes"
+      shift
       ;;
     --dry-run)
       DRY_RUN="yes"
@@ -140,14 +146,26 @@ if [[ "${RESTART_SERVICE}" == "no" ]]; then
 fi
 
 if [[ "${MODE}" == "production" ]]; then
-  ssh -i "${SSH_KEY}" "${REMOTE_HOST}" "bash -s" <<EOF
+  REMOTE_APP_PROFILE="$(ssh -i "${SSH_KEY}" "${REMOTE_HOST}" "bash -lc \"if [[ -f '${REMOTE_DIR}/.env' ]]; then awk -F= '/^APP_PROFILE=/{print \\\\\\$2}' '${REMOTE_DIR}/.env' | tail -n1 | tr -d '\\\\r' | xargs; fi\"")"
+  REMOTE_APP_PROFILE="$(echo "${REMOTE_APP_PROFILE}" | tail -n1 | xargs)"
+  if [[ -z "${REMOTE_APP_PROFILE}" ]]; then
+    REMOTE_APP_PROFILE="unknown"
+  fi
+  echo "[deploy_sync] remote APP_PROFILE=${REMOTE_APP_PROFILE}"
+
+  if [[ "${REMOTE_APP_PROFILE}" == "production" || "${FORCE_PRODUCTION_CLEANUP}" == "yes" ]]; then
+    ssh -i "${SSH_KEY}" "${REMOTE_HOST}" "bash -s" <<EOF
 set -euo pipefail
 cd "${REMOTE_DIR}"
 rm -f .env.example internal_api_config.example.json fix.py fix_file.py replace.py
 rm -rf tests test examples
 find main scripts templates -type f \\( -name 'test_*.py' -o -name '*_test.py' -o -name '*.example.*' \\) -delete 2>/dev/null || true
 EOF
-  echo "[deploy_sync] production cleanup complete (test/example artifacts removed)."
+    echo "[deploy_sync] production cleanup complete (test/example artifacts removed)."
+  else
+    echo "[deploy_sync] production cleanup skipped for safety (remote APP_PROFILE is not production)."
+    echo "[deploy_sync] use --force-production-cleanup if you intentionally want cleanup on this host."
+  fi
 fi
 
 ssh -i "${SSH_KEY}" "${REMOTE_HOST}" "bash -s" <<EOF
