@@ -95,6 +95,7 @@ declare -a RSYNC_ARGS=(
   --exclude '.osint_cache/'
   --exclude '.research_bundle_cache/'
   --exclude '.chroma/'
+  --exclude '.kb_vector_state.json'
   -e "ssh -i ${SSH_KEY}"
 )
 
