@@ -158,6 +158,36 @@ python scripts/profilectl.py production --env-file .env --api-config /srv/apps/p
 python scripts/profilectl.py production --env-file .env --api-config /srv/apps/proposal-gen/internal_api_config.json --fallback demo
 ```
 
+### Deploy Sync dengan Filter Production vs In-House
+
+Gunakan script berikut agar artefak test/example tidak ikut terkirim pada deploy production:
+
+```bash
+chmod +x scripts/deploy_sync.sh
+```
+
+Dry-run production (cek dulu file yang akan dikirim):
+
+```bash
+scripts/deploy_sync.sh --mode production --dry-run
+```
+
+Deploy production (sinkronisasi + restart service):
+
+```bash
+scripts/deploy_sync.sh --mode production
+```
+
+Deploy in-house/dev (tetap mengirim file example/test):
+
+```bash
+scripts/deploy_sync.sh --mode inhouse
+```
+
+Catatan:
+- `production` mengecualikan file example/test seperti `.env.example`, `internal_api_config.example.json`, folder `tests/`, folder `examples/`, dan pola `test_*.py` / `*_test.py`.
+- `inhouse` tidak memakai filter tambahan tersebut.
+
 ### 4. Jalankan aplikasi
 
 ```bash
