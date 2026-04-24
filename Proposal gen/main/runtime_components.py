@@ -1235,6 +1235,38 @@ class Researcher:
             return []
 
     @staticmethod
+    def _dedupe_results(items: List[Dict[str, Any]], limit: int = 10) -> List[Dict[str, Any]]:
+        deduped: List[Dict[str, Any]] = []
+        seen: Set[str] = set()
+        for item in items or []:
+            link = str(item.get("link") or "").strip().lower()
+            title = Researcher._normalize_text(str(item.get("title") or ""))
+            key = link or title
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+            if len(deduped) >= max(1, int(limit or 10)):
+                break
+        return deduped
+
+    @staticmethod
+    def _search_multi(queries: List[str], limit_per_query: int = 5, recency_bucket: str = "year", max_results: int = 10) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        for query in queries or []:
+            cleaned = re.sub(r"\s+", " ", str(query or "")).strip()
+            if not cleaned:
+                continue
+            results.extend(Researcher.search(cleaned, limit=limit_per_query, recency_bucket=recency_bucket))
+        return Researcher._sort_by_recency(Researcher._dedupe_results(results, limit=max_results))
+
+    @staticmethod
+    def _is_trusted_regulatory_source(link: str) -> bool:
+        host = urlparse(str(link or "")).netloc.lower().replace("www.", "")
+        trusted_exact = {"iso.org", "ietf.org", "ojk.go.id", "bi.go.id", "bssn.go.id", "kominfo.go.id"}
+        return any(host == domain or host.endswith(f".{domain}") for domain in trusted_exact) or host.endswith(".go.id")
+
+    @staticmethod
     def _normalize_text(text: str) -> str:
         normalized = re.sub(r"[^a-z0-9]+", " ", (text or "").lower())
         return re.sub(r"\s+", " ", normalized).strip()
@@ -1503,7 +1535,12 @@ class Researcher:
         if context_clause:
             query = f'"{client_name}" {context_clause} berita inovasi OR transformasi digital OR inisiatif strategis'
         query = f"{query} {current_year}"
-        res = Researcher.search(query, limit=5, recency_bucket="month")
+        queries = [
+            query,
+            f'"{client_name}" "{plan.get("industry")}" strategi bisnis inisiatif {current_year}',
+            f'"{client_name}" {context_clause} roadmap program prioritas {current_year}' if context_clause else "",
+        ]
+        res = Researcher._search_multi(queries, limit_per_query=5, recency_bucket="month", max_results=10)
         filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=2)
         
         # Deep Scrape the #1 top news hit
@@ -1546,7 +1583,12 @@ class Researcher:
         if context_clause:
             query = f'{query} {context_clause}'
         query = f"{query} {current_year}"
-        res = Researcher.search(query, limit=5, recency_bucket="year")
+        queries = [
+            query,
+            f'"{client_name}" data analytics automation digital platform {current_year}',
+            f'"{client_name}" {context_clause} AI data governance {current_year}' if context_clause else "",
+        ]
+        res = Researcher._search_multi(queries, limit_per_query=5, recency_bucket="year", max_results=10)
         filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=3)
         
         # Deep Scrape the #1 AI posture link
@@ -1612,7 +1654,12 @@ class Researcher:
         if context_clause:
             query = f'"{entity_name}" {context_clause} profil perusahaan OR "tentang kami" OR layanan utama'
         query = f"{query} {current_year}"
-        res = Researcher.search(query, limit=6, recency_bucket="year")
+        queries = [
+            query,
+            f'"{entity_name}" annual report profil bisnis layanan utama {current_year}',
+            f'"{entity_name}" {context_clause} profil bisnis {current_year}' if context_clause else "",
+        ]
+        res = Researcher._search_multi(queries, limit_per_query=5, recency_bucket="year", max_results=10)
         filtered = Researcher._filter_recent_entity_results(res, entity_name, max_age_years=3, strict_entity=strict_entity)
         return Researcher._format_evidence(filtered[:3], label="OSINT_PROFILE", fallback="Data profil terbatas.")
 
@@ -1627,7 +1674,12 @@ class Researcher:
         query = f'"{client_name}" pencapaian OR kinerja OR penghargaan OR implementasi OR transformasi'
         if context_clause:
             query = f'"{client_name}" {context_clause} pencapaian OR kinerja OR penghargaan OR implementasi OR transformasi'
-        res = Researcher.search(query, limit=6, recency_bucket="year")
+        queries = [
+            query,
+            f'"{client_name}" kinerja bisnis transformasi operasional',
+            f'"{client_name}" {context_clause} pencapaian implementasi' if context_clause else "",
+        ]
+        res = Researcher._search_multi(queries, limit_per_query=5, recency_bucket="year", max_results=10)
         filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=3)
         return Researcher._format_evidence(filtered[:3], label="OSINT_TRACK", fallback="Track record terbatas.")
 
@@ -1642,7 +1694,13 @@ class Researcher:
         query = f'"{writer_firm_name}" "{client_name}" kerja sama OR proyek OR konsultasi'
         if context_clause:
             query = f'"{writer_firm_name}" "{client_name}" {context_clause} kerja sama OR proyek OR konsultasi'
-        res = Researcher.search(query, limit=6, recency_bucket="year")
+        queries = [
+            query,
+            f'"{writer_firm_name}" "{client_name}" pelatihan OR sertifikasi OR pendampingan',
+        ]
+        if context_clause:
+            queries.append(f'"{writer_firm_name}" "{client_name}" {context_clause}')
+        res = Researcher._search_multi(queries, limit_per_query=5, recency_bucket="year", max_results=10)
         filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=6)
         return Researcher._format_evidence(filtered[:2], label="OSINT_COLLAB", fallback="Belum ditemukan bukti publik kolaborasi.")
 
@@ -1659,10 +1717,15 @@ class Researcher:
         query = f'Ringkasan implementasi standar {framework_clause or regulations_string.replace(",", " OR ")}'
         if context_clause:
             query = f"{query} {context_clause}"
-        query = f"{query} site:.go.id OR site:iso.org"
-        res = Researcher.search(query, limit=5, recency_bucket="year")
+        queries = [
+            f"{query} site:.go.id",
+            f"{query} site:iso.org",
+            f"{query} site:ojk.go.id OR site:bi.go.id" if "bank" in Researcher._normalize_text(client_name + ' ' + ai_context) else "",
+            f"{query} site:bssn.go.id OR site:kominfo.go.id",
+        ]
+        res = Researcher._search_multi(queries, limit_per_query=5, recency_bucket="year", max_results=10)
         recent = [i for i in Researcher._sort_by_recency(res) if Researcher._is_recent(i, max_age_years=5)]
-        trusted = [i for i in recent if any(str(i.get("link","")).endswith(sfx) for sfx in ("go.id", "iso.org", "ietf.org"))]
+        trusted = [i for i in recent if Researcher._is_trusted_regulatory_source(str(i.get("link", "")))]
         return Researcher._format_evidence((trusted or recent)[:3], label="OSINT_REG", fallback="Data regulasi terbatas.")
 
     @staticmethod
@@ -4444,6 +4507,26 @@ class DocumentBuilder:
         num_id_el.set(qn('w:val'), str(num_id))
 
     @staticmethod
+    def _format_plain_paragraph(paragraph) -> None:
+        pf = paragraph.paragraph_format
+        pf.left_indent = Pt(0)
+        pf.first_line_indent = Pt(0)
+        pf.space_before = Pt(0)
+        pf.space_after = Pt(StyleEngine.BODY_SPACE_AFTER)
+        pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+        pf.line_spacing = StyleEngine.BODY_LINE_SPACING
+
+    @staticmethod
+    def _format_list_paragraph(paragraph) -> None:
+        pf = paragraph.paragraph_format
+        pf.space_before = Pt(0)
+        pf.space_after = Pt(3)
+        pf.left_indent = Inches(0.32)
+        pf.first_line_indent = Inches(-0.18)
+        pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+        pf.line_spacing = 1.05
+
+    @staticmethod
     def parse_html_to_docx(doc: Document, html_content: str, theme_color: Tuple[int, int, int]) -> None:
         soup = BeautifulSoup(html_content, 'html.parser')
         for element in soup.children:
@@ -4461,26 +4544,26 @@ class DocumentBuilder:
                     )
             elif element.name == 'p':
                 p = doc.add_paragraph()
-                # Reset inherited paragraph indents from templates so plain
-                # paragraphs never render as accidental hanging indents.
-                p.paragraph_format.left_indent = Pt(0)
-                p.paragraph_format.first_line_indent = Pt(0)
+                DocumentBuilder._format_plain_paragraph(p)
                 DocumentBuilder._process_inline_html(p, element)
             elif element.name in ['ul', 'ol']:
                 direct_items = element.find_all('li', recursive=False)
                 is_ordered_list = element.name == 'ol'
+                style_name = 'List Number' if is_ordered_list else 'List Bullet'
+                list_num_id = DocumentBuilder._create_list_num_id(doc, style_name)
                 for idx, li in enumerate(direct_items, start=1):
                     if not li.get_text(" ", strip=True):
                         continue
-                    p = doc.add_paragraph()
-
-                    p.paragraph_format.space_before = Pt(0)
-                    p.paragraph_format.space_after = Pt(4)
-                    p.paragraph_format.left_indent = Inches(0.28)
-                    p.paragraph_format.first_line_indent = Inches(-0.18)
-                    marker = f"{idx}. " if is_ordered_list else "- "
-                    marker_run = p.add_run(marker)
-                    marker_run.bold = True
+                    try:
+                        p = doc.add_paragraph(style=style_name)
+                    except KeyError:
+                        p = doc.add_paragraph()
+                        fallback_marker = f"{idx}. " if is_ordered_list else "- "
+                        marker_run = p.add_run(fallback_marker)
+                        marker_run.bold = True
+                    if list_num_id is not None:
+                        DocumentBuilder._apply_list_num_id(p, list_num_id, level=0)
+                    DocumentBuilder._format_list_paragraph(p)
                     DocumentBuilder._process_inline_html(p, li)
             elif element.name == 'table':
                 rows = element.find_all('tr')
@@ -4680,3 +4763,17 @@ class DocumentBuilder:
 
             if previous_is_page_break or next_is_page_break or not next_is_real_content:
                 body.remove(child)
+
+        for paragraph in doc.paragraphs:
+            style_name = str(getattr(paragraph.style, "name", "") or "")
+            if style_name.startswith("Heading"):
+                paragraph.paragraph_format.keep_with_next = True
+                continue
+            if paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER:
+                continue
+            if paragraph._element.find('.//' + qn('w:drawing')) is not None:
+                continue
+            if style_name in {"List Bullet", "List Number"}:
+                DocumentBuilder._format_list_paragraph(paragraph)
+            else:
+                DocumentBuilder._format_plain_paragraph(paragraph)

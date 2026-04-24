@@ -179,7 +179,16 @@ echo "== proposal-gen status =="
 sudo systemctl --no-pager --full status proposal-gen.service | sed -n '1,30p'
 echo
 echo "== health =="
-curl -sS -i http://127.0.0.1:5500/health | sed -n '1,12p'
+for attempt in \$(seq 1 20); do
+  if curl -fsS http://127.0.0.1:5500/health >/tmp/proposal-gen-health.json 2>/tmp/proposal-gen-health.err; then
+    curl -sS -i http://127.0.0.1:5500/health | sed -n '1,12p'
+    exit 0
+  fi
+  sleep 1
+done
+echo "proposal-gen health check failed after restart"
+cat /tmp/proposal-gen-health.err || true
+exit 1
 EOF
 
 echo "[deploy_sync] complete."

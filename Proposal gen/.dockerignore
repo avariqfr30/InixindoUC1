@@ -14,3 +14,13 @@ venv/
 app_assets/
 generated/
 app_state.db
+.chroma/
+.osint_cache/
+.research_bundle_cache/
+.kb_vector_state.json
+fix.py
+fix_file.py
+replace.py
+tests/
+test/
+examples/

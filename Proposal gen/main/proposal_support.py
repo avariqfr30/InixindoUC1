@@ -1413,6 +1413,7 @@ class ProposalSupportMixin:
         text = re.sub(r"\.\s*\.", ".", text)
         text = re.sub(r"([!?])\1+", r"\1", text)
         text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+        text = re.sub(r"\.\s*,", ",", text)
         text = re.sub(r",\s*\.", ".", text)
         text = re.sub(r";\s*\.", ".", text)
         text = re.sub(r":\s*\.", ".", text)
@@ -3535,17 +3536,24 @@ class ProposalSupportMixin:
             futures["collaboration"] = self.io_pool.submit(
                 Researcher.get_client_writer_collaboration, base_client, WRITER_FIRM_NAME, ai_context, regulations
             )
-        try:
-            return {
-                "profile": futures["profile"].result(timeout=8),
-                "news": futures["news"].result(timeout=8),
-                "track_record": futures["track_record"].result(timeout=8),
-                "collaboration": futures["collaboration"].result(timeout=8) if include_collaboration else "",
-                "regulations": futures["regulations"].result(timeout=8),
-                "ai_posture": futures["ai_posture"].result(timeout=8) if ai_mode else "",
-            }
-        except Exception:
-            return self._fallback_research_bundle(base_client, include_collaboration, ai_mode=ai_mode)
+        fallback = self._fallback_research_bundle(base_client, include_collaboration, ai_mode=ai_mode)
+        bundle: Dict[str, str] = {}
+        for field, future in futures.items():
+            try:
+                value = future.result(timeout=10)
+            except Exception as exc:
+                logger.warning(
+                    "Serper | Research branch failed | client=%s | branch=%s | error=%s",
+                    base_client,
+                    field,
+                    str(exc)[:100],
+                )
+                value = ""
+            bundle[field] = str(value or "").strip() or str(fallback.get(field, "") or "")
+
+        for field, value in fallback.items():
+            bundle.setdefault(field, value)
+        return bundle
 
     def prefetch_research_bundle(
         self,
