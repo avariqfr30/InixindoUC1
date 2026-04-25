@@ -4172,22 +4172,60 @@ class DocumentBuilder:
         shd.set(qn('w:fill'), fill_hex)
 
     @staticmethod
+    def _set_cell_width(cell, width_inches: float) -> None:
+        width_twips = int(max(width_inches, 0.1) * 1440)
+        cell.width = Inches(width_inches)
+        tc_pr = cell._tc.get_or_add_tcPr()
+        tc_w = tc_pr.find(qn('w:tcW'))
+        if tc_w is None:
+            tc_w = OxmlElement('w:tcW')
+            tc_pr.append(tc_w)
+        tc_w.set(qn('w:w'), str(width_twips))
+        tc_w.set(qn('w:type'), 'dxa')
+
+    @staticmethod
+    def _table_column_widths(table) -> Optional[List[float]]:
+        if not table.rows:
+            return None
+        headers = [
+            re.sub(r"\s+", " ", cell.text or "").strip().lower()
+            for cell in table.rows[0].cells
+        ]
+        if headers[:6] == ["no", "periode", "fase", "fokus aktivitas", "deliverable utama", "milestone / kontrol"]:
+            return [0.32, 0.78, 0.95, 1.45, 1.30, 1.45]
+        if len(headers) >= 5 and "periode" in headers and any("deliverable" in header for header in headers):
+            return [1.15, 0.90, 1.65, 1.30, 1.25][:len(headers)]
+        if len(headers) == 2:
+            return [1.55, 4.70]
+        if len(headers) == 3:
+            return [1.35, 2.45, 2.45]
+        if len(headers) == 4:
+            return [1.35, 1.70, 1.70, 1.50]
+        return None
+
+    @staticmethod
     def _format_table(table) -> None:
         table.style = 'Table Grid'
-        table.autofit = True
+        widths = DocumentBuilder._table_column_widths(table)
+        table.autofit = widths is None
         if not table.rows:
             return
+        if widths:
+            for row in table.rows:
+                for idx, cell in enumerate(row.cells):
+                    if idx < len(widths):
+                        DocumentBuilder._set_cell_width(cell, widths[idx])
         for row_index, row in enumerate(table.rows):
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
                     paragraph.paragraph_format.space_before = Pt(0)
-                    paragraph.paragraph_format.space_after = Pt(2)
+                    paragraph.paragraph_format.space_after = Pt(3)
                     paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-                    paragraph.paragraph_format.line_spacing = 1.0
+                    paragraph.paragraph_format.line_spacing = 1.05
                     for run in paragraph.runs:
                         DocumentBuilder._set_run_format(
                             run,
-                            size=StyleEngine.TABLE_FONT_SIZE,
+                            size=9.5 if widths and len(widths) >= 5 else StyleEngine.TABLE_FONT_SIZE,
                             bold=run.bold if row_index != 0 else True,
                         )
                 if row_index == 0:

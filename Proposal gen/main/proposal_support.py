@@ -719,6 +719,7 @@ class ProposalSupportMixin:
         )
         terminology = cls._industry_terms(industry)
         initiative_terms = cls._semantic_terms([project, notes, project_goal], max_terms=8)
+        proper_terms = cls._extract_proper_terms(client, project, project_goal, regulations)
         merged_terms: List[str] = []
         seen_terms: Set[str] = set()
         ai_terms = ai_profile.get("quality_terms", []) or []
@@ -748,6 +749,7 @@ class ProposalSupportMixin:
             "kpi_blueprint": kpi_blueprint,
             "kpi_keywords": cls._extract_metric_keywords(kpi_blueprint),
             "terminology": merged_terms[:10],
+            "proper_terms": proper_terms,
             "initiative_facts": initiative_facts,
             "anchor_citations": [item.get("citation", "") for item in initiative_facts if item.get("citation")],
             "anchor_keywords": cls._extract_anchor_keywords(initiative_facts),
@@ -755,6 +757,45 @@ class ProposalSupportMixin:
             "ai_mode": bool(ai_profile.get("enabled")),
             "ai_adoption_profile": ai_profile,
         }
+
+    @classmethod
+    def _extract_proper_terms(
+        cls,
+        client: str,
+        project: str,
+        project_goal: str,
+        regulations: str,
+    ) -> List[str]:
+        raw_terms: List[str] = []
+        for value in [client, project, project_goal]:
+            phrase = cls._normalize_prose_fragment(value)
+            if phrase:
+                raw_terms.append(phrase)
+                summary = cls._summarize_phrase(phrase, "", max_words=12)
+                if summary:
+                    raw_terms.append(summary)
+        for item in re.split(r"[,;/\n]+", str(regulations or "")):
+            cleaned = re.sub(r"\s+", " ", item).strip(" -.;:")
+            if cleaned:
+                raw_terms.append(cleaned)
+        acronym_candidates = re.findall(
+            r"\b(?:PT|CV|BUMN|BNI|BRI|BCA|BTN|OJK|POJK|BI|ISO|COBIT|ITIL|TOGAF|DAMA|RACI|PMO|KPI|SLA|OLA|UAT|API|AI|TI|IT|ERP|CRM|KAK|PDP)\b",
+            " ".join([client, project, project_goal, regulations]),
+            flags=re.IGNORECASE,
+        )
+        raw_terms.extend(acronym_candidates)
+        terms: List[str] = []
+        seen: Set[str] = set()
+        for term in raw_terms:
+            normalized = re.sub(r"\s+", " ", str(term or "").strip())
+            if len(normalized) < 2:
+                continue
+            key = normalized.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            terms.append(normalized)
+        return terms[:24]
 
     @staticmethod
     def _playbook_for_project(project_type: str) -> Dict[str, Any]:
@@ -1394,11 +1435,72 @@ class ProposalSupportMixin:
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
 
+    @staticmethod
+    def _restore_branded_terms(content: str, client: str, proper_terms: Optional[List[str]] = None) -> str:
+        text = str(content or "")
+        replacements = {
+            "pt": "PT",
+            "cv": "CV",
+            "bumn": "BUMN",
+            "bni": "BNI",
+            "bri": "BRI",
+            "bca": "BCA",
+            "btn": "BTN",
+            "ojk": "OJK",
+            "pojk": "POJK",
+            "bi": "BI",
+            "iso": "ISO",
+            "cobit": "COBIT",
+            "itil": "ITIL",
+            "togaf": "TOGAF",
+            "dama": "DAMA",
+            "raci": "RACI",
+            "pmo": "PMO",
+            "kpi": "KPI",
+            "sla": "SLA",
+            "ola": "OLA",
+            "uat": "UAT",
+            "api": "API",
+            "ai": "AI",
+            "ti": "TI",
+            "it": "IT",
+            "erp": "ERP",
+            "crm": "CRM",
+            "kak": "KAK",
+            "pdp": "PDP",
+        }
+        for raw, canonical in replacements.items():
+            text = re.sub(rf"\b{re.escape(raw)}\b", canonical, text, flags=re.IGNORECASE)
+
+        terms: List[str] = []
+        if client:
+            terms.append(client)
+        terms.extend(proper_terms or [])
+        seen: Set[str] = set()
+        for term in sorted(terms, key=lambda item: len(str(item or "")), reverse=True):
+            canonical = re.sub(r"\s+", " ", str(term or "").strip())
+            if len(canonical) < 3:
+                continue
+            key = canonical.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            pattern = r"\b" + r"\s+".join(re.escape(part) for part in canonical.split()) + r"\b"
+            text = re.sub(pattern, canonical, text, flags=re.IGNORECASE)
+
+        text = re.sub(r"\bOJK\s*/\s*POJK\b", "OJK/POJK", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bPOJK\s*/\s*OJK\b", "POJK/OJK", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bend\s*-\s*to\s*-\s*end\b", "end-to-end", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bgo\s*-\s*live\b", "Go-Live", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bcut\s*-\s*over\b", "cut-over", text, flags=re.IGNORECASE)
+        return text
+
     def _postprocess_chapter_content(
         self,
         chapter: Optional[Dict[str, Any]],
         content: str,
         client: str,
+        proper_terms: Optional[List[str]] = None,
     ) -> str:
         text = self._humanize_chapter_tone(content or "")
         text = self._reorder_h2_sections(text, list((chapter or {}).get("subs") or []))
@@ -1417,6 +1519,7 @@ class ProposalSupportMixin:
         text = re.sub(r",\s*\.", ".", text)
         text = re.sub(r";\s*\.", ".", text)
         text = re.sub(r":\s*\.", ".", text)
+        text = self._restore_branded_terms(text, client, proper_terms=proper_terms)
         return re.sub(r"\n{3,}", "\n\n", text).strip()
 
     @classmethod
@@ -3260,7 +3363,7 @@ class ProposalSupportMixin:
                 f"tim masih punya ruang untuk melakukan penyesuaian yang terkontrol tanpa merusak keseluruhan jalur delivery.\n\n"
                 "| No | Periode | Fase | Fokus Aktivitas | Deliverable Utama | Milestone / Kontrol |\n"
                 "| --- | --- | --- | --- | --- | --- |\n"
-                f"{table_rows}\n"
+                f"{table_rows}\n\n"
                 f"- Review progres dilakukan berkala agar deviasi timeline dapat dikoreksi sebelum memengaruhi KPI inti seperti {kpi_line}.\n"
                 "- Pergeseran jadwal hanya dilakukan melalui change control formal dan keputusan bersama sponsor proyek.\n"
                 f"- Deliverable pada akhir fase menjadi dasar transisi ke fase berikutnya, sehingga tidak ada aktivitas {client} yang berjalan tanpa acceptance yang terukur.\n"
@@ -4643,7 +4746,12 @@ class ProposalSupportMixin:
             timeline=timeline
         )
         repaired = self._clean_external_citations(repaired, allowed)
-        return self._postprocess_chapter_content(chapter, repaired, client)
+        return self._postprocess_chapter_content(
+            chapter,
+            repaired,
+            client,
+            proper_terms=(personalization_pack or {}).get("proper_terms", []),
+        )
 
     @staticmethod
     def _semantic_terms(values: Any, max_terms: int = 12) -> List[str]:
@@ -5213,7 +5321,12 @@ class ProposalSupportMixin:
         stabilized = dict(chapter_outputs)
         for chapter in selected_chapters:
             chapter_id = chapter["id"]
-            content = self._postprocess_chapter_content(chapter, stabilized.get(chapter_id, ""), client)
+            content = self._postprocess_chapter_content(
+                chapter,
+                stabilized.get(chapter_id, ""),
+                client,
+                proper_terms=(personalization_pack or {}).get("proper_terms", []),
+            )
             stabilized[chapter_id] = content
             if not content:
                 continue
