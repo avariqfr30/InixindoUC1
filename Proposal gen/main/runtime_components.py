@@ -3712,8 +3712,8 @@ class LogoManager:
 class StyleEngine:
     PROFESSIONAL_FONT = "Times New Roman"
     BODY_FONT_SIZE = 12
-    BODY_LINE_SPACING = 1.15
-    BODY_SPACE_AFTER = 6
+    BODY_LINE_SPACING = 1.25
+    BODY_SPACE_AFTER = 8
     HEADING_1_SIZE = 14
     HEADING_2_SIZE = 12
     HEADING_3_SIZE = 11
@@ -3784,10 +3784,10 @@ class StyleEngine:
             style.font.color.rgb = RGBColor(*StyleEngine.TEXT_COLOR)
             
             pf = style.paragraph_format
-            pf.space_before = Pt(12)
-            pf.space_after = Pt(6)
+            pf.space_before = Pt(14)
+            pf.space_after = Pt(8)
             pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-            pf.line_spacing = 1.0
+            pf.line_spacing = 1.05
             pf.keep_with_next = True
         except Exception as e:
             logger.warning(f"Could not apply Heading 1 style: {e}")
@@ -3800,10 +3800,10 @@ class StyleEngine:
             style.font.color.rgb = RGBColor(*StyleEngine.TEXT_COLOR)
             
             pf = style.paragraph_format
-            pf.space_before = Pt(10)
-            pf.space_after = Pt(4)
+            pf.space_before = Pt(12)
+            pf.space_after = Pt(6)
             pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-            pf.line_spacing = 1.0
+            pf.line_spacing = 1.05
             pf.keep_with_next = True
         except Exception as e:
             logger.warning(f"Could not apply Heading 2 style: {e}")
@@ -3816,10 +3816,10 @@ class StyleEngine:
             style.font.color.rgb = RGBColor(*StyleEngine.TEXT_COLOR)
             
             pf = style.paragraph_format
-            pf.space_before = Pt(8)
-            pf.space_after = Pt(3)
+            pf.space_before = Pt(10)
+            pf.space_after = Pt(5)
             pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-            pf.line_spacing = 1.0
+            pf.line_spacing = 1.05
             pf.keep_with_next = True
         except Exception as e:
             logger.warning(f"Could not apply Heading 3 style: {e}")
@@ -3829,20 +3829,24 @@ class StyleEngine:
         try:
             style = doc.styles['List Bullet']
             pf = style.paragraph_format
-            pf.space_after = Pt(4)
+            pf.space_after = Pt(5)
             pf.space_before = Pt(0)
-            pf.left_indent = Inches(0.25)
-            pf.first_line_indent = Inches(-0.25)
+            pf.left_indent = Inches(0.36)
+            pf.first_line_indent = Inches(-0.18)
+            pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+            pf.line_spacing = 1.15
         except Exception as e:
             logger.warning(f"Could not apply List Bullet style: {e}")
         
         try:
             style = doc.styles['List Number']
             pf = style.paragraph_format
-            pf.space_after = Pt(4)
+            pf.space_after = Pt(5)
             pf.space_before = Pt(0)
-            pf.left_indent = Inches(0.25)
-            pf.first_line_indent = Inches(-0.25)
+            pf.left_indent = Inches(0.36)
+            pf.first_line_indent = Inches(-0.18)
+            pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+            pf.line_spacing = 1.15
         except Exception as e:
             logger.warning(f"Could not apply List Number style: {e}")
     
@@ -4482,6 +4486,12 @@ class DocumentBuilder:
         abstract_ref = OxmlElement('w:abstractNumId')
         abstract_ref.set(qn('w:val'), str(abstract_num_id))
         num.append(abstract_ref)
+        lvl_override = OxmlElement('w:lvlOverride')
+        lvl_override.set(qn('w:ilvl'), '0')
+        start_override = OxmlElement('w:startOverride')
+        start_override.set(qn('w:val'), '1')
+        lvl_override.append(start_override)
+        num.append(lvl_override)
         numbering.append(num)
         return next_num_id
 
@@ -4517,14 +4527,54 @@ class DocumentBuilder:
         pf.line_spacing = StyleEngine.BODY_LINE_SPACING
 
     @staticmethod
-    def _format_list_paragraph(paragraph) -> None:
+    def _format_list_paragraph(paragraph, level: int = 0) -> None:
+        safe_level = max(0, min(int(level or 0), 8))
         pf = paragraph.paragraph_format
         pf.space_before = Pt(0)
-        pf.space_after = Pt(3)
-        pf.left_indent = Inches(0.32)
+        pf.space_after = Pt(5)
+        pf.left_indent = Inches(0.36 + (0.26 * safe_level))
         pf.first_line_indent = Inches(-0.18)
         pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-        pf.line_spacing = 1.05
+        pf.line_spacing = 1.15
+
+    @staticmethod
+    def _paragraph_list_level(paragraph) -> int:
+        try:
+            num_pr = paragraph._p.get_or_add_pPr().find(qn('w:numPr'))
+            ilvl = num_pr.find(qn('w:ilvl')) if num_pr is not None else None
+            return int(ilvl.get(qn('w:val'))) if ilvl is not None else 0
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _render_html_list(doc: Document, element, level: int = 0) -> None:
+        safe_level = max(0, min(int(level or 0), 8))
+        direct_items = element.find_all('li', recursive=False)
+        is_ordered_list = element.name == 'ol'
+        style_name = 'List Number' if is_ordered_list else 'List Bullet'
+        list_num_id = DocumentBuilder._create_list_num_id(doc, style_name)
+        for idx, li in enumerate(direct_items, start=1):
+            inline_text = " ".join(
+                str(child).strip()
+                for child in li.contents
+                if getattr(child, "name", None) not in {"ul", "ol"} and str(child).strip()
+            )
+            nested_lists = li.find_all(['ul', 'ol'], recursive=False)
+            if not inline_text and not nested_lists:
+                continue
+            try:
+                p = doc.add_paragraph(style=style_name)
+            except KeyError:
+                p = doc.add_paragraph()
+                fallback_marker = f"{idx}. " if is_ordered_list else "- "
+                marker_run = p.add_run(fallback_marker)
+                marker_run.bold = True
+            if list_num_id is not None:
+                DocumentBuilder._apply_list_num_id(p, list_num_id, level=safe_level)
+            DocumentBuilder._format_list_paragraph(p, level=safe_level)
+            DocumentBuilder._process_inline_html(p, li, skip_nested_lists=True)
+            for nested in nested_lists:
+                DocumentBuilder._render_html_list(doc, nested, level=safe_level + 1)
 
     @staticmethod
     def parse_html_to_docx(doc: Document, html_content: str, theme_color: Tuple[int, int, int]) -> None:
@@ -4547,24 +4597,7 @@ class DocumentBuilder:
                 DocumentBuilder._format_plain_paragraph(p)
                 DocumentBuilder._process_inline_html(p, element)
             elif element.name in ['ul', 'ol']:
-                direct_items = element.find_all('li', recursive=False)
-                is_ordered_list = element.name == 'ol'
-                style_name = 'List Number' if is_ordered_list else 'List Bullet'
-                list_num_id = DocumentBuilder._create_list_num_id(doc, style_name)
-                for idx, li in enumerate(direct_items, start=1):
-                    if not li.get_text(" ", strip=True):
-                        continue
-                    try:
-                        p = doc.add_paragraph(style=style_name)
-                    except KeyError:
-                        p = doc.add_paragraph()
-                        fallback_marker = f"{idx}. " if is_ordered_list else "- "
-                        marker_run = p.add_run(fallback_marker)
-                        marker_run.bold = True
-                    if list_num_id is not None:
-                        DocumentBuilder._apply_list_num_id(p, list_num_id, level=0)
-                    DocumentBuilder._format_list_paragraph(p)
-                    DocumentBuilder._process_inline_html(p, li)
+                DocumentBuilder._render_html_list(doc, element, level=0)
             elif element.name == 'table':
                 rows = element.find_all('tr')
                 if not rows: continue
@@ -4584,8 +4617,10 @@ class DocumentBuilder:
                 DocumentBuilder._format_table(table)
 
     @staticmethod
-    def _process_inline_html(paragraph, element):
+    def _process_inline_html(paragraph, element, skip_nested_lists: bool = False):
         for child in element.children:
+            if skip_nested_lists and getattr(child, "name", None) in ['ul', 'ol']:
+                continue
             if child.name in ['strong', 'b']:
                 DocumentBuilder._append_text_run(paragraph, child.get_text(" ", strip=True), bold=True)
             elif child.name in ['em', 'i']:
@@ -4595,7 +4630,7 @@ class DocumentBuilder:
             elif child.name is None:
                 DocumentBuilder._append_text_run(paragraph, str(child))
             else:
-                DocumentBuilder._process_inline_html(paragraph, child)
+                DocumentBuilder._process_inline_html(paragraph, child, skip_nested_lists=skip_nested_lists)
 
     @staticmethod
     def _normalize_markdown_blocks(raw_text: str) -> str:
@@ -4604,21 +4639,33 @@ class DocumentBuilder:
         bullet_pattern = re.compile(r'^[-*•▪◦●]\s+')
 
         for raw_line in (raw_text or "").split('\n'):
+            leading = re.match(r'^(\s*)', raw_line).group(1)
             stripped = raw_line.strip()
-            if re.match(r'^\d+\)\s+', stripped):
-                stripped = re.sub(r'^(\d+)\)\s+', r'\1. ', stripped)
-            if re.match(r'^[-*•▪◦●]\s+', stripped):
-                stripped = re.sub(r'^[-*•▪◦●]\s+', '- ', stripped)
+            is_indented_list = bool(re.match(r'^(\d+[.)]|[-*•▪◦●])\s+', stripped))
+            line = f"{leading}{stripped}" if is_indented_list else stripped
+            line_for_match = line.strip()
+            if re.match(r'^\d+\)\s+', line_for_match):
+                normalized_ordered = re.sub(r'^(\d+)\)\s+', r'\1. ', line_for_match)
+                line = f"{leading}{normalized_ordered}"
+                line_for_match = line.strip()
+            if re.match(r'^[-*•▪◦●]\s+', line_for_match):
+                normalized_bullet = re.sub(r'^[-*•▪◦●]\s+', '- ', line_for_match)
+                line = f"{leading}{normalized_bullet}"
+                line_for_match = line.strip()
             previous = normalized[-1].strip() if normalized else ""
-            is_ordered = bool(ordered_pattern.match(stripped))
-            is_bullet = bool(bullet_pattern.match(stripped))
+            is_ordered = bool(ordered_pattern.match(line_for_match))
+            is_bullet = bool(bullet_pattern.match(line_for_match))
             is_list = is_ordered or is_bullet
             previous_is_ordered = bool(ordered_pattern.match(previous))
             previous_is_bullet = bool(bullet_pattern.match(previous))
             previous_is_list = previous_is_ordered or previous_is_bullet
-            is_table = stripped.startswith('|')
-            is_heading = stripped.startswith('#')
-            is_visual = stripped.startswith('[[') and stripped.endswith(']]')
+            if is_bullet and previous_is_ordered and not leading:
+                line = f"    {line_for_match}"
+                leading = "    "
+            is_nested_list = bool(is_list and leading)
+            is_table = line_for_match.startswith('|')
+            is_heading = line_for_match.startswith('#')
+            is_visual = line_for_match.startswith('[[') and line_for_match.endswith(']]')
 
             if is_list and previous and (
                 (
@@ -4627,12 +4674,16 @@ class DocumentBuilder:
                     and not previous.startswith('#')
                     and not previous.startswith('[[')
                 )
-                or (previous_is_list and (is_ordered != previous_is_ordered or is_bullet != previous_is_bullet))
+                or (
+                    previous_is_list
+                    and not is_nested_list
+                    and (is_ordered != previous_is_ordered or is_bullet != previous_is_bullet)
+                )
             ):
                 normalized.append("")
-            if stripped and previous_is_list and not is_list and not is_table and not is_heading and not is_visual:
+            if line_for_match and previous_is_list and not is_list and not is_table and not is_heading and not is_visual:
                 normalized.append("")
-            normalized.append(stripped)
+            normalized.append(line)
 
         compacted: List[str] = []
         blank_streak = 0
@@ -4651,10 +4702,11 @@ class DocumentBuilder:
         clean_lines = []
         in_table = False
         normalized_text = DocumentBuilder._normalize_markdown_blocks(raw_text)
-        for line in normalized_text.split('\n'):
-            line = line.strip()
-            if line.startswith('[[GANTT:') and line.endswith(']]'):
-                data = line.replace('[[GANTT:', '').replace(']]', '').strip()
+        for raw_line in normalized_text.split('\n'):
+            line = raw_line.rstrip()
+            stripped_line = line.strip()
+            if stripped_line.startswith('[[GANTT:') and stripped_line.endswith(']]'):
+                data = stripped_line.replace('[[GANTT:', '').replace(']]', '').strip()
                 img = ChartEngine.create_gantt_chart(data, theme_color)
                 if img:
                     paragraph = doc.add_paragraph()
@@ -4662,8 +4714,8 @@ class DocumentBuilder:
                     paragraph.paragraph_format.space_after = Pt(8)
                     paragraph.add_run().add_picture(img, width=Inches(6.1))
                 continue
-            if line.startswith('[[BAR:') and line.endswith(']]'):
-                data = line.replace('[[BAR:', '').replace(']]', '').strip()
+            if stripped_line.startswith('[[BAR:') and stripped_line.endswith(']]'):
+                data = stripped_line.replace('[[BAR:', '').replace(']]', '').strip()
                 img = ChartEngine.create_bar_chart(data, theme_color)
                 if img:
                     paragraph = doc.add_paragraph()
@@ -4671,8 +4723,8 @@ class DocumentBuilder:
                     paragraph.paragraph_format.space_after = Pt(8)
                     paragraph.add_run().add_picture(img, width=Inches(6.1))
                 continue
-            if line.startswith('[[DONUT:') and line.endswith(']]'):
-                data = line.replace('[[DONUT:', '').replace(']]', '').strip()
+            if stripped_line.startswith('[[DONUT:') and stripped_line.endswith(']]'):
+                data = stripped_line.replace('[[DONUT:', '').replace(']]', '').strip()
                 img = ChartEngine.create_donut_chart(data, theme_color)
                 if img:
                     paragraph = doc.add_paragraph()
@@ -4680,13 +4732,14 @@ class DocumentBuilder:
                     paragraph.paragraph_format.space_after = Pt(8)
                     paragraph.add_run().add_picture(img, width=Inches(5.6))
                 continue
-            if line.startswith('|'):
+            if stripped_line.startswith('|'):
                 if not in_table and clean_lines and clean_lines[-1] != "":
                     clean_lines.append("")
                 in_table = True
+                clean_lines.append(stripped_line)
             else:
                 in_table = False
-            clean_lines.append(line)
+                clean_lines.append(line)
             
         html = markdown.markdown("\n".join(clean_lines), extensions=['tables', 'sane_lists'])
         DocumentBuilder.parse_html_to_docx(doc, html, theme_color)
@@ -4774,6 +4827,9 @@ class DocumentBuilder:
             if paragraph._element.find('.//' + qn('w:drawing')) is not None:
                 continue
             if style_name in {"List Bullet", "List Number"}:
-                DocumentBuilder._format_list_paragraph(paragraph)
+                DocumentBuilder._format_list_paragraph(
+                    paragraph,
+                    level=DocumentBuilder._paragraph_list_level(paragraph),
+                )
             else:
                 DocumentBuilder._format_plain_paragraph(paragraph)

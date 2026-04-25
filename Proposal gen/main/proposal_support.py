@@ -1812,19 +1812,19 @@ class ProposalSupportMixin:
         item_clean = re.sub(r"\s+", " ", str(item or "").strip())
         lowered = item_clean.lower()
         if "cobit" in lowered:
-            return "COBIT membantu menata keputusan, kontrol, dan akuntabilitas tata kelola agar delivery tidak bergerak tanpa arah."
+            return "COBIT dipakai untuk governance: siapa memutuskan, kontrol apa yang wajib ada, dan indikator apa yang membuktikan delivery terkendali."
         if "itil" in lowered:
-            return "ITIL membantu merapikan alur layanan, incident, perubahan, dan mutu operasi agar eksekusi lebih stabil."
+            return "ITIL dipakai untuk service management: alur incident, change, SLA, dan transisi operasi agar hasil proyek stabil saat dipakai."
         if "togaf" in lowered:
-            return "TOGAF membantu menyusun arah arsitektur target dan peta perubahan agar keputusan desain tidak terputus dari roadmap."
+            return "TOGAF dipakai untuk arsitektur target: membaca kondisi saat ini, merancang target state, dan menurunkan roadmap perubahan."
         if "dama" in lowered:
-            return "DAMA membantu menata tata kelola data, kualitas data, dan peran pengelolanya agar keputusan berbasis data lebih dapat dipercaya."
+            return "DAMA dipakai untuk data management: ownership, kualitas, metadata, dan kontrol pemakaian data agar keputusan lebih dapat dipercaya."
         if "tm forum" in lowered:
-            return "TM Forum membantu menyelaraskan proses layanan, operasi, dan model kapabilitas industri agar perbaikan tidak parsial."
+            return "TM Forum dipakai untuk model operasi layanan: menyambungkan proses front-end, fulfilment, assurance, dan billing agar perbaikan tidak parsial."
         if any(token in lowered for token in ["iso", "pojk", "ojk", "nist", "regulasi", "kepatuhan"]):
             if "ojk" in lowered or "pojk" in lowered:
-                return "Acuan OJK menetapkan batas kepatuhan, kontrol minimum, dan mutu dokumen yang wajib dijaga selama pekerjaan berjalan."
-            return "Acuan ini menetapkan batas kepatuhan, kontrol minimum, dan mutu yang wajib dijaga selama pekerjaan berjalan."
+                return "Acuan OJK dipakai sebagai pagar kepatuhan sektor jasa keuangan, terutama pada kontrol, bukti keputusan, dan tata kelola risiko."
+            return "Acuan ini dipakai sebagai pagar kontrol: menentukan batas risiko, bukti kepatuhan, dan mutu minimum yang harus terlihat pada deliverable."
         has_ai_terms = bool(re.search(r"\b(ai|artificial intelligence|machine learning|generative)\b", lowered))
         has_data_terms = bool(re.search(r"\b(data|model)\b", lowered))
         if has_ai_terms or has_data_terms:
@@ -1834,10 +1834,79 @@ class ProposalSupportMixin:
                 else "Acuan ini membantu menjaga keputusan berbasis data tetap punya kontrol, akuntabilitas, dan kualitas hasil yang memadai."
             )
         if "standar" in lowered or "framework" in lowered:
-            return "Acuan ini memberi bahasa kerja yang seragam agar keputusan, desain, dan kontrol pelaksanaan tidak berjalan sporadis."
+            return "Acuan ini memberi bahasa kerja yang seragam agar keputusan, desain, dan kontrol pelaksanaan bisa diuji secara konsisten."
         if item_clean:
-            return f"{item_clean} dipakai sebagai acuan kerja agar keputusan, langkah kerja, dan mutu hasil tetap konsisten sepanjang proyek."
+            return f"{item_clean} dipakai sebagai acuan kerja untuk mengubah kebutuhan proyek menjadi kriteria keputusan, kontrol mutu, dan acceptance yang jelas."
         return "Acuan ini memberi pegangan praktis agar keputusan, langkah kerja, dan mutu hasil tetap konsisten dari awal sampai akhir."
+
+    @staticmethod
+    def _framework_profile(
+        item: str,
+        project_type: str,
+        service_type: str = "",
+        context_hint: str = "",
+        ai_mode: bool = False,
+    ) -> Dict[str, str]:
+        item_clean = re.sub(r"\s+", " ", str(item or "").strip()) or "Acuan kerja"
+        lowered = item_clean.lower()
+        context = context_hint.lower() if context_hint else f"kebutuhan proyek {project_type.lower()}"
+        service = service_type.lower() if service_type else "layanan yang diusulkan"
+        if "cobit" in lowered:
+            return {
+                "peran": "governance dan kontrol keputusan",
+                "relevansi": f"dipilih karena {context} membutuhkan akuntabilitas owner, control objective, dan ukuran keberhasilan yang tidak berhenti pada aktivitas.",
+                "pembeda": "berbeda dari ITIL atau TOGAF karena COBIT menilai apakah keputusan, kontrol, dan tanggung jawab sudah layak secara tata kelola.",
+                "penggunaan": "diterapkan untuk menetapkan decision right, RACI, KPI/KGI, quality gate, dan eskalasi keputusan pada tiap fase penting.",
+                "artefak": "RACI keputusan, control objective, KPI/KGI governance, dan decision log.",
+            }
+        if "itil" in lowered:
+            return {
+                "peran": "stabilisasi proses layanan dan operasi",
+                "relevansi": f"dipilih karena {context} perlu diterjemahkan ke proses layanan, SLA, incident/change handling, dan acceptance operasi.",
+                "pembeda": "berbeda dari COBIT karena ITIL fokus pada kualitas service operation, bukan struktur tata kelola korporat.",
+                "penggunaan": "diterapkan untuk merancang alur layanan, incident/problem/change handling, readiness operasi, dan transisi hasil ke tim pengguna.",
+                "artefak": "process flow layanan, SLA/OLA expectation, acceptance criteria operasi, dan service transition checklist.",
+            }
+        if "togaf" in lowered:
+            return {
+                "peran": "arsitektur target dan roadmap perubahan",
+                "relevansi": f"dipilih karena {context} perlu dipetakan dari current state ke target state tanpa kehilangan dependensi proses, data, aplikasi, dan organisasi.",
+                "pembeda": "berbeda dari COBIT dan ITIL karena TOGAF membentuk blueprint perubahan, bukan hanya kontrol atau operasi layanan.",
+                "penggunaan": "diterapkan untuk membaca current state, menyusun target operating model, memetakan gap, dan mengurutkan roadmap transisi.",
+                "artefak": "baseline capability map, target state, gap analysis, dan roadmap transisi.",
+            }
+        if "dama" in lowered or re.search(r"\bdata\b", lowered):
+            return {
+                "peran": "tata kelola dan kualitas data",
+                "relevansi": f"dipilih karena {context} membutuhkan data source, ownership, kualitas informasi, dan definisi data yang dapat dipertanggungjawabkan.",
+                "pembeda": "berbeda dari framework delivery karena DAMA menguji kelayakan data sebagai fondasi keputusan dan otomasi.",
+                "penggunaan": "diterapkan untuk menetapkan ownership data, quality checkpoint, metadata penting, dan aturan penggunaan data selama engagement.",
+                "artefak": "data ownership map, data quality checkpoint, source requirement, dan metadata register awal.",
+            }
+        if any(token in lowered for token in ["pojk", "ojk", "uu pdp", "pdp", "hipaa", "regulasi", "kepatuhan", "iso", "nist"]):
+            compliance_focus = "human oversight dan risiko model" if ai_mode else "kontrol, bukti keputusan, dan batas risiko"
+            return {
+                "peran": "pagar kepatuhan dan minimum control",
+                "relevansi": f"dipilih karena {context} harus tetap berada dalam batas {compliance_focus} yang bisa diaudit.",
+                "pembeda": "berbeda dari framework metodologi karena acuan ini menentukan batas aman dan wajib, bukan hanya cara kerja yang disarankan.",
+                "penggunaan": "diterapkan untuk mengecek scope, pengelolaan data, approval, bukti kontrol, dan bentuk deliverable sebelum diserahkan.",
+                "artefak": "compliance checklist, risk/control register, approval note, dan daftar bukti pemenuhan kontrol.",
+            }
+        if any(token in lowered for token in ["responsible ai", "ai rmf", "ai governance", "machine learning", "artificial intelligence"]):
+            return {
+                "peran": "readiness, validasi, dan kontrol adopsi AI",
+                "relevansi": f"dipilih karena {context} perlu diuji dari sisi data, risiko, human oversight, dan kesiapan perubahan sebelum diperluas.",
+                "pembeda": "berbeda dari framework proyek umum karena fokusnya pada risiko model, kualitas output, dan mekanisme stop/go.",
+                "penggunaan": "diterapkan untuk menilai use case, data readiness, guardrail, validasi hasil, dan monitoring pasca-pilot.",
+                "artefak": "AI risk register, validation checklist, stop/go criteria, monitoring requirement, dan adoption guardrail.",
+            }
+        return {
+            "peran": "acuan kerja custom yang mengikat scope, mutu, dan acceptance",
+            "relevansi": f"dipilih karena {context} perlu diterjemahkan ke langkah {service}, keputusan kerja, dan output yang dapat diterima sponsor.",
+            "pembeda": f"berbeda dari framework generik karena {item_clean} dipakai untuk menyesuaikan kontrol langsung pada konteks proyek ini.",
+            "penggunaan": f"diterapkan untuk mengubah {item_clean} menjadi checklist desain, kriteria mutu, acceptance criteria, dan checkpoint keputusan.",
+            "artefak": "checklist kerja, kriteria desain, acceptance criteria, decision note, dan quality gate per fase.",
+        }
 
     @classmethod
     def _framework_reference_rows(
@@ -1870,43 +1939,20 @@ class ProposalSupportMixin:
 
         rows: List[Dict[str, str]] = []
         for item in selected[:4]:
-            lowered = item.lower()
+            profile = cls._framework_profile(
+                item,
+                project_type,
+                context_hint=context_hint,
+                ai_mode=ai_mode,
+            )
             ringkas = cls._framework_tldr(item, ai_mode=ai_mode)
-            if any(token in lowered for token in ["iso", "pojk", "ojk", "nist", "regulasi", "kepatuhan"]):
-                peran = "memberi batas kepatuhan, kontrol minimum, dan ekspektasi kualitas yang wajib dijaga"
-                outcome_focus = "memastikan keputusan dan keluaran tetap patuh terhadap kewajiban formal"
-            elif any(token in lowered for token in ["cobit", "itil", "togaf", "tm forum", "dama", "framework", "standar"]):
-                peran = "memberi struktur kerja agar desain, governance, dan prioritas implementasi tidak berjalan sporadis"
-                if "cobit" in lowered:
-                    outcome_focus = "menjaga keputusan tata kelola, akuntabilitas owner, dan kontrol delivery"
-                elif "itil" in lowered:
-                    outcome_focus = "menjaga stabilitas proses layanan, incident, dan quality gate operasional"
-                elif "togaf" in lowered:
-                    outcome_focus = "menjaga konsistensi target-state, arsitektur kerja, dan roadmap perubahan"
-                elif "dama" in lowered:
-                    outcome_focus = "menjaga kualitas data, ownership, dan kejelasan pengelolaan informasi"
-                else:
-                    outcome_focus = "menjaga konsistensi keputusan, desain, dan prioritas implementasi"
-            elif "ai" in lowered or "model" in lowered or "data" in lowered:
-                peran = "menjaga kesiapan data, akuntabilitas keputusan, dan kelayakan solusi sebelum diperluas"
-                outcome_focus = "menjaga kesiapan adopsi agar rollout tidak melampaui kontrol organisasi"
-            else:
-                peran = "menjadi acuan praktis untuk menjaga kualitas keputusan, konsistensi langkah kerja, dan kontrol hasil"
-                outcome_focus = f"membuat kerangka kerja {item} benar-benar operasional di lapangan"
-
-            if ai_mode:
-                relevansi = f"relevan untuk memastikan adopsi tetap feasible, terkontrol, dan dapat dipertanggungjawabkan, dengan fokus pada {outcome_focus}"
-            else:
-                relevansi = f"relevan untuk proyek {project_type.lower()} karena membantu {outcome_focus}"
-            if context_hint:
-                relevansi = f"{relevansi}, terutama ketika proyek perlu menjaga {context_hint.lower()}"
-
             rows.append(
                 {
                     "acuan": item,
                     "ringkas": ringkas,
-                    "peran": peran,
-                    "relevansi": relevansi,
+                    "peran": profile["peran"],
+                    "relevansi": profile["relevansi"],
+                    "pembeda": profile["pembeda"],
                 }
             )
         return rows
@@ -1942,51 +1988,53 @@ class ProposalSupportMixin:
 
         rows: List[Dict[str, str]] = []
         for item in selected[:4]:
+            profile = cls._framework_profile(
+                item,
+                project_type,
+                service_type=service_type,
+                context_hint=context_hint,
+                ai_mode=ai_mode,
+            )
             lowered = item.lower()
             if "togaf" in lowered:
-                penggunaan = "dipakai untuk membaca current state, merumuskan target operating model, dan menurunkan roadmap transisi yang konsisten."
-                artefak = "baseline capability map, target state, dan roadmap transisi."
+                penggunaan = profile["penggunaan"]
+                artefak = profile["artefak"]
                 fase = f"{first_phase} sampai {middle_phase}"
             elif "cobit" in lowered:
-                penggunaan = "dipakai untuk menetapkan kontrol tata kelola, decision right, accountability, dan ukuran keberhasilan delivery."
-                artefak = "control objective, RACI keputusan, dan KPI/KGI governance."
+                penggunaan = profile["penggunaan"]
+                artefak = profile["artefak"]
                 fase = f"{first_phase} dan checkpoint pada {middle_phase}"
             elif "itil" in lowered:
-                penggunaan = "dipakai untuk merapikan service process, incident/problem/change handling, dan ritme quality gate operasional."
-                artefak = "process flow, SLA/OLA expectation, dan kontrol service operation."
+                penggunaan = profile["penggunaan"]
+                artefak = profile["artefak"]
                 fase = f"{middle_phase} sampai {last_phase}"
             elif "iso 27001" in lowered:
-                penggunaan = "dipakai untuk menjaga bahwa desain kontrol, akses, logging, dan perlindungan informasi sudah dipikirkan sejak awal."
-                artefak = "security requirement, control checklist, dan risk treatment awal."
+                penggunaan = profile["penggunaan"]
+                artefak = profile["artefak"]
                 fase = f"{first_phase} sampai {last_phase}"
             elif "iso 20000" in lowered:
-                penggunaan = "dipakai untuk menata mutu service management, service acceptance, dan mekanisme continual improvement."
-                artefak = "service management checkpoint dan acceptance criteria layanan."
+                penggunaan = profile["penggunaan"]
+                artefak = profile["artefak"]
                 fase = f"{middle_phase} dan {last_phase}"
             elif any(token in lowered for token in ["pojk", "ojk", "uu pdp", "pdp", "hipaa", "regulasi", "kepatuhan"]):
-                penggunaan = "dipakai sebagai pagar kepatuhan agar ruang lingkup, kontrol data, approval, dan bentuk keluaran tidak melanggar kewajiban formal."
-                artefak = "compliance checkpoint, daftar kontrol wajib, dan catatan keputusan kepatuhan."
+                penggunaan = profile["penggunaan"]
+                artefak = profile["artefak"]
                 fase = f"{first_phase} dengan review berulang hingga {last_phase}"
             elif any(token in lowered for token in ["responsible ai", "nist ai", "ai rmf", "ai governance"]):
-                penggunaan = "dipakai untuk menguji kelayakan use case, human oversight, quality gate model, dan monitoring risiko adopsi."
-                artefak = "AI risk register, stop/go criteria, dan monitoring requirement."
+                penggunaan = profile["penggunaan"]
+                artefak = profile["artefak"]
                 fase = f"{first_phase} sampai {last_phase}"
             elif any(token in lowered for token in ["dama", "data"]):
-                penggunaan = "dipakai untuk memastikan ownership data, kualitas informasi, metadata, dan kontrol pemakaian data relevan dengan kebutuhan proyek."
-                artefak = "data ownership map, quality checkpoint, dan requirement data source."
+                penggunaan = profile["penggunaan"]
+                artefak = profile["artefak"]
                 fase = f"{first_phase} dan {middle_phase}"
             elif "tm forum" in lowered:
-                penggunaan = "dipakai untuk merapikan alur layanan, dependensi operasi, dan hubungan proses front-end sampai back-end."
-                artefak = "service/process model dan integrasi alur operasi."
+                penggunaan = profile["penggunaan"]
+                artefak = profile["artefak"]
                 fase = f"{middle_phase} sampai {last_phase}"
             else:
-                penggunaan = (
-                    f"dipakai sebagai acuan praktis untuk menerjemahkan {item} ke kriteria desain, checklist mutu, dan checkpoint keputusan "
-                    f"yang relevan dengan proyek {project_type.lower()} dan layanan {service_type.lower()}."
-                )
-                artefak = (
-                    f"checklist kerja, catatan keputusan, dan acceptance criteria yang menjaga {short_notes.lower()}."
-                )
+                penggunaan = profile["penggunaan"]
+                artefak = f"{profile['artefak']} Fokus kontrol: {short_notes.lower()}."
                 fase = f"{first_phase} sampai {last_phase}"
 
             if context_hint:
@@ -2283,9 +2331,27 @@ class ProposalSupportMixin:
         return rows[:5]
 
     @staticmethod
+    def _duration_unit_count(timeline: str, default_months: int = 6) -> Tuple[str, int]:
+        text = str(timeline or "").lower()
+        match = re.search(r"(\d+(?:[.,]\d+)?)\s*(minggu|pekan|week|weeks|bulan|month|months|hari|day|days)", text)
+        if not match:
+            months = FinancialAnalyzer._duration_to_months(timeline)
+            return "Bulan", max(2, int(round(months or default_months)))
+        value = float(match.group(1).replace(",", "."))
+        unit = match.group(2)
+        if unit in {"minggu", "pekan", "week", "weeks"}:
+            return "Minggu", max(4, int(round(value)))
+        if unit in {"hari", "day", "days"}:
+            return "Minggu", max(2, int((value + 6) // 7))
+        return "Bulan", max(2, int(round(value)))
+
+    @staticmethod
+    def _period_label(unit: str, start: int, end: int) -> str:
+        return f"{unit} {start + 1}" if end - start <= 1 else f"{unit} {start + 1}-{end}"
+
+    @staticmethod
     def _build_phase_plan(project_type: str, timeline: str) -> List[Dict[str, str]]:
-        months = FinancialAnalyzer._duration_to_months(timeline)
-        total_months = max(2, int(round(months or 6)))
+        unit_label, total_units = ProposalSupportMixin._duration_unit_count(timeline, default_months=6)
         templates: Dict[str, List[Tuple[str, str, str, int]]] = {
             "diagnostic": [
                 ("Discovery & Baseline", "Baca konteks bisnis, data, dan pain points prioritas.", "baseline assessment dan hipotesis awal", 1),
@@ -2314,22 +2380,18 @@ class ProposalSupportMixin:
         }
         blueprint = templates.get((project_type or "").strip().lower(), templates["implementation"])
         total_weight = sum(item[3] for item in blueprint) or 1
-        remaining = total_months
+        remaining = total_units
         cursor = 0
         plan: List[Dict[str, str]] = []
         for idx, (phase, activity, deliverable, weight) in enumerate(blueprint):
             phases_left = len(blueprint) - idx
-            allocated = max(1, round(total_months * weight / total_weight))
+            allocated = max(1, round(total_units * weight / total_weight))
             allocated = min(allocated, remaining - (phases_left - 1))
             start = cursor
-            end = min(total_months, start + allocated)
+            end = min(total_units, start + allocated)
             if idx == len(blueprint) - 1:
-                end = total_months
-            label = (
-                f"Bulan {start + 1}"
-                if end - start <= 1
-                else f"Bulan {start + 1}-{end}"
-            )
+                end = total_units
+            label = ProposalSupportMixin._period_label(unit_label, start, end)
             plan.append({
                 "phase": phase,
                 "activity": activity,
@@ -2337,15 +2399,16 @@ class ProposalSupportMixin:
                 "start": str(start),
                 "end": str(end),
                 "period": label,
+                "unit": unit_label,
             })
             cursor = end
-            remaining = max(0, total_months - cursor)
+            remaining = max(0, total_units - cursor)
         return plan
 
     @staticmethod
     def _build_ai_phase_plan(timeline: str) -> List[Dict[str, str]]:
-        months = FinancialAnalyzer._duration_to_months(timeline)
-        total_months = max(3, int(round(months or 6)))
+        unit_label, total_units = ProposalSupportMixin._duration_unit_count(timeline, default_months=6)
+        total_units = max(3, total_units)
         blueprint: List[Tuple[str, str, str, int]] = [
             (
                 "Use Case & Readiness",
@@ -2374,18 +2437,18 @@ class ProposalSupportMixin:
         ]
 
         total_weight = sum(item[3] for item in blueprint) or 1
-        remaining = total_months
+        remaining = total_units
         cursor = 0
         plan: List[Dict[str, str]] = []
         for idx, (phase, activity, deliverable, weight) in enumerate(blueprint):
             phases_left = len(blueprint) - idx
-            allocated = max(1, round(total_months * weight / total_weight))
+            allocated = max(1, round(total_units * weight / total_weight))
             allocated = min(allocated, remaining - (phases_left - 1))
             start = cursor
-            end = min(total_months, start + allocated)
+            end = min(total_units, start + allocated)
             if idx == len(blueprint) - 1:
-                end = total_months
-            label = f"Bulan {start + 1}" if end - start <= 1 else f"Bulan {start + 1}-{end}"
+                end = total_units
+            label = ProposalSupportMixin._period_label(unit_label, start, end)
             plan.append({
                 "phase": phase,
                 "activity": activity,
@@ -2393,9 +2456,10 @@ class ProposalSupportMixin:
                 "start": str(start),
                 "end": str(end),
                 "period": label,
+                "unit": unit_label,
             })
             cursor = end
-            remaining = max(0, total_months - cursor)
+            remaining = max(0, total_units - cursor)
         return plan
 
     @staticmethod
@@ -2532,6 +2596,7 @@ class ProposalSupportMixin:
         commercial_summary = self._summarize_phrase(firm_data.get("commercial", ""), "mekanisme komersial mengikuti baseline internal")
         payment_plan = self._build_ai_payment_plan() if ai_mode else self._build_payment_plan(project_type, budget)
         phase_plan = self._build_ai_phase_plan(timeline) if ai_mode else self._build_phase_plan(project_type, timeline)
+        gantt_unit = phase_plan[0].get("unit", "Bulan") if phase_plan else "Bulan"
         gantt_points = "; ".join(
             f"{item['phase']},{item['start']},{item['end']}"
             for item in phase_plan
@@ -2590,7 +2655,7 @@ class ProposalSupportMixin:
             if framework_osint_context else ""
         )
         framework_rows = "\n".join(
-            f"| {item['acuan']} | {item['ringkas']} | {item['relevansi']} |"
+            f"| {item['acuan']} | {item['ringkas']} | {item['relevansi']} | {item['pembeda']} |"
             for item in self._framework_reference_rows(
                 regulations,
                 project_type,
@@ -2762,7 +2827,7 @@ class ProposalSupportMixin:
                     f"{numbered_phases}\n"
                     f"- Setiap fase memiliki keluaran utama yang menjadi dasar evaluasi sebelum melanjutkan ke fase berikutnya.\n"
                     f"- Program kerja dijaga agar tetap selaras dengan tujuan pekerjaan dan prioritas keputusan {client}.\n"
-                    f"[[GANTT: Jadwal Penugasan | Bulan | {gantt_points}]]\n"
+                    f"[[GANTT: Jadwal Penugasan | {gantt_unit} | {gantt_points}]]\n"
                     "| Fase | Periode | Aktivitas Kunci | Keluaran |\n"
                     "| --- | --- | --- | --- |\n"
                     f"{phase_rows}\n\n"
@@ -3046,8 +3111,8 @@ class ProposalSupportMixin:
                 f"Pemilihan acuan untuk {client} diarahkan agar kebutuhan {short_goal.lower()} dapat ditangani dengan bahasa kerja yang tetap konsisten terhadap {term_line}. "
                 f"Acuan ini sengaja dibangun di atas ruang lingkup yang sudah dipilih, sehingga pendekatan tidak bergerak di luar batas kerja yang sudah disepakati. "
                 f"Artinya, acuan dipilih bukan karena popularitasnya, tetapi karena benar-benar membantu menyusun urutan keputusan, menjaga kualitas keluaran, dan menempatkan kontrol yang proporsional sejak awal.\n\n"
-                "| Acuan | Ringkasnya | Mengapa Dipakai pada Proyek Ini |\n"
-                "| --- | --- | --- |\n"
+                "| Acuan | TL;DR Fungsi | Mengapa Dipakai pada Proyek Ini | Pembeda dari Acuan Lain |\n"
+                "| --- | --- | --- | --- |\n"
                 f"{framework_rows}\n\n"
                 f"Dengan acuan seperti di atas, {client} memperoleh pegangan yang jelas mengenai standar apa yang dipakai untuk menguji apakah solusi yang diusulkan memang selaras dengan konteks, risiko, dan ekspektasi hasil bisnis.\n\n"
                 f"## {self._chapter_subtitle(chapter, 1, '5.2 Standar Penyelesaian Masalah')}\n"
@@ -3159,8 +3224,8 @@ class ProposalSupportMixin:
 
         if chapter["id"] == "c_8":
             table_rows = "\n".join(
-                f"| {item['phase']} | {item['period']} | {item['deliverable']} | Menjaga progres {short_goal.lower()} |"
-                for item in phase_plan
+                f"| {idx} | {item['period']} | {item['phase']} | {item['activity']} | {item['deliverable']} | Acceptance fase dan keputusan lanjut/koreksi arah. |"
+                for idx, item in enumerate(phase_plan, start=1)
             )
             numbered = "\n".join(
                 f"{idx}. **{item['phase']}** ({item['period']}): {item['activity']} Output utama: {item['deliverable']}."
@@ -3186,15 +3251,15 @@ class ProposalSupportMixin:
                 f"- Baseline metode kerja yang dipakai mengacu pada {standard_method}.\n"
                 f"- Ritme eksekusi juga menjaga kesinambungan terhadap istilah kerja {term_line}, sehingga koordinasi antar-tim tidak kehilangan bahasa operasional yang sama.\n"
                 f"{ai_timeline_note}"
-                f"[[GANTT: Jadwal Pelaksanaan | Bulan | {gantt_points}]]\n\n"
+                f"[[GANTT: Jadwal Pelaksanaan | {gantt_unit} | {gantt_points}]]\n\n"
                 "## 8.2 Waktu Pelaksanaan dan Deliverable Tiap Fase\n"
                 f"Pengaturan waktu tidak hanya membagi durasi, tetapi memastikan setiap deliverable langsung mendukung kebutuhan {short_goal.lower()} "
                 f"dan memberi bahan keputusan yang rapi pada forum pengarah proyek {client}. Karena itu, deliverable dibangun berlapis: "
                 f"mulai dari baseline, rancangan solusi, keputusan implementasi, sampai stabilisasi hasil. Untuk konteks {client}, pendekatan ini penting agar tim tidak sekadar menyelesaikan aktivitas, "
                 f"tetapi juga menjaga relevansi terhadap KPI, dependensi, dan kesiapan adopsi pada tiap fase. Dengan demikian, bila terjadi perubahan kondisi lapangan atau kebutuhan sponsor, "
                 f"tim masih punya ruang untuk melakukan penyesuaian yang terkontrol tanpa merusak keseluruhan jalur delivery.\n\n"
-                "| Fase | Periode | Deliverable Utama | Kontribusi Bisnis |\n"
-                "| --- | --- | --- | --- |\n"
+                "| No | Periode | Fase | Fokus Aktivitas | Deliverable Utama | Milestone / Kontrol |\n"
+                "| --- | --- | --- | --- | --- | --- |\n"
                 f"{table_rows}\n"
                 f"- Review progres dilakukan berkala agar deviasi timeline dapat dikoreksi sebelum memengaruhi KPI inti seperti {kpi_line}.\n"
                 "- Pergeseran jadwal hanya dilakukan melalui change control formal dan keputusan bersama sponsor proyek.\n"
@@ -3926,7 +3991,8 @@ class ProposalSupportMixin:
             elif chapter['id'] == 'c_4':
                 extra += (
                     f" [FOCUS] Gunakan framework/regulasi terpilih berikut sebagai acuan utama: '{regulations}'. "
-                    "Pendekatan harus dibangun di atas ruang lingkup dan batas kerja yang sudah ditetapkan, lalu menjadi landasan metodologi."
+                    "Pendekatan harus dibangun di atas ruang lingkup dan batas kerja yang sudah ditetapkan, lalu menjadi landasan metodologi. "
+                    "Untuk setiap framework, jelaskan fungsi ringkas, alasan pemilihan khusus untuk proyek ini, dan pembeda terhadap framework lain."
                 )
                 if regulation_data:
                     extra += f" [FRAMEWORK_OSINT] Gunakan pembacaan eksternal/regulasi berikut untuk membuat pemilihan framework lebih context-aware: {regulation_data}"
@@ -3935,7 +4001,8 @@ class ProposalSupportMixin:
             elif chapter['id'] == 'c_5':
                 extra += (
                     f" [FOCUS] Jelaskan alasan pemilihan metodologi untuk engagement '{service_type}' dan gunakan baseline metodologi internal: {firm_data['methodology']}. "
-                    "Metodologi harus secara eksplisit menurunkan ruang lingkup dan pendekatan menjadi langkah kerja yang dapat dijalankan."
+                    "Metodologi harus secara eksplisit menurunkan ruang lingkup dan pendekatan menjadi langkah kerja yang dapat dijalankan. "
+                    "Framework tidak boleh dijelaskan generik; sebutkan cara pakai, artefak yang dipengaruhi, fase penggunaan, dan kontrol yang berbeda untuk masing-masing framework."
                 )
                 if regulation_data:
                     extra += f" [FRAMEWORK_OSINT] Gunakan pembacaan eksternal/regulasi berikut saat menjelaskan penerapan framework dalam metodologi: {regulation_data}"
@@ -3951,7 +4018,8 @@ class ProposalSupportMixin:
             elif chapter['id'] == 'c_8':
                 extra += (
                     f" [FOCUS] Timeline harus sinkron dengan durasi proyek: '{timeline}'. Tampilkan aktivitas per fase, milestone, dan deliverable yang terukur. "
-                    "Bab ini harus langsung menerjemahkan metodologi dan solution design menjadi ritme pelaksanaan."
+                    "Bab ini harus langsung menerjemahkan metodologi dan solution design menjadi ritme pelaksanaan. "
+                    "Jika durasi memakai minggu, gunakan label minggu eksplisit; jangan menyembunyikan periode di nama fase."
                 )
             elif chapter['id'] == 'c_9':
                 extra += (
@@ -4314,15 +4382,16 @@ class ProposalSupportMixin:
         if chapter.get("visual_intent") != "gantt" or "[[GANTT:" in patched:
             return patched
 
-        months = max(4, int(round(FinancialAnalyzer._duration_to_months(timeline) or 6)))
-        breakpoints = [0, max(1, months // 4), max(2, months // 2), max(3, (months * 3) // 4), months]
+        unit_label, total_units = self._duration_unit_count(timeline, default_months=6)
+        total_units = max(4, total_units)
+        breakpoints = [0, max(1, total_units // 4), max(2, total_units // 2), max(3, (total_units * 3) // 4), total_units]
         phase_names = ["Discovery", "Design", "Execution", "Stabilization"]
         parts = []
         for idx, name in enumerate(phase_names):
-            start = min(breakpoints[idx], months - 1)
-            end = max(start + 1, min(months, breakpoints[idx + 1]))
+            start = min(breakpoints[idx], total_units - 1)
+            end = max(start + 1, min(total_units, breakpoints[idx + 1]))
             parts.append(f"{name},{start},{end}")
-        return patched + f"\n[[GANTT: Jadwal Pelaksanaan | Bulan | {'; '.join(parts)}]]"
+        return patched + f"\n[[GANTT: Jadwal Pelaksanaan | {unit_label} | {'; '.join(parts)}]]"
 
     def _ensure_personalization_signals(
         self,
