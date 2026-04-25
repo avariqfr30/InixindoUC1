@@ -315,6 +315,7 @@ PUBLIC_ENDPOINTS = {
     "ready",
     "static",
 }
+NO_STORE_EXACT_PATHS = {"/", "/auth", "/login", "/signup", "/logout", "/generate"}
 
 
 def _current_username() -> str:
@@ -342,6 +343,10 @@ def _is_authenticated() -> bool:
 
 def _is_api_request() -> bool:
     return request.path.startswith("/api/") or request.path == "/generate"
+
+
+def _requires_no_store_headers(path: str) -> bool:
+    return path in NO_STORE_EXACT_PATHS or path.startswith("/api/")
 
 
 def _safe_next_target(raw_target: str) -> str:
@@ -426,15 +431,7 @@ def _enforce_authentication():
 @app.after_request
 def _apply_auth_cache_headers(response):
     path = request.path or ""
-    if (
-        path == "/"
-        or path == "/auth"
-        or path == "/login"
-        or path == "/signup"
-        or path == "/logout"
-        or path == "/generate"
-        or path.startswith("/api/")
-    ):
+    if _requires_no_store_headers(path):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"

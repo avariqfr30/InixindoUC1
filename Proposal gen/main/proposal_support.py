@@ -1,18 +1,13 @@
 """Proposal support logic: research assembly, structured chapters, quality checks, and acceptance."""
 
-import hashlib
 import diskcache as dc
 
 from .proposal_shared import *
 from .runtime_components import (
-    ChartEngine,
-    DocumentBuilder,
     FinancialAnalyzer,
     FirmAPIClient,
-    LogoManager,
     Researcher,
     SchemaMapper,
-    StyleEngine,
 )
 
 bundle_cache_dir = Path(APP_STATE_DB_PATH).parent / ".research_bundle_cache"
@@ -492,7 +487,6 @@ class ProposalSupportMixin:
                 "delivery_guidance": [],
                 "chapter_guidance": {},
                 "quality_terms": [],
-                "debug_terms": [],
             }
 
         objective_note = cls._summarize_phrase(
@@ -599,7 +593,6 @@ class ProposalSupportMixin:
             "delivery_guidance": delivery_guidance,
             "chapter_guidance": chapter_guidance,
             "quality_terms": quality_terms,
-            "debug_terms": signals["strong_hits"] + signals["supporting_hits"],
         }
 
     @classmethod

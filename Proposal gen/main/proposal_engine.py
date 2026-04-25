@@ -1,7 +1,7 @@
 """Proposal orchestration logic: drafting, tightening, compression, and document assembly."""
 
 from .proposal_shared import *
-from .runtime_components import ChartEngine, DocumentBuilder, FinancialAnalyzer, FirmAPIClient, LogoManager, StyleEngine, Researcher
+from .runtime_components import DocumentBuilder, LogoManager, StyleEngine, Researcher
 from .proposal_support import ProposalSupportMixin
 
 
@@ -30,22 +30,6 @@ class ProposalEngineMixin:
             "top_p": 0.85,
             "repeat_penalty": 1.1,
         }
-
-    @staticmethod
-    def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
-        if not text:
-            return None
-        try:
-            return json.loads(text)
-        except Exception:
-            pass
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if not match:
-            return None
-        try:
-            return json.loads(match.group(0))
-        except Exception:
-            return None
 
     @staticmethod
     def _enhance_closing_with_firm_osint(
@@ -91,13 +75,6 @@ class ProposalEngineMixin:
         except Exception as e:
             logger.warning(f"Error enhancing closing with firm OSINT: {e}")
             return closing_content
-
-    @staticmethod
-    def _chapter_excerpt(text: str, max_words: int = 170) -> str:
-        words = re.findall(r"\S+", text)
-        if len(words) <= max_words:
-            return " ".join(words)
-        return " ".join(words[:max_words]).rstrip(".,;:")
 
     def _apply_global_coherence(
         self,
