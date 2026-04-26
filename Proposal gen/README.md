@@ -132,6 +132,7 @@ Untuk mode production:
 export APP_PROFILE=production
 export INTERNAL_DATA_SOURCE=api
 export INTERNAL_DATA_FALLBACK=none
+export PROJECT_DATA_SOURCE=api
 export FIRM_API_AUTH_MODE=basic
 export FIRM_API_USERNAME=isi_username
 export FIRM_API_PASSWORD=isi_password
@@ -150,12 +151,67 @@ export INTERNAL_DATA_FALLBACK=demo
 
 Contoh file ada di [internal_api_config.example.json](./internal_api_config.example.json). Dengan pendekatan ini, operator cukup mengganti satu file konfigurasi resource dan kredensial env tanpa perlu memahami mode `rest`, `dataset`, atau `generic`.
 
+### 4. Handover Internal API / APIDog
+
+Untuk production, aplikasi bisa membaca satu endpoint JSON apa pun selama operator menyediakan mapping field di `internal_api_config.json`.
+
+Alur paling sederhana:
+
+```bash
+python scripts/internal_api_config_tool.py init \
+  --url "https://inworx.inixindojogja.co.id/api/Resource/dataset" \
+  --out internal_api_config.json \
+  --body-encoding form
+```
+
+Jika APIDog menyediakan contoh response JSON, mapping dapat dibantu otomatis:
+
+```bash
+python scripts/internal_api_config_tool.py infer \
+  --sample-json sample_response.json \
+  --resource firm_profile \
+  --response-path "data.dataset_result.0"
+```
+
+Validasi konfigurasi sebelum restart:
+
+```bash
+python scripts/internal_api_config_tool.py validate --config internal_api_config.json
+python -m main.doctor --format text --project-type Implementation --client-name "PT Contoh Klien"
+```
+
+Resource minimum yang perlu tersedia:
+
+| Resource | Field wajib |
+| --- | --- |
+| `firm_profile` | `office_address`, `email`, `phone`, `website` |
+| `project_standards` | `methodology`, `team`, `commercial` |
+| `client_relationship` | `summary`, `mode` |
+| `project_records` | `entity`, `topic` |
+
+Catatan penting:
+- `request_defaults.url` boleh berupa URL penuh dari APIDog.
+- `response_path` memakai JMESPath, misalnya `data.dataset_result.0`.
+- `field_mapping` memetakan field aplikasi ke path JSON pada object hasil.
+- Kredensial tetap lewat environment variable, bukan ditulis ke config.
+- `PROJECT_DATA_SOURCE=local` mempertahankan `projects.db` / `db.csv` untuk demo dan pre-production.
+- `PROJECT_DATA_SOURCE=api` membuat knowledge base dan vector index membaca `project_records` dari APIDog JSON, lalu menyimpan salinan cache ke `projects.db`.
+
 Jika operator tidak ingin mengedit `.env` manual, gunakan helper berikut:
 
 ```bash
 python scripts/profilectl.py demo --env-file .env
-python scripts/profilectl.py production --env-file .env --api-config /srv/apps/proposal-gen/internal_api_config.json
-python scripts/profilectl.py production --env-file .env --api-config /srv/apps/proposal-gen/internal_api_config.json --fallback demo
+python scripts/profilectl.py production --env-file .env \
+  --api-url "https://inworx.inixindojogja.co.id/api/Resource/dataset" \
+  --auth-mode basic \
+  --api-config /srv/apps/proposal-gen/internal_api_config.json \
+  --project-data-source api
+python scripts/profilectl.py production --env-file .env \
+  --api-url "https://inworx.inixindojogja.co.id/api/Resource/dataset" \
+  --auth-mode basic \
+  --api-config /srv/apps/proposal-gen/internal_api_config.json \
+  --project-data-source api \
+  --fallback demo
 ```
 
 ### Deploy Sync dengan Filter Production vs In-House

@@ -82,6 +82,7 @@ class GenericProjectStandardsSchema(BaseModel):
 class GenericClientRelationshipSchema(BaseModel):
     summary: str = Field("", description="Client relationship or engagement summary.")
     status: str = Field("", description="Relationship status such as existing, new, active, or renewal.")
+    mode: str = Field("", description="Normalized relationship mode such as existing or new.")
 
 
 class GenericFirmProfileSchema(BaseModel):
@@ -204,6 +205,13 @@ class SchemaMapper:
 
 # Internal API adapter.
 class FirmAPIClient:
+    REQUIRED_RESOURCE_FIELDS: Dict[str, Tuple[str, ...]] = {
+        "firm_profile": ("office_address", "email", "phone", "website"),
+        "project_standards": ("methodology", "team", "commercial"),
+        "client_relationship": ("summary", "mode"),
+        "project_records": ("entity", "topic"),
+    }
+
     def __init__(self, force_source: str = "") -> None:
         normalized_force_source = str(force_source or "").strip().lower()
         if normalized_force_source not in {"demo", "api"}:
@@ -289,34 +297,102 @@ class FirmAPIClient:
         method = str(request_spec.get("method") or "GET").strip().upper() or "GET"
         params = self._render_template_payload(request_spec.get("params") or {}, context)
         body = self._render_template_payload(request_spec.get("body") or {}, context)
-        
+        headers = self._render_template_payload(request_spec.get("headers") or {}, context)
+
         url = str(path or "").strip()
         if not re.match(r"^https?://", url, flags=re.IGNORECASE):
             url = f"{self.base_url}/{url.lstrip('/')}"
-            
+
         kwargs = {"params": params, "timeout": self.timeout_seconds}
+        if isinstance(headers, dict) and headers:
+            kwargs["headers"] = headers
         if method != "GET":
             encoding = str(request_spec.get("body_encoding") or "json").strip().lower()
             if encoding == "form":
                 kwargs["data"] = body or {}
             else:
                 kwargs["json"] = body or {}
-                
+
         response = self.session.request(method, url, **kwargs)
         response.raise_for_status()
         return response.json()
+
+    @staticmethod
+    def _flatten_json_paths(payload: Any, prefix: str = "", limit: int = 400) -> List[str]:
+        paths: List[str] = []
+
+        def walk(value: Any, current: str) -> None:
+            if len(paths) >= limit:
+                return
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    key_text = str(key)
+                    next_path = f"{current}.{key_text}" if current else key_text
+                    paths.append(next_path)
+                    walk(child, next_path)
+            elif isinstance(value, list):
+                if not value:
+                    return
+                next_path = f"{current}.0" if current else "0"
+                paths.append(next_path)
+                walk(value[0], next_path)
+
+        walk(payload, prefix)
+        return paths[:limit]
+
+    @classmethod
+    def _missing_required_mapping_fields(cls, resource_name: str, field_mapping: Dict[str, Any]) -> List[str]:
+        required = cls.REQUIRED_RESOURCE_FIELDS.get(resource_name, ())
+        return [
+            field
+            for field in required
+            if not str((field_mapping or {}).get(field) or "").strip()
+        ]
+
+    def validate_config(self, sample_payload: Optional[Any] = None) -> Dict[str, Any]:
+        resources: Dict[str, Any] = {}
+        resource_names = ["firm_profile", "project_standards", "client_relationship"]
+        if PROJECT_DATA_SOURCE == "api" or "project_records" in (self.resource_config or {}):
+            resource_names.append("project_records")
+        for resource_name in resource_names:
+            resource_spec = dict((self.resource_config or {}).get(resource_name) or {})
+            request_spec = self._merge_spec(self.request_defaults, dict(resource_spec.get("request") or {}))
+            field_mapping = resource_spec.get("field_mapping") or {}
+            path = str(request_spec.get("url") or request_spec.get("path") or "").strip()
+            method = str(request_spec.get("method") or "GET").strip().upper() or "GET"
+            missing_mapping = self._missing_required_mapping_fields(resource_name, field_mapping)
+            resources[resource_name] = {
+                "ok": bool(path) and not missing_mapping,
+                "method": method,
+                "path": path,
+                "response_path": str(resource_spec.get("response_path") or "").strip(),
+                "mapped_fields": sorted([str(key) for key in field_mapping.keys()]),
+                "missing_required_mapping": missing_mapping,
+                "allow_llm_extract": bool(resource_spec.get("allow_llm_extract", True)),
+            }
+
+        result: Dict[str, Any] = {
+            "ok": all(bool(item.get("ok")) for item in resources.values()),
+            "mode": self.integration_mode,
+            "base_url": self.base_url,
+            "auth_mode": self.auth_mode,
+            "resources": resources,
+        }
+        if sample_payload is not None:
+            result["sample_paths"] = self._flatten_json_paths(sample_payload)
+        return result
 
     def _resolve_resource_payload(self, resource_name: str, **context: Any) -> Any:
         resource_spec = dict((self.resource_config or {}).get(resource_name) or {})
         if not resource_spec:
             return {}
-            
+
         payload = self._request_from_spec(resource_spec, **context)
-        
+
         response_path = self._render_template_value(resource_spec.get("response_path") or "", context)
         if response_path:
             payload = self._extract_with_jmespath(payload, response_path)
-            
+
         filters = self._render_template_payload(resource_spec.get("record_filters") or {}, context)
         if isinstance(payload, list) and filters:
             matches = []
@@ -331,20 +407,59 @@ class FirmAPIClient:
                     if match:
                         matches.append(item)
             payload = matches[0] if len(matches) == 1 else matches
-            
+
         field_mapping = resource_spec.get("field_mapping")
         if not field_mapping:
             return payload
-            
+
         extracted = {}
         target_payload = payload[0] if isinstance(payload, list) and payload else payload
         if not isinstance(target_payload, dict):
             return {}
-            
+
         for target_field, json_path in field_mapping.items():
             extracted[target_field] = self._extract_with_jmespath(target_payload, str(json_path))
-            
+
         return extracted
+
+    @classmethod
+    def _coerce_record_list(cls, payload: Any) -> List[Dict[str, Any]]:
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+        if isinstance(payload, dict):
+            for key in ("dataset_result", "records", "items", "results", "data"):
+                value = payload.get(key)
+                records = cls._coerce_record_list(value)
+                if records:
+                    return records
+            return [payload]
+        return []
+
+    def get_project_records(self) -> List[Dict[str, Any]]:
+        if self.demo_mode:
+            return []
+        resource_spec = dict((self.resource_config or {}).get("project_records") or {})
+        if not resource_spec:
+            raise ValueError("project_records resource is not configured for API-backed project data.")
+
+        payload = self._request_from_spec(resource_spec)
+        response_path = str(resource_spec.get("response_path") or "").strip()
+        if response_path:
+            payload = self._extract_with_jmespath(payload, response_path)
+
+        records = self._coerce_record_list(payload)
+        field_mapping = resource_spec.get("field_mapping") or {}
+        if field_mapping:
+            mapped_records: List[Dict[str, Any]] = []
+            for record in records:
+                mapped_record = {
+                    target_field: self._extract_with_jmespath(record, str(json_path))
+                    for target_field, json_path in field_mapping.items()
+                }
+                mapped_records.append(mapped_record)
+            records = mapped_records
+
+        return [SchemaMapper.normalize_record(record, PROJECT_DATA_FIELD_ALIASES) for record in records]
 
     def uses_demo_logic(self) -> bool:
         return self.demo_mode or self.data_acquisition_mode == "demo"
@@ -358,6 +473,7 @@ class FirmAPIClient:
             "auth_mode": self.auth_mode,
             "base_url": self.base_url,
             "config_file": FIRM_API_CONFIG_FILE,
+            "configured_resources": sorted((self.resource_config or {}).keys()),
         }
 
     @staticmethod
@@ -429,6 +545,7 @@ class FirmAPIClient:
         try:
             payload = self._resolve_resource_payload("client_relationship", client_name=client_name)
             data = GenericClientRelationshipSchema.model_validate(payload).model_dump()
+            data["mode"] = str(data.get("mode") or data.get("status") or "new").strip().lower() or "new"
             data["source"] = "internal_api"
             data["verified"] = bool(data.get("summary"))
             return data
@@ -786,6 +903,8 @@ class InternalDataClient:
             "runtime": self.describe_runtime(),
             "resources": {},
         }
+        if self.internal_data_source == "api" or PROJECT_DATA_SOURCE == "api":
+            snapshot["api_config"] = self.api_provider.validate_config()
         try:
             firm_profile = self.get_firm_profile()
             snapshot["resources"]["firm_profile"] = {
@@ -879,6 +998,44 @@ class KnowledgeBase:
         return all(field in df.columns for field in cls._required_project_fields())
 
     def _load_project_data(self) -> bool:
+        if PROJECT_DATA_SOURCE == "api":
+            if self._load_project_data_from_api():
+                return True
+            if INTERNAL_DATA_FALLBACK == "demo":
+                logger.warning(
+                    "API-backed project data failed. Falling back to local project data because INTERNAL_DATA_FALLBACK=demo."
+                )
+                return self._load_project_data_from_local()
+            return False
+        return self._load_project_data_from_local()
+
+    def _load_project_data_from_api(self) -> bool:
+        try:
+            records = FirmAPIClient(force_source="api").get_project_records()
+            if not records:
+                raise ValueError("project_records API returned no records.")
+            normalized_df = self._normalize_projects_df(pd.DataFrame(records))
+            normalized_df.to_sql("projects", self.engine, index=False, if_exists="replace")
+            self.df = normalized_df
+        except Exception as exc:
+            self.df = None
+            self.vector_ready = False
+            self.last_refresh_error = f"API project data load failed: {exc}"
+            logger.warning("API project data load failed: %s", exc)
+            return False
+
+        if not self._has_required_project_fields(self.df):
+            logger.warning(
+                "API project data schema is missing required fields. Expected aliases for: %s. Available columns: %s",
+                ", ".join(self._required_project_fields()),
+                ", ".join(self.df.columns.astype(str).tolist()) if self.df is not None else "-",
+            )
+            self.vector_ready = False
+            self.last_refresh_error = "API project data schema is missing required fields."
+            return False
+        return True
+
+    def _load_project_data_from_local(self) -> bool:
         try:
             self.df = self._normalize_projects_df(pd.read_sql("SELECT * FROM projects", self.engine))
         except Exception:

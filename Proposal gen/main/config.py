@@ -40,6 +40,31 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
             merged[key] = value
     return merged
 
+
+def _merge_resource_configs(*configs: Dict[str, Any]) -> Dict[str, Any]:
+    neutral_resource = {
+        "request": {},
+        "response_path": "",
+        "record_filters": {},
+        "allow_llm_extract": True,
+    }
+    merged: Dict[str, Any] = dict(DEFAULT_FIRM_API_RESOURCE_CONFIG)
+    explicitly_configured = set()
+    for config in configs:
+        if not isinstance(config, dict):
+            continue
+        for resource_name, resource_spec in config.items():
+            if not isinstance(resource_spec, dict):
+                continue
+            base = (
+                merged.get(resource_name, neutral_resource)
+                if resource_name in explicitly_configured
+                else neutral_resource
+            )
+            merged[resource_name] = _deep_merge(base, resource_spec)
+            explicitly_configured.add(resource_name)
+    return merged
+
 # Backend mode and internal API settings.
 def _normalize_app_profile(value: str) -> str:
     normalized = str(value or "").strip().lower()
@@ -66,6 +91,13 @@ def _normalize_internal_data_fallback(value: str) -> str:
     if normalized in {"demo", "mock"}:
         return "demo"
     return ""
+
+
+def _normalize_project_data_source(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"api", "internal_api", "live"}:
+        return "api"
+    return "local"
 
 
 _legacy_demo_mode = os.getenv("DEMO_MODE", "true").strip().lower() in {"1", "true", "yes", "on"}
@@ -205,12 +237,9 @@ FIRM_API_DATASET_CONFIG = _deep_merge(
         _load_json_env("FIRM_API_DATASET_CONFIG"),
     ),
 )
-FIRM_API_RESOURCE_CONFIG = _deep_merge(
-    DEFAULT_FIRM_API_RESOURCE_CONFIG,
-    _deep_merge(
-        _firm_api_file_config.get("resources", {}) if isinstance(_firm_api_file_config.get("resources"), dict) else {},
-        _load_json_env("FIRM_API_RESOURCE_CONFIG"),
-    ),
+FIRM_API_RESOURCE_CONFIG = _merge_resource_configs(
+    _firm_api_file_config.get("resources", {}) if isinstance(_firm_api_file_config.get("resources"), dict) else {},
+    _load_json_env("FIRM_API_RESOURCE_CONFIG"),
 )
 
 # External service configuration.
@@ -222,6 +251,7 @@ LLM_MODEL = os.getenv("LLM_MODEL", "gpt-oss:120b-cloud").strip() or "gpt-oss:120
 EMBED_MODEL = os.getenv("EMBED_MODEL", "bge-m3:latest").strip() or "bge-m3:latest"
 PROJECT_DB_PATH = Path(os.getenv("PROJECT_DB_PATH", str(PROJECT_ROOT / "projects.db"))).expanduser()
 PROJECT_CSV_PATH = Path(os.getenv("PROJECT_CSV_PATH", str(PROJECT_ROOT / "db.csv"))).expanduser()
+PROJECT_DATA_SOURCE = _normalize_project_data_source(os.getenv("PROJECT_DATA_SOURCE", "local"))
 APP_STATE_DB_PATH = Path(os.getenv("APP_STATE_DB_PATH", str(PROJECT_ROOT / "app_state.db"))).expanduser()
 APP_ASSET_ROOT = Path(os.getenv("APP_ASSET_ROOT", str(PROJECT_ROOT / "app_assets"))).expanduser()
 GENERATED_OUTPUT_DIR = Path(os.getenv("GENERATED_OUTPUT_DIR", str(PROJECT_ROOT / "generated"))).expanduser()

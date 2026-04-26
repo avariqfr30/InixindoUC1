@@ -14,6 +14,7 @@ from .config import (
     INTERNAL_DATA_SOURCE,
     OLLAMA_HOST,
     PROJECT_CSV_PATH,
+    PROJECT_DATA_SOURCE,
     PROJECT_DB_PATH,
     SERPER_API_KEY,
 )
@@ -31,6 +32,7 @@ def build_snapshot(project_type: str, client_name: str) -> Dict[str, Any]:
         "app_profile": APP_PROFILE,
         "internal_data_source": INTERNAL_DATA_SOURCE,
         "internal_data_fallback": INTERNAL_DATA_FALLBACK,
+        "project_data_source": PROJECT_DATA_SOURCE,
         "firm_api_config_file": FIRM_API_CONFIG_FILE,
         "firm_api_config_exists": bool(FIRM_API_CONFIG_FILE and Path(FIRM_API_CONFIG_FILE).exists()),
         "project_db_exists": PROJECT_DB_PATH.exists(),
@@ -51,11 +53,14 @@ def build_snapshot(project_type: str, client_name: str) -> Dict[str, Any]:
             "error": str(exc),
         }
 
-    env_ok = (
-        snapshot["environment"]["project_db_exists"]
-        and snapshot["environment"]["project_csv_exists"]
-        and snapshot["environment"]["ollama"].get("ok", False)
-    )
+    if PROJECT_DATA_SOURCE == "api":
+        project_source_ok = bool((snapshot.get("api_config") or {}).get("resources", {}).get("project_records", {}).get("ok"))
+    else:
+        project_source_ok = bool(
+            snapshot["environment"]["project_db_exists"]
+            or snapshot["environment"]["project_csv_exists"]
+        )
+    env_ok = project_source_ok and snapshot["environment"]["ollama"].get("ok", False)
     snapshot["ok"] = bool(snapshot.get("ok")) and env_ok
     return snapshot
 
@@ -64,10 +69,12 @@ def render_text(snapshot: Dict[str, Any]) -> str:
     runtime = snapshot.get("runtime", {})
     environment = snapshot.get("environment", {})
     resources = snapshot.get("resources", {})
+    api_config = snapshot.get("api_config") or {}
     lines = [
         f"Overall: {_bool_status(bool(snapshot.get('ok')))}",
         f"Profile: {environment.get('app_profile', '')}",
         f"Internal data: {runtime.get('operator_mode', '')}",
+        f"Project data source: {environment.get('project_data_source', 'local')}",
         f"API config file: {environment.get('firm_api_config_file') or '-'} ({_bool_status(bool(environment.get('firm_api_config_exists')) or not environment.get('firm_api_config_file'))})",
         f"Ollama: {_bool_status(bool((environment.get('ollama') or {}).get('ok')))}",
         f"Project DB: {_bool_status(bool(environment.get('project_db_exists')))}",
@@ -76,6 +83,22 @@ def render_text(snapshot: Dict[str, Any]) -> str:
         "",
         "Resources:",
     ]
+    if api_config:
+        lines.extend([
+            "",
+            f"API config: {_bool_status(bool(api_config.get('ok')))}",
+            f"API mode: {api_config.get('mode', '-')}",
+            f"API base URL: {api_config.get('base_url', '-')}",
+        ])
+        for resource_name, payload in (api_config.get("resources") or {}).items():
+            missing = payload.get("missing_required_mapping") or []
+            suffix = f" missing={', '.join(missing)}" if missing else ""
+            lines.append(
+                f"- config.{resource_name}: {_bool_status(bool(payload.get('ok')))} "
+                f"{payload.get('method', '-')} {payload.get('path', '-')}{suffix}"
+            )
+        lines.append("")
+        lines.append("Resources:")
     for name, payload in resources.items():
         lines.append(f"- {name}: {_bool_status(bool(payload.get('ok')))}")
         error = str(payload.get("error") or "").strip()

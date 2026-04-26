@@ -1,4 +1,5 @@
 {
+  "mode": "generic",
   "request_defaults": {
     "url": "https://xxx.com/api/Resource/dataset",
     "method": "POST",
@@ -56,6 +57,19 @@
       "field_mapping": {
         "summary": "relationship_summary",
         "mode": "relationship_status"
+      }
+    },
+    "project_records": {
+      "request": {
+        "body": {
+          "dataset": "Projects"
+        }
+      },
+      "response_path": "data.dataset_result",
+      "field_mapping": {
+        "entity": "client_entity",
+        "topic": "strategic_initiative",
+        "budget": "investment_estimation"
       }
     }
   }
