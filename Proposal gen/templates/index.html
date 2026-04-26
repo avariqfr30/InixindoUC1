@@ -16,9 +16,9 @@
         h2 { color: #0f172a; margin: 0 0 5px 0; font-size: 1.6rem; }
         p.sub { color: #64748b; margin: 0 0 20px 0; font-size: 0.95rem; }
         label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; color: #475569;}
-        select, input[type="text"], textarea, button { width: 100%; padding: 10px; margin-bottom: 12px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.95rem; box-sizing: border-box; }
+        select, input[type="text"], input[type="url"], textarea, button { width: 100%; padding: 10px; margin-bottom: 12px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.95rem; box-sizing: border-box; }
         .header-actions button, .modal-actions button, .history-actions button { width: auto; margin-bottom: 0; margin-top: 0; }
-        select:focus, input[type="text"]:focus, textarea:focus { border-color: #3b82f6; outline: none; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1); }
+        select:focus, input[type="text"]:focus, input[type="url"]:focus, textarea:focus { border-color: #3b82f6; outline: none; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1); }
         button { background: #2563eb; color: white; border: none; font-weight: 600; cursor: pointer; transition: 0.2s; margin-top: 5px; }
         button:hover { background: #1d4ed8; }
         button:disabled { background: #94a3b8; cursor: not-allowed; }
@@ -69,6 +69,8 @@
         .history-meta { font-size: 0.84rem; color: #64748b; margin-bottom: 10px; line-height: 1.5; }
         .small-note { font-size: 0.82rem; color: #64748b; margin: 0 0 10px 0; }
         .template-status { background: #f8fafc; border: 1px dashed #cbd5e1; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 0.86rem; color: #475569; }
+        .settings-section { border-top: 1px solid #e2e8f0; padding-top: 16px; margin-top: 16px; }
+        .status-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; color: #475569; font-size: 0.84rem; line-height: 1.5; }
         .upload-row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
         .upload-row input[type="file"] { flex: 1 1 280px; margin-bottom: 0; background: #ffffff; }
         .upload-row button { width: auto; margin: 0; }
@@ -271,6 +273,32 @@
                 <button type="button" id="btn-upload-template" class="secondary">Upload Blanko</button>
                 <button type="button" id="btn-clear-template" class="secondary">Hapus Blanko</button>
             </div>
+
+            <div class="settings-section">
+                <h3>Internal API / APIDog</h3>
+                <p class="small-note">Masukkan endpoint dataset internal. Sistem akan membuat mapping dasar, menyimpan config, mengaktifkan sumber data API untuk sesi berjalan, lalu refresh knowledge base di background.</p>
+                <label for="settings-api-url">Endpoint API Dataset</label>
+                <input type="url" id="settings-api-url" placeholder="https://xxx.com/api/Resource/dataset" />
+                <div class="grid-2">
+                    <div>
+                        <label for="settings-api-auth-mode">Mode Auth</label>
+                        <select id="settings-api-auth-mode">
+                            <option value="basic">Basic Auth dari environment</option>
+                            <option value="bearer">Bearer Token dari environment</option>
+                            <option value="none">Tanpa auth</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="settings-api-body-encoding">Format Body</label>
+                        <select id="settings-api-body-encoding">
+                            <option value="form">Form</option>
+                            <option value="json">JSON</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="internal-api-status" class="status-box">Status Internal API belum dimuat.</div>
+                <button type="button" id="btn-save-internal-api" class="secondary">Simpan & Aktifkan Internal API</button>
+            </div>
         </div>
     </div>
 
@@ -324,6 +352,11 @@
             btnSaveSettings: document.getElementById('btn-save-settings'),
             btnUploadTemplate: document.getElementById('btn-upload-template'),
             btnClearTemplate: document.getElementById('btn-clear-template'),
+            settingsApiUrl: document.getElementById('settings-api-url'),
+            settingsApiAuthMode: document.getElementById('settings-api-auth-mode'),
+            settingsApiBodyEncoding: document.getElementById('settings-api-body-encoding'),
+            internalApiStatus: document.getElementById('internal-api-status'),
+            btnSaveInternalApi: document.getElementById('btn-save-internal-api'),
             kakFiles: document.getElementById('input-kak-files'),
             btnUploadKakFiles: document.getElementById('btn-upload-kak-files'),
             kakDocList: document.getElementById('kak-doc-list'),
@@ -600,13 +633,24 @@
             ui.btnGenerate.disabled = !canGenerate;
         };
 
+        async function loadCompanies() {
+            const companyRes = await fetch('/api/companies');
+            const data = await companyRes.json();
+            const currentValue = ui.selPerusahaan.value;
+            ui.selPerusahaan.innerHTML = `<option value="" disabled selected>Pilih Klien...</option>`;
+            data.forEach(d => ui.selPerusahaan.add(new Option(d, d)));
+            if (currentValue && data.includes(currentValue)) {
+                ui.selPerusahaan.value = currentValue;
+            }
+            return data;
+        }
+
         async function init() {
             try {
-                const [companyRes, configRes] = await Promise.all([
-                    fetch('/api/companies'),
+                const [data, configRes] = await Promise.all([
+                    loadCompanies(),
                     fetch('/api/config')
                 ]);
-                const data = await companyRes.json();
                 if (configRes.ok) {
                     const config = await configRes.json();
                     jobPollIntervalMs = Number(config.job_poll_interval_ms) || jobPollIntervalMs;
@@ -616,8 +660,6 @@
                         ui.selModeProposal.add(new Option(item.label, item.value));
                     });
                 }
-                ui.selPerusahaan.innerHTML = `<option value="" disabled selected>Pilih Klien...</option>`;
-                data.forEach(d => ui.selPerusahaan.add(new Option(d, d)));
                 showScreen('config');
                 updateActionState();
             } catch (e) {
@@ -850,11 +892,45 @@
                 ui.templateStatus.textContent = data.has_active_template
                     ? `Template aktif: ${data.active_template_name || 'blanko proposal'}`
                     : 'Belum ada template blanko aktif.';
+                await loadInternalApiSetup();
             } catch (_) {
                 ui.portfolioDocList.innerHTML = '<div class="template-status">File pendukung portofolio belum bisa dimuat.</div>';
                 ui.credentialDocList.innerHTML = '<div class="template-status">File pendukung kapabilitas belum bisa dimuat.</div>';
                 ui.kakDocList.innerHTML = '<div class="template-status">Dokumen KAK/TOR belum bisa dimuat.</div>';
                 ui.templateStatus.textContent = 'Pengaturan belum bisa dimuat.';
+            }
+        }
+
+        function renderInternalApiStatus(data) {
+            const validation = (data && data.validation) || {};
+            const resources = validation.resources || {};
+            const firstResource = Object.values(resources)[0] || {};
+            if (!ui.settingsApiUrl.value && firstResource.path && /^https?:\/\//i.test(firstResource.path)) {
+                ui.settingsApiUrl.value = firstResource.path;
+            }
+            if (validation.auth_mode && ui.settingsApiAuthMode) {
+                ui.settingsApiAuthMode.value = validation.auth_mode;
+            }
+            const resourceRows = Object.entries(resources).map(([name, payload]) => {
+                const missing = (payload.missing_required_mapping || []).join(', ');
+                return `<div>${escapeHtml(name)}: <strong>${payload.ok ? 'ok' : 'perlu mapping'}</strong>${missing ? ` (${escapeHtml(missing)})` : ''}</div>`;
+            }).join('');
+            ui.internalApiStatus.innerHTML = `
+                <div>Config: <strong>${data.config_exists ? 'tersedia' : 'belum ada'}</strong></div>
+                <div>Project data source: <strong>${escapeHtml(data.project_data_source || 'local')}</strong></div>
+                <div>File: ${escapeHtml(data.config_file || '-')}</div>
+                ${resourceRows || '<div>Resource belum dikonfigurasi.</div>'}
+            `;
+        }
+
+        async function loadInternalApiSetup() {
+            try {
+                const res = await fetch('/api/internal-api/setup');
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Status Internal API belum bisa dimuat.');
+                renderInternalApiStatus(data);
+            } catch (err) {
+                ui.internalApiStatus.textContent = err.message || 'Status Internal API belum bisa dimuat.';
             }
         }
 
@@ -1038,6 +1114,44 @@
                 alert('Blanko proposal berhasil dihapus.');
             } catch (err) {
                 alert(err.message || 'Blanko belum berhasil dihapus.');
+            }
+        });
+
+        ui.btnSaveInternalApi.addEventListener('click', async () => {
+            const endpoint = ui.settingsApiUrl.value.trim();
+            if (!endpoint) {
+                return alert('Masukkan endpoint API dataset terlebih dahulu.');
+            }
+            ui.btnSaveInternalApi.disabled = true;
+            ui.btnSaveInternalApi.textContent = 'Menyimpan & refresh knowledge base...';
+            try {
+                const res = await fetch('/api/internal-api/setup', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        url: endpoint,
+                        auth_mode: ui.settingsApiAuthMode.value,
+                        body_encoding: ui.settingsApiBodyEncoding.value,
+                        activate_now: true
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Internal API belum berhasil disimpan.');
+                renderInternalApiStatus({
+                    config_file: data.config_file,
+                    config_exists: true,
+                    project_data_source: data.project_data_source,
+                    validation: data.validation
+                });
+                await loadCompanies();
+                alert(data.refresh_started
+                    ? 'Internal API tersimpan. Knowledge base sedang di-refresh di background.'
+                    : 'Internal API tersimpan. Knowledge base belum di-refresh karena ada job berjalan atau sumber belum siap.');
+            } catch (err) {
+                alert(err.message || 'Internal API belum berhasil disimpan.');
+            } finally {
+                ui.btnSaveInternalApi.disabled = false;
+                ui.btnSaveInternalApi.textContent = 'Simpan & Aktifkan Internal API';
             }
         });
 

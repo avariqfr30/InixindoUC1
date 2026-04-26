@@ -157,6 +157,18 @@ Untuk production, aplikasi bisa membaca satu endpoint JSON apa pun selama operat
 
 Alur paling sederhana:
 
+Lewat UI:
+
+1. Login ke aplikasi.
+2. Buka `Pengaturan`.
+3. Isi `Endpoint API Dataset`.
+4. Pilih mode auth dan format body.
+5. Klik `Simpan & Aktifkan Internal API`.
+
+Sistem akan membuat config internal, memvalidasi resource minimum, mengaktifkan `project_records` untuk sesi berjalan, dan menjalankan refresh knowledge base di background. Kredensial tetap harus tersedia di environment supaya password/token tidak disimpan lewat UI.
+
+Lewat terminal:
+
 ```bash
 python scripts/internal_api_config_tool.py init \
   --url "https://inworx.inixindojogja.co.id/api/Resource/dataset" \

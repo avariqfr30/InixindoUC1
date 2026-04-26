@@ -130,6 +130,7 @@ def write_json(path: Path, payload: Dict[str, Any]) -> None:
 def build_starter_config(args: argparse.Namespace) -> Dict[str, Any]:
     return {
         "mode": "generic",
+        "auth_mode": args.auth_mode,
         "request_defaults": {
             "url": args.url,
             "method": args.method,
@@ -253,6 +254,7 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--out", default="internal_api_config.json")
     init_parser.add_argument("--method", default="POST", choices=("GET", "POST", "PUT", "PATCH"))
     init_parser.add_argument("--body-encoding", default="form", choices=("json", "form"))
+    init_parser.add_argument("--auth-mode", default="basic", choices=("basic", "bearer", "none"))
     init_parser.add_argument("--firm-dataset", default="ReferenceAccount")
     init_parser.add_argument("--standards-dataset", default="ProjectStandards")
     init_parser.add_argument("--relationship-dataset", default="ClientRelationship")

@@ -37,6 +37,7 @@ from .config import (
     LOGIN_RATE_LIMIT_BLOCK_SECONDS,
     LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
     LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+    MANAGED_INTERNAL_API_CONFIG_PATH,
     MAX_ACTIVE_GENERATIONS,
     MAX_GENERATION_BACKLOG,
     OLLAMA_HOST,
@@ -51,6 +52,7 @@ from .config import (
 )
 from .core import FinancialAnalyzer, KnowledgeBase, ProposalGenerator
 from .runtime_components import AppStateStore
+from .runtime_components import InternalDataClient, FirmAPIClient
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -463,6 +465,96 @@ def _warm_request_context(data: Dict[str, Any]) -> str:
     )
 
 
+def _build_internal_api_config(data: Dict[str, Any]) -> Dict[str, Any]:
+    endpoint_url = str(data.get("url") or "").strip()
+    if not re.match(r"^https?://", endpoint_url, flags=re.IGNORECASE):
+        raise ValueError("Endpoint API harus berupa URL HTTP/HTTPS penuh.")
+
+    method = str(data.get("method") or "POST").strip().upper()
+    if method not in {"GET", "POST", "PUT", "PATCH"}:
+        method = "POST"
+    body_encoding = str(data.get("body_encoding") or "form").strip().lower()
+    if body_encoding not in {"form", "json"}:
+        body_encoding = "form"
+    auth_mode = str(data.get("auth_mode") or "basic").strip().lower()
+    if auth_mode not in {"basic", "bearer", "none"}:
+        auth_mode = "basic"
+
+    datasets = data.get("datasets") if isinstance(data.get("datasets"), dict) else {}
+    paths = data.get("response_paths") if isinstance(data.get("response_paths"), dict) else {}
+    return {
+        "mode": "generic",
+        "auth_mode": auth_mode,
+        "request_defaults": {
+            "url": endpoint_url,
+            "method": method,
+            "body_encoding": body_encoding,
+            "params": {},
+            "headers": {},
+        },
+        "resources": {
+            "firm_profile": {
+                "request": {"body": {"dataset": str(datasets.get("firm_profile") or "ReferenceAccount")}},
+                "response_path": str(paths.get("firm_profile") or "data.dataset_result.0"),
+                "field_mapping": {
+                    "office_address": "company_address",
+                    "email": "official_email",
+                    "phone": "telephone",
+                    "whatsapp": "whatsapp",
+                    "website": "website_url",
+                    "legal_name": "legal_name",
+                    "operating_hours": "operating_hours",
+                    "profile_summary": "profile_summary",
+                    "credential_highlights": "credential_highlights",
+                    "portfolio_highlights": "portfolio_highlights",
+                },
+            },
+            "project_standards": {
+                "request": {"body": {"dataset": str(datasets.get("project_standards") or "ProjectStandards")}},
+                "response_path": str(paths.get("project_standards") or "data.dataset_result"),
+                "record_filters": {"project_type": "{project_type}"},
+                "field_mapping": {
+                    "methodology": "delivery_methodology",
+                    "team": "team_composition",
+                    "commercial": "commercial_terms",
+                },
+            },
+            "client_relationship": {
+                "request": {"body": {"dataset": str(datasets.get("client_relationship") or "ClientRelationship")}},
+                "response_path": str(paths.get("client_relationship") or "data.dataset_result"),
+                "record_filters": {"client_name": "{client_name}"},
+                "field_mapping": {
+                    "summary": "relationship_summary",
+                    "mode": "relationship_status",
+                },
+            },
+            "project_records": {
+                "request": {"body": {"dataset": str(datasets.get("project_records") or "Projects")}},
+                "response_path": str(paths.get("project_records") or "data.dataset_result"),
+                "field_mapping": {
+                    "entity": "client_entity",
+                    "topic": "strategic_initiative",
+                    "budget": "investment_estimation",
+                },
+            },
+        },
+    }
+
+
+def _internal_api_config_target() -> Path:
+    configured = str(FirmAPIClient._resolve_config_file() or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return MANAGED_INTERNAL_API_CONFIG_PATH
+
+
+def _write_internal_api_config(config_payload: Dict[str, Any]) -> Path:
+    target = _internal_api_config_target()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(config_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return target
+
+
 @app.route('/')
 @login_required
 def home():
@@ -680,6 +772,53 @@ def get_base_config():
         "max_active_generations": MAX_ACTIVE_GENERATIONS,
         "max_generation_backlog": MAX_GENERATION_BACKLOG,
         "proposal_modes": PROPOSAL_MODES,
+    })
+
+
+@app.route('/api/internal-api/setup', methods=['GET', 'POST'])
+def internal_api_setup():
+    if request.method == 'GET':
+        api_client = FirmAPIClient(force_source="api")
+        config_file = api_client.config_file or str(MANAGED_INTERNAL_API_CONFIG_PATH)
+        return jsonify({
+            "config_file": config_file,
+            "config_exists": bool(config_file and Path(config_file).exists()),
+            "project_data_source": getattr(knowledge_base, "project_data_source", "local"),
+            "runtime": api_client.describe_runtime(),
+            "validation": api_client.validate_config(),
+        })
+
+    data = request.json or {}
+    try:
+        config_payload = _build_internal_api_config(data)
+        target_path = _write_internal_api_config(config_payload)
+        api_client = FirmAPIClient(force_source="api")
+        validation = api_client.validate_config()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logger.exception("Internal API setup failed")
+        return jsonify({"error": str(exc)}), 500
+
+    activated = bool(data.get("activate_now", True))
+    refresh_started = False
+    if activated:
+        proposal_generator.firm_api = InternalDataClient(force_source="api")
+        knowledge_base.set_project_data_source("api")
+        if not generation_queue.has_live_jobs():
+            refresh_started = knowledge_base.refresh_data(background=True)
+
+    return jsonify({
+        "status": "ok",
+        "config_file": str(target_path),
+        "activated": activated,
+        "refresh_started": refresh_started,
+        "project_data_source": getattr(knowledge_base, "project_data_source", "local"),
+        "validation": validation,
+        "notes": [
+            "Kredensial tetap dibaca dari environment variable agar password tidak disimpan di UI.",
+            "Agar aktif permanen setelah restart, set PROJECT_DATA_SOURCE=api dan FIRM_API_CONFIG_FILE ke path config ini.",
+        ],
     })
 
 

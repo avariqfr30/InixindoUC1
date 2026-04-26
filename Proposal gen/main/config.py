@@ -254,6 +254,9 @@ PROJECT_CSV_PATH = Path(os.getenv("PROJECT_CSV_PATH", str(PROJECT_ROOT / "db.csv
 PROJECT_DATA_SOURCE = _normalize_project_data_source(os.getenv("PROJECT_DATA_SOURCE", "local"))
 APP_STATE_DB_PATH = Path(os.getenv("APP_STATE_DB_PATH", str(PROJECT_ROOT / "app_state.db"))).expanduser()
 APP_ASSET_ROOT = Path(os.getenv("APP_ASSET_ROOT", str(PROJECT_ROOT / "app_assets"))).expanduser()
+MANAGED_INTERNAL_API_CONFIG_PATH = Path(
+    os.getenv("MANAGED_INTERNAL_API_CONFIG_PATH", str(APP_ASSET_ROOT / "internal_api_config.json"))
+).expanduser()
 GENERATED_OUTPUT_DIR = Path(os.getenv("GENERATED_OUTPUT_DIR", str(PROJECT_ROOT / "generated"))).expanduser()
 VECTOR_STORE_DIR = Path(os.getenv("VECTOR_STORE_DIR", str(PROJECT_ROOT / ".chroma"))).expanduser()
 KB_SYNC_STATE_PATH = Path(os.getenv("KB_SYNC_STATE_PATH", str(PROJECT_ROOT / ".kb_vector_state.json"))).expanduser()

@@ -222,12 +222,22 @@ class FirmAPIClient:
         self.data_acquisition_mode = "demo" if self.demo_mode else "staged"
         self.base_url = FIRM_API_URL.rstrip("/")
         self.timeout_seconds = FIRM_API_TIMEOUT_SECONDS
-        self.integration_mode = FIRM_API_INTEGRATION_MODE
-        self.auth_mode = (FIRM_API_AUTH_MODE or "bearer").strip().lower()
-        self.request_defaults = dict(FIRM_API_REQUEST_DEFAULTS or {})
+        self.config_file = self._resolve_config_file()
+        runtime_config = self._load_json_config(self.config_file)
+        self.integration_mode = str(runtime_config.get("mode") or FIRM_API_INTEGRATION_MODE or "rest").strip().lower()
+        if self.integration_mode not in {"rest", "dataset", "generic"}:
+            self.integration_mode = "rest"
+        self.auth_mode = str(runtime_config.get("auth_mode") or FIRM_API_AUTH_MODE or "bearer").strip().lower()
+        self.request_defaults = self._merge_spec(
+            dict(FIRM_API_REQUEST_DEFAULTS or {}),
+            runtime_config.get("request_defaults") if isinstance(runtime_config.get("request_defaults"), dict) else {},
+        )
         self.endpoint_config = dict(FIRM_API_ENDPOINT_CONFIG or {})
         self.dataset_config = dict(FIRM_API_DATASET_CONFIG or {})
-        self.resource_config = dict(FIRM_API_RESOURCE_CONFIG or {})
+        self.resource_config = self._merge_runtime_resource_config(
+            dict(FIRM_API_RESOURCE_CONFIG or {}),
+            runtime_config.get("resources") if isinstance(runtime_config.get("resources"), dict) else {},
+        )
         self.session = requests.Session()
         self.session.headers.update({"Accept": "application/json"})
 
@@ -242,6 +252,41 @@ class FirmAPIClient:
             pass
         else:
             logger.warning("Unknown FIRM_API_AUTH_MODE=%s. Falling back to unauthenticated requests.", self.auth_mode)
+
+    @staticmethod
+    def _load_json_config(path_value: str) -> Dict[str, Any]:
+        path = Path(str(path_value or "").strip()).expanduser()
+        if not path or not path.exists() or not path.is_file():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _resolve_config_file() -> str:
+        explicit = str(FIRM_API_CONFIG_FILE or "").strip()
+        if explicit:
+            return explicit
+        if MANAGED_INTERNAL_API_CONFIG_PATH.exists():
+            return str(MANAGED_INTERNAL_API_CONFIG_PATH)
+        return ""
+
+    @classmethod
+    def _merge_runtime_resource_config(cls, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+        merged = dict(base or {})
+        neutral_resource = {
+            "request": {},
+            "response_path": "",
+            "record_filters": {},
+            "allow_llm_extract": True,
+        }
+        for resource_name, resource_spec in (override or {}).items():
+            if not isinstance(resource_spec, dict):
+                continue
+            merged[resource_name] = cls._merge_spec(neutral_resource, resource_spec)
+        return merged
 
     @staticmethod
     def _extract_with_jmespath(payload: Any, path: str) -> Any:
@@ -472,7 +517,7 @@ class FirmAPIClient:
             "integration_mode": self.integration_mode,
             "auth_mode": self.auth_mode,
             "base_url": self.base_url,
-            "config_file": FIRM_API_CONFIG_FILE,
+            "config_file": self.config_file,
             "configured_resources": sorted((self.resource_config or {}).keys()),
         }
 
@@ -846,9 +891,12 @@ class DemoDataProvider:
 
 
 class InternalDataClient:
-    def __init__(self) -> None:
+    def __init__(self, force_source: str = "") -> None:
         self.app_profile = APP_PROFILE
-        self.internal_data_source = INTERNAL_DATA_SOURCE
+        normalized_force_source = str(force_source or "").strip().lower()
+        if normalized_force_source not in {"demo", "api"}:
+            normalized_force_source = INTERNAL_DATA_SOURCE
+        self.internal_data_source = normalized_force_source
         self.internal_data_fallback = INTERNAL_DATA_FALLBACK
         self.api_provider = FirmAPIClient(force_source="api")
         self.demo_provider = DemoDataProvider()
@@ -975,6 +1023,7 @@ class KnowledgeBase:
         self.last_refresh_error = ""
         self.vector_ready = False
         self.sync_in_progress = False
+        self.project_data_source = PROJECT_DATA_SOURCE
         self._sync_lock = threading.RLock()
         self._sync_thread: Optional[threading.Thread] = None
         self._load_project_data()
@@ -997,8 +1046,12 @@ class KnowledgeBase:
             return False
         return all(field in df.columns for field in cls._required_project_fields())
 
+    def set_project_data_source(self, source: str) -> None:
+        normalized = str(source or "").strip().lower()
+        self.project_data_source = "api" if normalized in {"api", "internal_api", "live"} else "local"
+
     def _load_project_data(self) -> bool:
-        if PROJECT_DATA_SOURCE == "api":
+        if self.project_data_source == "api":
             if self._load_project_data_from_api():
                 return True
             if INTERNAL_DATA_FALLBACK == "demo":
@@ -1018,7 +1071,6 @@ class KnowledgeBase:
             normalized_df.to_sql("projects", self.engine, index=False, if_exists="replace")
             self.df = normalized_df
         except Exception as exc:
-            self.df = None
             self.vector_ready = False
             self.last_refresh_error = f"API project data load failed: {exc}"
             logger.warning("API project data load failed: %s", exc)
