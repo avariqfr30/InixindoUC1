@@ -1,9 +1,10 @@
 """Primary proposal generator composed from focused backend mixins."""
 
 from .proposal_shared import *
+from .data_sources import InternalDataClient
+from .knowledge_store import KnowledgeBase
 from .proposal_engine import ProposalEngineMixin
 from .proposal_support import ProposalSupportMixin
-from .runtime_components import InternalDataClient, KnowledgeBase
 
 
 class ProposalGenerator(ProposalEngineMixin, ProposalSupportMixin):

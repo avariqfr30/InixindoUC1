@@ -18,7 +18,7 @@ from .config import (
     PROJECT_DB_PATH,
     SERPER_API_KEY,
 )
-from .runtime_components import InternalDataClient
+from .data_sources import InternalDataClient
 
 
 def _bool_status(value: bool) -> str:

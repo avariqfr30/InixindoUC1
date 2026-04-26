@@ -1,7 +1,8 @@
 """Proposal orchestration logic: drafting, tightening, compression, and document assembly."""
 
 from .proposal_shared import *
-from .runtime_components import DocumentBuilder, LogoManager, StyleEngine, Researcher
+from .document_rendering import DocumentBuilder, LogoManager, StyleEngine
+from .research import Researcher
 from .proposal_support import ProposalSupportMixin
 
 

@@ -2,18 +2,11 @@
 
 from .proposal_shared import logger
 from .proposal_generator import ProposalGenerator
-from .runtime_components import (
-    ChartEngine,
-    DocumentBuilder,
-    FinancialAnalyzer,
-    FirmAPIClient,
-    InternalDataClient,
-    KnowledgeBase,
-    LogoManager,
-    Researcher,
-    SchemaMapper,
-    StyleEngine,
-)
+from .data_sources import FirmAPIClient, InternalDataClient, SchemaMapper
+from .document_rendering import ChartEngine, DocumentBuilder, LogoManager, StyleEngine
+from .finance import FinancialAnalyzer
+from .knowledge_store import KnowledgeBase
+from .research import Researcher
 
 __all__ = [
     "logger",

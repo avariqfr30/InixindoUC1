@@ -1,19 +1,13 @@
 """Flask entrypoint for the proposal generator app."""
-import concurrent.futures
 from datetime import timedelta
-from functools import wraps
-import hashlib
 import io
-import json
 import logging
 import re
-import threading
 import time
-import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict
 
-from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 from flask_cors import CORS
 import requests
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -50,15 +44,20 @@ from .config import (
     SESSION_TOUCH_INTERVAL_SECONDS,
     SMART_SUGGESTIONS,
 )
-from .core import FinancialAnalyzer, KnowledgeBase, ProposalGenerator
-from .runtime_components import AppStateStore
-from .runtime_components import InternalDataClient, FirmAPIClient
+from .auth_flow import AuthFlow
+from .core import ProposalGenerator
+from .data_sources import FirmAPIClient, InternalDataClient
+from .finance import FinancialAnalyzer
+from .internal_api_setup import build_internal_api_config, write_json_config
+from .job_queue import GenerationQueue
+from .knowledge_store import KnowledgeBase
+from .state_store import AppStateStore
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
 from .config import SERPER_API_KEY
-from .runtime_components import Researcher
+from .research import Researcher
 
 # Initialize and log Serper availability
 def _log_serper_status() -> None:
@@ -93,213 +92,6 @@ app_state_store = AppStateStore()
 proposal_generator.app_state_store = app_state_store
 
 
-class GenerationQueue:
-    """Small in-memory queue for low-level shared testing."""
-
-    def __init__(
-        self,
-        generator: ProposalGenerator,
-        state_store: AppStateStore,
-        max_active: int,
-        max_backlog: int,
-        retention_seconds: int,
-    ) -> None:
-        self.generator = generator
-        self.state_store = state_store
-        self.max_active = max_active
-        self.max_backlog = max_backlog
-        self.retention_seconds = retention_seconds
-        self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=max_active,
-            thread_name_prefix="proposal-job"
-        )
-        self._lock = threading.RLock()
-        self._jobs: Dict[str, Dict[str, Any]] = {}
-        self._sequence = 0
-
-    @staticmethod
-    def _payload_fingerprint(payload: Dict[str, Any]) -> str:
-        canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-    def _next_sequence(self) -> int:
-        self._sequence += 1
-        return self._sequence
-
-    def _cleanup_locked(self) -> None:
-        now = time.time()
-        stale_ids = []
-        for job_id, job in self._jobs.items():
-            if job["status"] in {"done", "failed"} and job.get("finished_at"):
-                if now - float(job["finished_at"]) > self.retention_seconds:
-                    stale_ids.append(job_id)
-        for job_id in stale_ids:
-            self._jobs.pop(job_id, None)
-
-    def _queue_position_locked(self, sequence: int) -> int:
-        ahead = sum(
-            1
-            for job in self._jobs.values()
-            if job["status"] == "queued" and int(job["sequence"]) < sequence
-        )
-        return ahead + 1
-
-    def _live_count_locked(self) -> int:
-        return sum(1 for job in self._jobs.values() if job["status"] in {"queued", "running"})
-
-    def _build_message_locked(self, job: Dict[str, Any]) -> str:
-        status = job["status"]
-        if status == "queued":
-            position = self._queue_position_locked(int(job["sequence"]))
-            return f"Permintaan tersimpan. Menunggu antrean, posisi {position}."
-        if status == "running":
-            return "Sedang menyusun proposal. Dokumen akan otomatis diunduh setelah selesai."
-        if status == "done":
-            return "Proposal selesai dibuat dan siap diunduh."
-        return str(job.get("error") or "Proses generate proposal gagal.")
-
-    def _snapshot_locked(self, job: Dict[str, Any]) -> Dict[str, Any]:
-        started_at = job.get("started_at")
-        finished_at = job.get("finished_at")
-        processing_seconds = None
-        if started_at:
-            processing_seconds = round((finished_at or time.time()) - float(started_at), 1)
-        snapshot = {
-            "job_id": job["job_id"],
-            "history_id": job.get("history_id"),
-            "status": job["status"],
-            "message": self._build_message_locked(job),
-            "queue_position": self._queue_position_locked(int(job["sequence"])) if job["status"] == "queued" else None,
-            "filename": job.get("filename"),
-            "created_at": job.get("created_at"),
-            "started_at": started_at,
-            "finished_at": finished_at,
-            "processing_seconds": processing_seconds,
-            "download_ready": job["status"] == "done",
-            "acceptance_score": job.get("acceptance_score"),
-            "acceptance_passes": job.get("acceptance_passes"),
-        }
-        if job["status"] == "failed":
-            snapshot["error"] = job.get("error") or "Proses generate proposal gagal."
-        return snapshot
-
-    def submit(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        with self._lock:
-            self._cleanup_locked()
-            fingerprint = self._payload_fingerprint(payload)
-            for job in self._jobs.values():
-                if job["status"] in {"queued", "running"} and job.get("fingerprint") == fingerprint:
-                    snapshot = self._snapshot_locked(job)
-                    snapshot["deduplicated"] = True
-                    snapshot["message"] = "Permintaan yang sama sudah sedang diproses. Sistem melanjutkan job yang sudah ada."
-                    return snapshot
-            if self._live_count_locked() >= self.max_backlog:
-                raise OverflowError(
-                    "Server sedang padat. Coba lagi beberapa menit lagi setelah antrean berkurang."
-                )
-            job_id = uuid.uuid4().hex
-            job = {
-                "job_id": job_id,
-                "sequence": self._next_sequence(),
-                "status": "queued",
-                "created_at": time.time(),
-                "started_at": None,
-                "finished_at": None,
-                "fingerprint": fingerprint,
-                "payload": dict(payload),
-                "filename": None,
-                "result_bytes": None,
-                "error": None,
-            }
-            self._jobs[job_id] = job
-            self._executor.submit(self._run_job, job_id)
-            return self._snapshot_locked(job)
-
-    def _run_job(self, job_id: str) -> None:
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if not job:
-                return
-            job["status"] = "running"
-            job["started_at"] = time.time()
-            payload = dict(job.get("payload") or {})
-
-        try:
-            doc, filename, generation_meta = self.generator.generate_document(
-                client=payload["nama_perusahaan"],
-                project=payload["konteks_organisasi"],
-                budget=payload["estimasi_biaya"],
-                service_type=payload["jenis_proposal"],
-                project_goal=payload["klasifikasi_kebutuhan"],
-                project_type=payload["jenis_proyek"],
-                timeline=payload["estimasi_waktu"],
-                notes=payload["permasalahan"],
-                regulations=payload["potensi_framework"],
-                chapter_id=payload.get("chapter_id"),
-                proposal_mode=payload.get("mode_proposal", "canvassing"),
-            )
-            output = io.BytesIO()
-            doc.save(output)
-            result_bytes = output.getvalue()
-            finished_at = time.time()
-            acceptance_report = dict((generation_meta or {}).get("acceptance_report") or {})
-            processing_seconds = max(0.0, finished_at - float(job.get("started_at") or finished_at))
-
-            with self._lock:
-                job = self._jobs.get(job_id)
-                if not job:
-                    return
-                stored_path = self.state_store.persist_generated_file(f"{filename}.docx", result_bytes)
-                history_id = self.state_store.add_history_entry(
-                    payload=payload,
-                    filename=stored_path.name,
-                    filepath=str(stored_path),
-                    created_at=job.get("created_at") or time.time(),
-                    finished_at=finished_at,
-                    acceptance_report=acceptance_report,
-                    processing_seconds=processing_seconds,
-                )
-                job["status"] = "done"
-                job["finished_at"] = finished_at
-                job["filename"] = stored_path.name
-                job["result_bytes"] = result_bytes
-                job["history_id"] = history_id
-                job["acceptance_score"] = acceptance_report.get("score")
-                job["acceptance_passes"] = acceptance_report.get("passes")
-                job["payload"] = None
-        except Exception as exc:  # keep the queue resilient during shared testing
-            logger.exception("Generation job %s failed", job_id)
-            with self._lock:
-                job = self._jobs.get(job_id)
-                if not job:
-                    return
-                job["status"] = "failed"
-                job["finished_at"] = time.time()
-                job["error"] = str(exc) or "Proses generate proposal gagal."
-                job["payload"] = None
-
-    def get(self, job_id: str) -> Optional[Dict[str, Any]]:
-        with self._lock:
-            self._cleanup_locked()
-            job = self._jobs.get(job_id)
-            if not job:
-                return None
-            return self._snapshot_locked(job)
-
-    def get_download(self, job_id: str) -> Optional[Tuple[str, bytes]]:
-        with self._lock:
-            self._cleanup_locked()
-            job = self._jobs.get(job_id)
-            if not job or job["status"] != "done" or not job.get("result_bytes"):
-                return None
-            return str(job.get("filename") or f"proposal_{job_id}.docx"), bytes(job["result_bytes"])
-
-    def has_live_jobs(self) -> bool:
-        with self._lock:
-            self._cleanup_locked()
-            return any(job["status"] in {"queued", "running"} for job in self._jobs.values())
-
-
 generation_queue = GenerationQueue(
     generator=proposal_generator,
     state_store=app_state_store,
@@ -319,125 +111,28 @@ PUBLIC_ENDPOINTS = {
 }
 NO_STORE_EXACT_PATHS = {"/", "/auth", "/login", "/signup", "/logout", "/generate"}
 
-
-def _current_username() -> str:
-    return str(session.get("auth_username") or "").strip()
-
-
-def _current_session_id() -> str:
-    return str(session.get("auth_session_id") or "").strip()
-
-
-def _request_ip() -> str:
-    forwarded = str(request.headers.get("X-Forwarded-For", "") or "").strip()
-    if forwarded:
-        return forwarded.split(",")[0].strip()[:96]
-    return str(request.remote_addr or "").strip()[:96]
-
-
-def _request_user_agent() -> str:
-    return str(request.headers.get("User-Agent", "") or "").strip()[:256]
-
-
-def _is_authenticated() -> bool:
-    return bool(_current_username() and _current_session_id())
-
-
-def _is_api_request() -> bool:
-    return request.path.startswith("/api/") or request.path == "/generate"
-
-
-def _requires_no_store_headers(path: str) -> bool:
-    return path in NO_STORE_EXACT_PATHS or path.startswith("/api/")
-
-
-def _safe_next_target(raw_target: str) -> str:
-    next_target = str(raw_target or "").strip()
-    if next_target.startswith("/") and not next_target.startswith("//"):
-        return next_target
-    return url_for("home")
-
-
-def _login_redirect_target() -> str:
-    return _safe_next_target(request.args.get("next"))
-
-
-def _set_authenticated_user(username: str) -> None:
-    normalized_username = str(username or "").strip()
-    if not normalized_username:
-        raise ValueError("Username is required.")
-    tracked_session_id = app_state_store.create_user_session(
-        username=normalized_username,
-        remote_ip=_request_ip(),
-        user_agent=_request_user_agent(),
-        idle_timeout_seconds=SESSION_IDLE_TIMEOUT_MINUTES * 60,
-        absolute_timeout_seconds=SESSION_ABSOLUTE_TIMEOUT_HOURS * 3600,
-        force_single_session=AUTH_FORCE_SINGLE_SESSION,
-        max_sessions_per_user=AUTH_MAX_SESSIONS_PER_USER,
-        max_global_sessions=AUTH_MAX_GLOBAL_ACTIVE_SESSIONS,
-    )
-    if not tracked_session_id:
-        raise RuntimeError("Unable to create authenticated session.")
-    session.clear()
-    session["auth_username"] = normalized_username
-    session["auth_session_id"] = tracked_session_id
-    session.permanent = True
-
-
-def _clear_authenticated_user(revoke: bool = True) -> None:
-    tracked_session_id = _current_session_id()
-    if revoke and tracked_session_id:
-        app_state_store.revoke_user_session(tracked_session_id)
-    session.clear()
-
-
-def _touch_active_auth_session() -> bool:
-    username = _current_username()
-    tracked_session_id = _current_session_id()
-    if not username or not tracked_session_id:
-        return False
-    return app_state_store.touch_user_session(
-        session_id=tracked_session_id,
-        username=username,
-        remote_ip=_request_ip(),
-        idle_timeout_seconds=SESSION_IDLE_TIMEOUT_MINUTES * 60,
-        touch_interval_seconds=SESSION_TOUCH_INTERVAL_SECONDS,
-    )
-
-
-def login_required(view_func):
-    @wraps(view_func)
-    def wrapper(*args, **kwargs):
-        if _is_authenticated():
-            return view_func(*args, **kwargs)
-        if _is_api_request():
-            return jsonify({"error": "Authentication required."}), 401
-        return redirect(url_for("auth_page", next=request.full_path if request.query_string else request.path))
-    return wrapper
+auth_flow = AuthFlow(
+    state_store=app_state_store,
+    public_endpoints=PUBLIC_ENDPOINTS,
+    no_store_paths=NO_STORE_EXACT_PATHS,
+    idle_timeout_minutes=SESSION_IDLE_TIMEOUT_MINUTES,
+    absolute_timeout_hours=SESSION_ABSOLUTE_TIMEOUT_HOURS,
+    touch_interval_seconds=SESSION_TOUCH_INTERVAL_SECONDS,
+    force_single_session=AUTH_FORCE_SINGLE_SESSION,
+    max_sessions_per_user=AUTH_MAX_SESSIONS_PER_USER,
+    max_global_sessions=AUTH_MAX_GLOBAL_ACTIVE_SESSIONS,
+)
+login_required = auth_flow.login_required
 
 
 @app.before_request
 def _enforce_authentication():
-    endpoint = request.endpoint or ""
-    if _is_authenticated():
-        if _touch_active_auth_session():
-            return None
-        _clear_authenticated_user(revoke=False)
-    if endpoint in PUBLIC_ENDPOINTS:
-        return None
-    if _is_api_request():
-        return jsonify({"error": "Authentication required."}), 401
-    return redirect(url_for("auth_page", next=request.full_path if request.query_string else request.path))
+    return auth_flow.enforce_authentication()
 
 
 @app.after_request
 def _apply_auth_cache_headers(response):
-    path = request.path or ""
-    if _requires_no_store_headers(path):
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-    return response
+    return auth_flow.apply_cache_headers(response)
 
 
 def _normalize_client_name(raw_name: str) -> str:
@@ -465,82 +160,6 @@ def _warm_request_context(data: Dict[str, Any]) -> str:
     )
 
 
-def _build_internal_api_config(data: Dict[str, Any]) -> Dict[str, Any]:
-    endpoint_url = str(data.get("url") or "").strip()
-    if not re.match(r"^https?://", endpoint_url, flags=re.IGNORECASE):
-        raise ValueError("Endpoint API harus berupa URL HTTP/HTTPS penuh.")
-
-    method = str(data.get("method") or "POST").strip().upper()
-    if method not in {"GET", "POST", "PUT", "PATCH"}:
-        method = "POST"
-    body_encoding = str(data.get("body_encoding") or "form").strip().lower()
-    if body_encoding not in {"form", "json"}:
-        body_encoding = "form"
-    auth_mode = str(data.get("auth_mode") or "basic").strip().lower()
-    if auth_mode not in {"basic", "bearer", "none"}:
-        auth_mode = "basic"
-
-    datasets = data.get("datasets") if isinstance(data.get("datasets"), dict) else {}
-    paths = data.get("response_paths") if isinstance(data.get("response_paths"), dict) else {}
-    return {
-        "mode": "generic",
-        "auth_mode": auth_mode,
-        "request_defaults": {
-            "url": endpoint_url,
-            "method": method,
-            "body_encoding": body_encoding,
-            "params": {},
-            "headers": {},
-        },
-        "resources": {
-            "firm_profile": {
-                "request": {"body": {"dataset": str(datasets.get("firm_profile") or "ReferenceAccount")}},
-                "response_path": str(paths.get("firm_profile") or "data.dataset_result.0"),
-                "field_mapping": {
-                    "office_address": "company_address",
-                    "email": "official_email",
-                    "phone": "telephone",
-                    "whatsapp": "whatsapp",
-                    "website": "website_url",
-                    "legal_name": "legal_name",
-                    "operating_hours": "operating_hours",
-                    "profile_summary": "profile_summary",
-                    "credential_highlights": "credential_highlights",
-                    "portfolio_highlights": "portfolio_highlights",
-                },
-            },
-            "project_standards": {
-                "request": {"body": {"dataset": str(datasets.get("project_standards") or "ProjectStandards")}},
-                "response_path": str(paths.get("project_standards") or "data.dataset_result"),
-                "record_filters": {"project_type": "{project_type}"},
-                "field_mapping": {
-                    "methodology": "delivery_methodology",
-                    "team": "team_composition",
-                    "commercial": "commercial_terms",
-                },
-            },
-            "client_relationship": {
-                "request": {"body": {"dataset": str(datasets.get("client_relationship") or "ClientRelationship")}},
-                "response_path": str(paths.get("client_relationship") or "data.dataset_result"),
-                "record_filters": {"client_name": "{client_name}"},
-                "field_mapping": {
-                    "summary": "relationship_summary",
-                    "mode": "relationship_status",
-                },
-            },
-            "project_records": {
-                "request": {"body": {"dataset": str(datasets.get("project_records") or "Projects")}},
-                "response_path": str(paths.get("project_records") or "data.dataset_result"),
-                "field_mapping": {
-                    "entity": "client_entity",
-                    "topic": "strategic_initiative",
-                    "budget": "investment_estimation",
-                },
-            },
-        },
-    }
-
-
 def _internal_api_config_target() -> Path:
     configured = str(FirmAPIClient._resolve_config_file() or "").strip()
     if configured:
@@ -550,29 +169,28 @@ def _internal_api_config_target() -> Path:
 
 def _write_internal_api_config(config_payload: Dict[str, Any]) -> Path:
     target = _internal_api_config_target()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(config_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_json_config(target, config_payload)
     return target
 
 
 @app.route('/')
 @login_required
 def home():
-    return render_template('index.html', current_user=_current_username())
+    return render_template('index.html', current_user=auth_flow.current_username())
 
 
 @app.route('/auth')
 def auth_page():
-    if _is_authenticated():
-        if _touch_active_auth_session():
-            return redirect(_login_redirect_target())
-        _clear_authenticated_user(revoke=False)
+    if auth_flow.is_authenticated():
+        if auth_flow.touch_active_auth_session():
+            return redirect(auth_flow.login_redirect_target())
+        auth_flow.clear_authenticated_user(revoke=False)
     return render_template(
         'auth.html',
         login_error=request.args.get("login_error", "").strip(),
         signup_error=request.args.get("signup_error", "").strip(),
         signup_success=request.args.get("signup_success", "").strip(),
-        next_target=_login_redirect_target(),
+        next_target=auth_flow.login_redirect_target(),
     )
 
 
@@ -580,8 +198,8 @@ def auth_page():
 def login():
     username = str(request.form.get("username") or "").strip()
     password = str(request.form.get("password") or "")
-    next_target = _safe_next_target(request.form.get("next"))
-    remote_ip = _request_ip()
+    next_target = auth_flow.safe_next_target(request.form.get("next"))
+    remote_ip = auth_flow.request_ip()
     if not username or not password:
         return redirect(url_for("auth_page", login_error="Username dan password wajib diisi.", next=next_target))
     blocked_seconds = app_state_store.get_login_block_seconds(username=username, remote_ip=remote_ip)
@@ -616,7 +234,7 @@ def login():
 
     app_state_store.clear_login_failures(username=username, remote_ip=remote_ip)
     try:
-        _set_authenticated_user(str(user.get("username") or username))
+        auth_flow.set_authenticated_user(str(user.get("username") or username))
     except Exception:
         logger.exception("Failed creating authenticated session for user=%s", username)
         return redirect(
@@ -634,7 +252,7 @@ def signup():
     username = str(request.form.get("username") or "").strip()
     password = str(request.form.get("password") or "")
     confirm_password = str(request.form.get("confirm_password") or "")
-    next_target = _safe_next_target(request.form.get("next"))
+    next_target = auth_flow.safe_next_target(request.form.get("next"))
 
     if not username or not password:
         return redirect(url_for("auth_page", signup_error="Username dan password wajib diisi.", next=next_target))
@@ -657,14 +275,14 @@ def signup():
 
 @app.route('/logout', methods=['POST'])
 def logout():
-    _clear_authenticated_user()
+    auth_flow.clear_authenticated_user()
     return redirect(url_for("auth_page"))
 
 
 @app.route('/api/auth/session-status')
 @login_required
 def auth_session_status():
-    username = _current_username()
+    username = auth_flow.current_username()
     snapshot = app_state_store.active_session_snapshot(username=username)
     return jsonify({
         "username": username,
@@ -790,7 +408,7 @@ def internal_api_setup():
 
     data = request.json or {}
     try:
-        config_payload = _build_internal_api_config(data)
+        config_payload = build_internal_api_config(data)
         target_path = _write_internal_api_config(config_payload)
         api_client = FirmAPIClient(force_source="api")
         validation = api_client.validate_config()
