@@ -17,8 +17,6 @@ from .proposal_shared import *
 osint_cache_dir = Path(APP_STATE_DB_PATH).parent / '.osint_cache'
 osint_cache = dc.Cache(str(osint_cache_dir))
 
-import functools
-
 def smart_osint_cache(expire_success=86400, expire_empty=3600, ignore_empty=True, inject_llm=False):
     """
     Production-grade decorator replacing manual cache management.
@@ -731,5 +729,4 @@ class Researcher:
             "key_contacts": f"Hubungi {firm_name} melalui saluran resmi untuk koordinasi detail.",
             "accolades": f"{firm_name} terus membangun reputasi melalui proyek-proyek tepat guna.",
         }
-
 

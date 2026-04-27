@@ -1,9 +1,7 @@
-"""Runtime components for data access, research, pricing, and document rendering."""
+"""Runtime components for internal data access and knowledge-base retrieval."""
 
-import concurrent.futures
-import diskcache as dc
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any, Tuple, Set
+from typing import Optional, List, Dict, Any, Tuple
 
 from .proposal_shared import *
 from .schema_mapping import SchemaMapper
@@ -1139,4 +1137,3 @@ class KnowledgeBase:
 
 
 # Budget estimator from public financial context.
-
