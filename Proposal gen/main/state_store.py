@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .proposal_shared import *
 from .schema_mapping import SchemaMapper
+from .text_hygiene import compact_context_lines, formalize_caps_text, normalize_field_value, normalize_payload
 
 class AppStateStore:
     def __init__(self, db_path: Optional[Path] = None, asset_root: Optional[Path] = None) -> None:
@@ -697,7 +698,7 @@ class AppStateStore:
             lines.append(line)
         cleaned = "\n".join(lines)
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-        return cleaned.strip()
+        return formalize_caps_text(cleaned)
 
     @classmethod
     def _extract_supporting_document_text(cls, filename: str, raw_bytes: bytes) -> str:
@@ -859,6 +860,22 @@ class AppStateStore:
 
     @staticmethod
     def _best_duration_signal(text: str) -> str:
+        timeline_items = AppStateStore._extract_kak_timeline_items(text)
+        max_week = 0
+        max_month = 0
+        for item in timeline_items:
+            period = str(item.get("period") or "")
+            week_match = re.search(r"\bminggu\s+(\d+)(?:\s*[-–]\s*(\d+))?", period, flags=re.IGNORECASE)
+            month_match = re.search(r"\bbulan\s+(\d+)(?:\s*[-–]\s*(\d+))?", period, flags=re.IGNORECASE)
+            if week_match:
+                max_week = max(max_week, int(week_match.group(2) or week_match.group(1)))
+            if month_match:
+                max_month = max(max_month, int(month_match.group(2) or month_match.group(1)))
+        if max_week:
+            return f"{max_week} Minggu"
+        if max_month:
+            return f"{max_month} Bulan"
+
         patterns = [
             r"(?:jangka waktu(?:\s+pelaksanaan)?|durasi|masa pelaksanaan|waktu pelaksanaan)\s*[:\-]?\s*([^\n.;]{3,60})",
             r"(?:selama|dalam kurun waktu)\s*[:\-]?\s*(\d+\s*(?:hari|minggu|bulan|tahun)(?:\s*(?:kalender|kerja))?)",
@@ -867,6 +884,57 @@ class AppStateStore:
         value = AppStateStore._first_non_empty_match(text, patterns)
         value = re.sub(r"^(?:pelaksanaan|jangka waktu|durasi)\s*[:\-]?\s*", "", value, flags=re.IGNORECASE)
         return value.strip(" :;-.,")
+
+    @staticmethod
+    def _extract_kak_timeline_items(text: str, limit: int = 8) -> List[Dict[str, str]]:
+        items: List[Dict[str, str]] = []
+        seen: Set[str] = set()
+        source = formalize_caps_text(text)
+        for raw_line in source.splitlines():
+            line = re.sub(r"\s+", " ", raw_line).strip()
+            if not line or not re.search(r"\b(minggu|pekan|bulan|hari)\b", line, flags=re.IGNORECASE):
+                continue
+            if re.search(r"\b(no|periode|fase|aktivitas|deliverable)\b", line, flags=re.IGNORECASE) and "|" in line:
+                continue
+
+            cells = [cell.strip(" -") for cell in line.split("|") if cell.strip(" -")]
+            period = ""
+            phase = ""
+            activity = ""
+            deliverable = ""
+            if len(cells) >= 2:
+                for idx, cell in enumerate(cells):
+                    if re.search(r"\b(minggu|pekan|bulan|hari)\b", cell, flags=re.IGNORECASE):
+                        period = cell
+                        phase = cells[idx + 1] if idx + 1 < len(cells) else ""
+                        activity = cells[idx + 2] if idx + 2 < len(cells) else ""
+                        deliverable = cells[idx + 3] if idx + 3 < len(cells) else ""
+                        break
+            else:
+                match = re.search(
+                    r"((?:minggu|pekan|bulan|hari)\s+\d+(?:\s*[-–]\s*\d+)?)\s*[:\-]?\s*(.+)$",
+                    line,
+                    flags=re.IGNORECASE,
+                )
+                if match:
+                    period = match.group(1)
+                    activity = match.group(2)
+
+            if not period:
+                continue
+            key = SchemaMapper.normalize_key(f"{period}|{phase}|{activity}|{deliverable}")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            items.append({
+                "period": normalize_field_value("estimasi_waktu", period),
+                "phase": formalize_caps_text(phase)[:120],
+                "activity": formalize_caps_text(activity)[:220],
+                "deliverable": formalize_caps_text(deliverable)[:180],
+            })
+            if len(items) >= limit:
+                break
+        return items
 
     @staticmethod
     def _extract_first_section(text: str, labels: List[str], max_lines: int = 3) -> str:
@@ -1004,6 +1072,21 @@ class AppStateStore:
         joined = "; ".join(bits) if bits else "belum ada field utama yang berhasil dibaca"
         return f"Pembacaan KAK dari {source_name} menangkap {joined}."
 
+    def set_active_kak_document(self, document_id: str) -> Dict[str, Any]:
+        normalized_id = str(document_id or "").strip()
+        if not normalized_id:
+            self._set_setting("active_kak_document_id", "")
+            return self.get_settings()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM supporting_documents WHERE id = ? AND document_type = 'kak'",
+                (normalized_id,),
+            ).fetchone()
+        if not row:
+            raise KeyError("Dokumen KAK/TOR tidak ditemukan.")
+        self._set_setting("active_kak_document_id", normalized_id)
+        return self.get_settings()
+
     def get_latest_kak_context(
         self,
         company_candidates: Optional[List[str]] = None,
@@ -1022,7 +1105,12 @@ class AppStateStore:
         if not documents:
             return result
 
-        latest = documents[0]
+        active_id = self._get_setting("active_kak_document_id", "")
+        latest = next((item for item in documents if str(item.get("id") or "") == active_id), None) or documents[0]
+        active_id = str(latest.get("id") or "")
+        for item in documents:
+            item["is_active"] = str(item.get("id") or "") == active_id
+        result["documents"] = documents
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -1069,6 +1157,7 @@ class AppStateStore:
         )
         budget = self._best_money_signal(text)
         duration = self._best_duration_signal(text)
+        timeline_items = self._extract_kak_timeline_items(text)
         frameworks = self._extract_kak_frameworks(text)
         service_type = self._detect_service_type(text)
         project_type = self._detect_project_type(text)
@@ -1082,7 +1171,7 @@ class AppStateStore:
         if not frameworks:
             suggestion_warnings.append("Framework/acuan belum terbaca eksplisit; user mungkin masih perlu mengisi manual.")
 
-        suggestions = {
+        suggestions = normalize_payload({
             "nama_perusahaan": company,
             "jenis_proposal": service_type,
             "jenis_proyek": project_type,
@@ -1092,18 +1181,20 @@ class AppStateStore:
             "estimasi_waktu": duration,
             "estimasi_biaya": budget,
             "potensi_framework": ", ".join(frameworks),
-        }
+        })
         suggestions = {key: value for key, value in suggestions.items() if str(value or "").strip()}
 
         result["analysis"] = {
             "available": True,
             "source_document": latest.get("original_name", ""),
+            "source_document_id": latest.get("id", ""),
             "summary": self._summarize_kak_analysis(suggestions, latest.get("original_name", "dokumen KAK")),
             "suggestions": suggestions,
             "warnings": suggestion_warnings,
             "initiative_title": initiative,
             "objective_excerpt": objective,
             "problem_excerpt": problem_excerpt,
+            "timeline_items": timeline_items,
         }
         return result
 
@@ -1231,20 +1322,66 @@ class AppStateStore:
 
     def get_settings(self) -> Dict[str, Any]:
         template_path = self.get_template_path()
+        active_kak_document_id = self._get_setting("active_kak_document_id")
+        kak_documents = self.list_supporting_documents("kak")
+        if not active_kak_document_id and kak_documents:
+            active_kak_document_id = str(kak_documents[0].get("id") or "")
+        for item in kak_documents:
+            item["is_active"] = bool(active_kak_document_id and str(item.get("id") or "") == active_kak_document_id)
         return {
             "internal_portfolio": self._get_setting("internal_portfolio"),
             "internal_credentials": self._get_setting("internal_credentials"),
             "active_template_name": self._get_setting("active_template_name"),
+            "active_kak_document_id": active_kak_document_id,
             "has_active_template": bool(template_path and Path(template_path).exists()),
             "portfolio_documents": self.list_supporting_documents("portfolio"),
             "credential_documents": self.list_supporting_documents("credentials"),
-            "kak_documents": self.list_supporting_documents("kak"),
+            "kak_documents": kak_documents,
         }
 
     def save_settings(self, internal_portfolio: str = "", internal_credentials: str = "") -> Dict[str, Any]:
-        self._set_setting("internal_portfolio", internal_portfolio or "")
-        self._set_setting("internal_credentials", internal_credentials or "")
+        self._set_setting("internal_portfolio", formalize_caps_text(internal_portfolio or ""))
+        self._set_setting("internal_credentials", formalize_caps_text(internal_credentials or ""))
         return self.get_settings()
+
+    def build_generation_context(self, company_candidates: Optional[List[str]] = None) -> Dict[str, Any]:
+        kak = self.get_latest_kak_context(company_candidates=company_candidates).get("analysis", {})
+        settings = self.get_settings()
+        portfolio_lines = compact_context_lines(
+            [
+                settings.get("internal_portfolio", ""),
+                self._collect_supporting_document_text("portfolio", max_documents=3, max_words=120),
+            ],
+            limit=4,
+        )
+        credential_lines = compact_context_lines(
+            [
+                settings.get("internal_credentials", ""),
+                self._collect_supporting_document_text("credentials", max_documents=3, max_words=100),
+            ],
+            limit=4,
+        )
+        suggestions = normalize_payload(kak.get("suggestions") or {}) if kak.get("available") else {}
+        timeline_items = kak.get("timeline_items") if isinstance(kak.get("timeline_items"), list) else []
+        kak_lines = compact_context_lines(
+            [
+                kak.get("summary", ""),
+                kak.get("objective_excerpt", ""),
+                kak.get("problem_excerpt", ""),
+                *(f"{item.get('period', '')}: {item.get('phase', '')} {item.get('activity', '')} {item.get('deliverable', '')}" for item in timeline_items[:5]),
+            ],
+            limit=7,
+        )
+        return {
+            "kak_available": bool(kak.get("available")),
+            "kak_source_document": formalize_caps_text(kak.get("source_document", "")),
+            "kak_suggestions": suggestions,
+            "kak_timeline_items": timeline_items[:8],
+            "kak_context": "\n".join(kak_lines),
+            "settings_context": "\n".join(portfolio_lines + credential_lines),
+            "portfolio_context": "\n".join(portfolio_lines),
+            "credential_context": "\n".join(credential_lines),
+        }
 
     def save_template(self, filename: str, raw_bytes: bytes) -> Dict[str, Any]:
         safe_name = self._sanitize_filename(filename or "template_blanko.docx", fallback="template_blanko.docx")
@@ -1526,5 +1663,3 @@ class AppStateStore:
             "payload": payload,
             "can_reuse": bool(payload),
         }
-
-

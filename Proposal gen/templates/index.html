@@ -772,11 +772,13 @@
                 <div class="document-item">
                     <div>
                         <strong>${escapeHtml(item.original_name || 'Dokumen pendukung')}</strong>
+                        ${item.is_active ? '<span class="user-chip">KAK aktif</span>' : ''}
                         <div class="document-meta-note">
                             Diunggah ${escapeHtml(item.uploaded_at_label || '-')} · ${escapeHtml(formatFileSize(item.byte_size))}
                             ${item.has_text ? ' · teks berhasil dibaca' : ' · teks belum berhasil diekstrak'}
                         </div>
                     </div>
+                    ${item.document_type === 'kak' && !item.is_active ? `<button type="button" class="secondary" data-kak-active="${escapeHtml(item.id)}">Gunakan KAK Ini</button>` : ''}
                     <button type="button" class="secondary" data-doc-remove="${escapeHtml(item.id)}">Hapus</button>
                 </div>
             `).join('');
@@ -790,10 +792,28 @@
                 return;
             }
             const warnings = Array.isArray(analysis.warnings) ? analysis.warnings.filter(Boolean) : [];
+            const labels = {
+                nama_perusahaan: 'Klien',
+                jenis_proposal: 'Jenis layanan',
+                jenis_proyek: 'Jenis proyek',
+                konteks_organisasi: 'Inisiatif / objektif',
+                permasalahan: 'Masalah utama',
+                klasifikasi_kebutuhan: 'Klasifikasi kebutuhan',
+                estimasi_waktu: 'Durasi',
+                estimasi_biaya: 'Anggaran',
+                potensi_framework: 'Framework / acuan'
+            };
             const suggestionLines = Object.entries(analysis.suggestions || {})
                 .filter(([, value]) => String(value || '').trim())
-                .map(([key, value]) => `<li><strong>${escapeHtml(key)}</strong>: ${escapeHtml(value)}</li>`)
+                .map(([key, value]) => `<li><strong>${escapeHtml(labels[key] || key)}</strong>: ${escapeHtml(value)}</li>`)
                 .join('');
+            const timelineItems = Array.isArray(analysis.timeline_items) ? analysis.timeline_items : [];
+            const timelineLines = timelineItems.length
+                ? `<div class="small-note" style="margin-top:8px;"><strong>Timeline terbaca:</strong></div><ul class="kak-warning-list">${timelineItems.slice(0, 5).map(item => {
+                    const phase = [item.phase, item.activity, item.deliverable].filter(Boolean).join(' · ');
+                    return `<li><strong>${escapeHtml(item.period || '-')}</strong>: ${escapeHtml(phase || 'aktivitas sesuai KAK')}</li>`;
+                }).join('')}</ul>`
+                : '';
             const warningLines = warnings.length
                 ? `<ul class="kak-warning-list">${warnings.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
                 : '';
@@ -804,6 +824,7 @@
                 <strong>${escapeHtml(analysis.source_document || 'Dokumen KAK/TOR')}</strong><br />
                 ${escapeHtml(analysis.summary || '')}
                 ${suggestionList}
+                ${timelineLines}
                 ${warningLines}
             `;
             latestKakSuggestions = analysis.suggestions || null;
@@ -1004,9 +1025,31 @@
         });
 
         function handleSupportingDocumentClick(event) {
+            const activeButton = event.target.closest('[data-kak-active]');
+            if (activeButton) {
+                setActiveKakDocument(activeButton.dataset.kakActive);
+                return;
+            }
             const removeButton = event.target.closest('[data-doc-remove]');
             if (!removeButton) return;
             removeSupportingDocument(removeButton.dataset.docRemove);
+        }
+
+        async function setActiveKakDocument(documentId) {
+            try {
+                const res = await fetch('/api/kak-context/active', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ document_id: documentId })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'KAK aktif belum berhasil diganti.');
+                await loadSettings();
+                await loadKakContext();
+                alert('KAK aktif berhasil diganti.');
+            } catch (err) {
+                alert(err.message || 'KAK aktif belum berhasil diganti.');
+            }
         }
 
         ui.portfolioDocList.addEventListener('click', handleSupportingDocumentClick);

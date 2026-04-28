@@ -52,6 +52,7 @@ from .internal_api_setup import build_internal_api_config, write_json_config
 from .job_queue import GenerationQueue
 from .knowledge_store import KnowledgeBase
 from .state_store import AppStateStore
+from .text_hygiene import normalize_payload
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -140,6 +141,7 @@ def _normalize_client_name(raw_name: str) -> str:
 
 
 def _warm_request_context(data: Dict[str, Any]) -> str:
+    data = normalize_payload(data)
     client_name = _normalize_client_name(str(data.get("nama_perusahaan", "")).strip())
     regulations = str(data.get("potensi_framework", "")).strip()
     ai_context = " ".join([
@@ -459,7 +461,7 @@ def _company_candidates() -> list[str]:
 @app.route('/api/suggest-budget', methods=['POST'])
 def suggest_budget():
     """Estimate pricing tiers from public financial signals."""
-    data = request.json or {}
+    data = normalize_payload(request.json or {})
     required_fields = [
         'nama_perusahaan',
         'mode_proposal',
@@ -502,7 +504,7 @@ def suggest_budget():
 
 @app.route('/api/preview-outline', methods=['POST'])
 def preview_outline():
-    data = request.json or {}
+    data = normalize_payload(request.json or {})
     _warm_request_context(data)
     outline = proposal_generator.build_preview_outline(data)
     return jsonify({"outline": outline})
@@ -510,7 +512,7 @@ def preview_outline():
 
 @app.route('/api/prefetch-context', methods=['POST'])
 def prefetch_context():
-    data = request.json or {}
+    data = normalize_payload(request.json or {})
     status = _warm_request_context(data)
     return jsonify({"status": status})
 
@@ -520,9 +522,23 @@ def get_kak_context():
     return jsonify(app_state_store.get_latest_kak_context(company_candidates=_company_candidates()))
 
 
+@app.route('/api/kak-context/active', methods=['POST'])
+def set_active_kak_context():
+    data = request.json or {}
+    try:
+        settings = app_state_store.set_active_kak_document(str(data.get("document_id") or ""))
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    return jsonify({
+        "status": "ok",
+        "settings": settings,
+        "kak_context": app_state_store.get_latest_kak_context(company_candidates=_company_candidates()),
+    })
+
+
 @app.route('/generate', methods=['POST'])
 def generate_proposal():
-    data = request.json or {}
+    data = normalize_payload(request.json or {})
     required_fields = [
         'nama_perusahaan',
         'konteks_organisasi',
@@ -540,6 +556,7 @@ def generate_proposal():
         return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
 
     try:
+        data["_supporting_context"] = app_state_store.build_generation_context(company_candidates=_company_candidates())
         ticket = generation_queue.submit(data)
     except OverflowError as exc:
         return jsonify({"error": str(exc)}), 429
@@ -619,7 +636,7 @@ def proposal_settings():
     if request.method == 'GET':
         return jsonify(app_state_store.get_settings())
 
-    data = request.json or {}
+    data = normalize_payload(request.json or {})
     settings = app_state_store.save_settings(
         internal_portfolio=str(data.get("internal_portfolio") or ""),
         internal_credentials=str(data.get("internal_credentials") or ""),

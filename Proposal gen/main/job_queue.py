@@ -159,6 +159,7 @@ class GenerationQueue:
                 regulations=payload["potensi_framework"],
                 chapter_id=payload.get("chapter_id"),
                 proposal_mode=payload.get("mode_proposal", "canvassing"),
+                supporting_context=payload.get("_supporting_context") or {},
             )
             output = io.BytesIO()
             doc.save(output)

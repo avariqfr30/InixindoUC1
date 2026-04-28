@@ -1631,6 +1631,7 @@ class ProposalSupportMixin:
         notes: str,
         regulations: str,
         timeline: str,
+        supporting_context: Optional[Dict[str, Any]] = None,
     ) -> str:
         understanding = [
             text for _, text in cls._kak_understanding_points(project, project_goal, notes, regulations)[:3]
@@ -1642,6 +1643,9 @@ class ProposalSupportMixin:
             f"Pemahaman KAK: {'; '.join(understanding)}." if understanding else "",
             f"Tanggapan kerja: {'; '.join(response)}." if response else "",
         ]
+        kak_context = str((supporting_context or {}).get("kak_context") or "").strip()
+        if kak_context:
+            parts.append(f"Konteks hasil baca KAK/TOR: {kak_context}")
         return " ".join(part for part in parts if part).strip()
 
     def _has_anchor_signal(self, content: str, personalization_pack: Optional[Dict[str, Any]]) -> bool:
@@ -2556,6 +2560,37 @@ class ProposalSupportMixin:
         return plan
 
     @staticmethod
+    def _phase_plan_from_supporting_context(
+        supporting_context: Optional[Dict[str, Any]],
+        fallback_plan: List[Dict[str, str]],
+    ) -> List[Dict[str, str]]:
+        items = (supporting_context or {}).get("kak_timeline_items") or []
+        if not isinstance(items, list) or len(items) < 2:
+            return fallback_plan
+
+        plan: List[Dict[str, str]] = []
+        for idx, item in enumerate(items[:8]):
+            if not isinstance(item, dict):
+                continue
+            period = re.sub(r"\s+", " ", str(item.get("period") or "")).strip()
+            phase = re.sub(r"\s+", " ", str(item.get("phase") or "")).strip()
+            activity = re.sub(r"\s+", " ", str(item.get("activity") or "")).strip()
+            deliverable = re.sub(r"\s+", " ", str(item.get("deliverable") or "")).strip()
+            if not period:
+                continue
+            fallback = fallback_plan[min(idx, len(fallback_plan) - 1)] if fallback_plan else {}
+            plan.append({
+                "period": period,
+                "phase": phase or fallback.get("phase", f"Fase {idx + 1}"),
+                "activity": activity or fallback.get("activity", "Aktivitas utama sesuai KAK dan metodologi."),
+                "deliverable": deliverable or fallback.get("deliverable", "deliverable fase sesuai KAK"),
+                "start": fallback.get("start", str(idx)),
+                "end": fallback.get("end", str(idx + 1)),
+                "unit": fallback.get("unit", "Fase"),
+            })
+        return plan if len(plan) >= 2 else fallback_plan
+
+    @staticmethod
     def _build_payment_plan(project_type: str, budget: str) -> List[Tuple[str, str]]:
         presets: Dict[str, List[Tuple[str, str]]] = {
             "diagnostic": [
@@ -2629,6 +2664,7 @@ class ProposalSupportMixin:
         proposal_mode: str = "canvassing",
         chapter_chain_context: str = "",
         kak_context_base: str = "",
+        supporting_context: Optional[Dict[str, Any]] = None,
     ) -> str:
         year = datetime.now().year
         value_map = value_map or {}
@@ -2688,7 +2724,8 @@ class ProposalSupportMixin:
         )
         commercial_summary = self._summarize_phrase(firm_data.get("commercial", ""), "mekanisme komersial mengikuti baseline internal")
         payment_plan = self._build_ai_payment_plan() if ai_mode else self._build_payment_plan(project_type, budget)
-        phase_plan = self._build_ai_phase_plan(timeline) if ai_mode else self._build_phase_plan(project_type, timeline)
+        fallback_phase_plan = self._build_ai_phase_plan(timeline) if ai_mode else self._build_phase_plan(project_type, timeline)
+        phase_plan = self._phase_plan_from_supporting_context(supporting_context, fallback_phase_plan)
         gantt_unit = phase_plan[0].get("unit", "Bulan") if phase_plan else "Bulan"
         gantt_points = "; ".join(
             f"{item['phase']},{item['start']},{item['end']}"
@@ -3813,6 +3850,7 @@ class ProposalSupportMixin:
         personalization_pack: Dict[str, Any],
         value_map: Dict[str, Any],
         proposal_mode: str = "canvassing",
+        supporting_context: Optional[Dict[str, Any]] = None,
     ) -> str:
         cache_key = self._cache_key(
             "contract", client, project, budget, service_type, project_goal,
@@ -3825,6 +3863,8 @@ class ProposalSupportMixin:
             value_map.get("value_statement", ""),
             value_map.get("win_theme", ""),
             "|".join(value_map.get("proof_points", []) or []),
+            str((supporting_context or {}).get("kak_context", "")),
+            str((supporting_context or {}).get("settings_context", "")),
         )
         cached = self._cache_get(self._proposal_contract_cache, cache_key)
         if cached:
@@ -3832,7 +3872,15 @@ class ProposalSupportMixin:
 
         chapter_titles = ", ".join([c["title"] for c in selected_chapters])
         normalized_mode = self._normalize_proposal_mode(proposal_mode)
-        kak_context_base = self._build_kak_context_base(project, project_goal, notes, regulations, timeline) if normalized_mode == "kak_response" else ""
+        kak_context_base = self._build_kak_context_base(
+            project,
+            project_goal,
+            notes,
+            regulations,
+            timeline,
+            supporting_context=supporting_context,
+        ) if normalized_mode == "kak_response" else ""
+        settings_context = str((supporting_context or {}).get("settings_context") or "").strip()
         prompt = f"""
         Buat "Proposal Contract" ringkas untuk menjaga kualitas dan koherensi lintas bab.
         Konteks:
@@ -3866,6 +3914,7 @@ class ProposalSupportMixin:
         - Proof Points: {', '.join(value_map.get('proof_points', []) or [])}
         - Mode Proposal: {normalized_mode}
         - KAK Context Base: {kak_context_base}
+        - Konteks Pendukung Pengaturan: {settings_context}
         - Review Rule: Draft ini targetnya 80% siap pakai; sisakan ruang bagi reviewer manusia untuk menyempurnakan nuansa relasi, komersial, dan pesan penutup.
         - Aturan AI tersembunyi: bila konteks proposal terkait AI, narasi harus terasa dimulai dari use case bisnis, lalu dikendalikan oleh kesiapan data/model, arsitektur, governance, kapabilitas tim, dan perubahan cara kerja. Jangan menuliskan enam label itu secara eksplisit.
 
@@ -3921,6 +3970,7 @@ class ProposalSupportMixin:
         target_words: int,
         chapter_chain_context: str = "",
         kak_context_base: str = "",
+        supporting_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         try:
             current_year = datetime.now().year
@@ -3965,6 +4015,8 @@ class ProposalSupportMixin:
             ai_profile = personalization_pack.get("ai_adoption_profile", {}) or {}
             ai_mode = bool(ai_profile.get("enabled"))
             normalized_mode = self._normalize_proposal_mode(proposal_mode)
+            settings_context = str((supporting_context or {}).get("settings_context") or "").strip()
+            kak_supporting_context = str((supporting_context or {}).get("kak_context") or "").strip()
             ai_posture = research_bundle.get("ai_posture", "")
             ai_guidance = str((ai_profile.get("chapter_guidance") or {}).get(chapter.get("id", ""), "")).strip()
             initiative_facts = personalization_pack.get("initiative_facts", []) or []
@@ -3982,6 +4034,11 @@ class ProposalSupportMixin:
                 f"[GLOBAL] Proposal ini wajib mempertahankan kedalaman konten tingkat eksekutif dan total dokumen maksimal {MAX_PROPOSAL_PAGES} halaman. "
                 "Setiap bab harus memiliki konteks spesifik klien, poin yang dapat ditindaklanjuti, dan tidak generik. Gunakan kombinasi numbering dan bullet yang rapi di setiap H2, namun tetap padat dan tidak banyak whitespace."
             )
+            if settings_context:
+                extra += (
+                    f" [SETTINGS_CONTEXT] Gunakan konteks pengaturan internal berikut hanya sebagai penguat, "
+                    f"bukan sebagai konteks utama dan bukan untuk mengubah struktur standar: {settings_context}"
+                )
             extra += (
                 " [DRAFT_POLICY] Tulis sebagai draft proposal berkualitas tinggi yang siap dipakai sekitar 80%, "
                 "dengan ruang review manusia tersisa untuk kalibrasi hubungan, penajaman komersial, dan sentuhan personal terakhir. "
@@ -4003,6 +4060,8 @@ class ProposalSupportMixin:
                 )
                 if kak_context_base:
                     extra += f" [KAK_CONTEXT_BASE] {kak_context_base}"
+                if kak_supporting_context:
+                    extra += f" [KAK_SUPPORTING_CONTEXT] Pakai hasil baca KAK/TOR ini sebagai sharpening context, bukan untuk mengganti struktur bab standar: {kak_supporting_context}"
             else:
                 extra += (
                     " [PROPOSAL_MODE] Ini adalah proposal penawaran pekerjaan canvasing. "

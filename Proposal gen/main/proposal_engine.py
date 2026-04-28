@@ -351,8 +351,10 @@ class ProposalEngineMixin:
         notes: str,
         regulations: str,
         chapter_id: Optional[str] = None,
-        proposal_mode: str = "canvassing"
+        proposal_mode: str = "canvassing",
+        supporting_context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Document, str, Dict[str, Any]]:
+        supporting_context = dict(supporting_context or {})
         selected_chapters = self._resolve_chapters(chapter_id, proposal_mode=proposal_mode)
         chapter_targets = self._chapter_word_targets(selected_chapters)
         content_word_budget = self._content_word_budget()
@@ -364,7 +366,16 @@ class ProposalEngineMixin:
         if app_state_store:
             firm_profile = app_state_store.enrich_firm_profile(firm_profile)
         base_client = re.sub(r'\b(Cabang|Branch|Tbk)\b.*$|^(PT\.|CV\.)', '', client, flags=re.IGNORECASE).strip()
-        ai_context = " ".join([project, project_goal, project_type, service_type, proposal_mode, notes]).strip()
+        ai_context = " ".join([
+            project,
+            project_goal,
+            project_type,
+            service_type,
+            proposal_mode,
+            notes,
+            str(supporting_context.get("kak_context") or ""),
+            str(supporting_context.get("settings_context") or ""),
+        ]).strip()
         relationship_context = self.firm_api.get_client_relationship(base_client)
         research_bundle = self._get_research_bundle(
             base_client,
@@ -416,6 +427,7 @@ class ProposalEngineMixin:
             personalization_pack=personalization_pack,
             value_map=value_map,
             proposal_mode=proposal_mode,
+            supporting_context=supporting_context,
         )
         logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client)
 
@@ -429,6 +441,7 @@ class ProposalEngineMixin:
             notes=notes,
             regulations=regulations,
             timeline=timeline,
+            supporting_context=supporting_context,
         ) if self._normalize_proposal_mode(proposal_mode) == "kak_response" else ""
 
         chapter_map = {chapter['id']: chapter for chapter in selected_chapters}
@@ -461,6 +474,7 @@ class ProposalEngineMixin:
                     proposal_mode=proposal_mode,
                     chapter_chain_context=chapter_chain_context,
                     kak_context_base=kak_context_base,
+                    supporting_context=supporting_context,
                 )
                 rendered = self._tighten_structured_chapter(
                     chapter=chapter,
@@ -514,6 +528,7 @@ class ProposalEngineMixin:
                 chapter_targets.get(chapter['id'], self._target_words(chapter)),
                 chapter_chain_context=chapter_chain_context,
                 kak_context_base=kak_context_base,
+                supporting_context=supporting_context,
             )
             if not ctx['success']:
                 continue
@@ -871,7 +886,8 @@ class ProposalEngineMixin:
         notes: str,
         regulations: str,
         chapter_id: Optional[str] = None,
-        proposal_mode: str = "canvassing"
+        proposal_mode: str = "canvassing",
+        supporting_context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Document, str, Dict[str, Any]]:
         return self.generate_document(
             client=client,
@@ -885,4 +901,5 @@ class ProposalEngineMixin:
             regulations=regulations,
             chapter_id=chapter_id,
             proposal_mode=proposal_mode,
+            supporting_context=supporting_context,
         )
