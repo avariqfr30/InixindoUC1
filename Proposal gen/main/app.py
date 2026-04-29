@@ -213,6 +213,7 @@ def auth_page():
         signup_success=request.args.get("signup_success", "").strip(),
         next_target=auth_flow.login_redirect_target(),
         allow_signup=AUTH_ALLOW_SIGNUP,
+        signup_email_domain=AUTH_SIGNUP_EMAIL_DOMAIN,
     )
 
 

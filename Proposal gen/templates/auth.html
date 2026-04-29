@@ -170,6 +170,35 @@
             border-color: var(--success-line);
         }
 
+        .auth-warning-popup {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 30;
+            width: min(360px, calc(100vw - 32px));
+            padding: 14px 16px;
+            border-radius: 16px;
+            border: 1px solid var(--error-line);
+            background: #fffafa;
+            color: var(--error-text);
+            box-shadow: 0 22px 52px rgba(180, 35, 24, 0.16);
+            font-size: 0.92rem;
+            font-weight: 700;
+            line-height: 1.45;
+            opacity: 0;
+            transform: translateY(-8px);
+            transition: opacity 0.18s ease, transform 0.18s ease;
+        }
+
+        .auth-warning-popup.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .auth-warning-popup[hidden] {
+            display: none;
+        }
+
         .auth-form {
             display: none;
         }
@@ -281,7 +310,7 @@
             </div>
         </section>
 
-        <section class="auth-panel" data-initial-tab="{{ 'signup-form' if allow_signup and signup_error else 'login-form' }}">
+        <section class="auth-panel" data-initial-tab="{{ 'signup-form' if allow_signup and signup_error else 'login-form' }}" data-signup-domain="{{ signup_email_domain }}">
             <div class="tab-switcher" role="tablist" aria-label="Pilihan akses">
                 <button type="button" class="tab-button" id="tab-login" role="tab" data-target="login-form" aria-controls="login-form" aria-selected="false">Masuk</button>
                 {% if allow_signup %}
@@ -350,6 +379,7 @@
             {% endif %}
         </section>
     </div>
+    <div id="signup-domain-warning" class="auth-warning-popup" role="alert" hidden></div>
 
         <script>
         (function () {
@@ -359,6 +389,10 @@
                 'login-form': document.getElementById('login-form'),
                 'signup-form': document.getElementById('signup-form')
             };
+            const signupEmailInput = document.getElementById('signup-username');
+            const signupWarning = document.getElementById('signup-domain-warning');
+            const signupDomain = (authPanel?.dataset.signupDomain || '').replace(/^@/, '').toLowerCase();
+            let signupWarningTimer = null;
 
             function activateTab(targetId) {
                 Object.entries(forms).forEach(([formId, formEl]) => {
@@ -380,6 +414,55 @@
 
             document.querySelectorAll('[data-show-tab]').forEach((button) => {
                 button.addEventListener('click', () => activateTab(button.getAttribute('data-show-tab')));
+            });
+
+            function hideSignupWarning() {
+                if (!signupWarning) return;
+                signupWarning.classList.remove('visible');
+                if (signupWarningTimer) {
+                    window.clearTimeout(signupWarningTimer);
+                    signupWarningTimer = null;
+                }
+                window.setTimeout(() => {
+                    if (!signupWarning.classList.contains('visible')) {
+                        signupWarning.hidden = true;
+                    }
+                }, 180);
+            }
+
+            function showSignupWarning(message) {
+                if (!signupWarning) return;
+                signupWarning.textContent = message;
+                signupWarning.hidden = false;
+                window.requestAnimationFrame(() => signupWarning.classList.add('visible'));
+                if (signupWarningTimer) window.clearTimeout(signupWarningTimer);
+                signupWarningTimer = window.setTimeout(hideSignupWarning, 6000);
+            }
+
+            function signupEmailDomainError(value) {
+                if (!signupDomain) return '';
+                const email = String(value || '').trim().toLowerCase();
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                    return `Gunakan format email internal yang valid, misalnya nama@${signupDomain}.`;
+                }
+                if (!email.endsWith(`@${signupDomain}`)) {
+                    return `Pendaftaran hanya dapat menggunakan email internal @${signupDomain}.`;
+                }
+                return '';
+            }
+
+            forms['signup-form']?.addEventListener('submit', (event) => {
+                const message = signupEmailDomainError(signupEmailInput?.value || '');
+                if (!message) return;
+                event.preventDefault();
+                showSignupWarning(message);
+                signupEmailInput?.focus();
+            });
+
+            signupEmailInput?.addEventListener('input', () => {
+                if (!signupEmailDomainError(signupEmailInput.value)) {
+                    hideSignupWarning();
+                }
             });
 
             const initialTab = authPanel?.dataset.initialTab || 'login-form';

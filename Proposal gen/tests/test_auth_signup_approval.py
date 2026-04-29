@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from bs4 import BeautifulSoup
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -90,6 +92,23 @@ class SignupAccessTest(unittest.TestCase):
         query = parse_qs(urlparse(response.headers["Location"]).query)
         self.assertIn("@inixindojogja.co.id", query.get("signup_error", [""])[0].lower())
         self.assertIsNone(self.store.get_user("rogue@example.com"))
+
+    def test_signup_page_has_client_side_domain_warning(self) -> None:
+        client = self.app.test_client()
+
+        response = client.get("/auth")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.get_data(as_text=True), "html.parser")
+        panel = soup.select_one(".auth-panel")
+        warning = soup.select_one("#signup-domain-warning")
+        script = soup.find_all("script")[-1].string or ""
+        self.assertEqual(panel["data-signup-domain"], "inixindojogja.co.id")
+        self.assertIsNotNone(warning)
+        self.assertEqual(warning["role"], "alert")
+        self.assertIn("hidden", warning.attrs)
+        self.assertIn("signup-domain-warning", script)
+        self.assertIn("preventDefault", script)
 
 
 if __name__ == "__main__":
