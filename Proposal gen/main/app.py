@@ -458,10 +458,17 @@ def _company_candidates() -> list[str]:
     return sorted([c for c in companies if c.lower() != 'nan' and c])
 
 
+def _request_payload_with_kak_defaults(data: Dict[str, Any]) -> Dict[str, Any]:
+    return app_state_store.resolve_kak_references_in_payload(
+        normalize_payload(data or {}),
+        company_candidates=_company_candidates(),
+    )
+
+
 @app.route('/api/suggest-budget', methods=['POST'])
 def suggest_budget():
     """Estimate pricing tiers from public financial signals."""
-    data = normalize_payload(request.json or {})
+    data = _request_payload_with_kak_defaults(request.json or {})
     required_fields = [
         'nama_perusahaan',
         'mode_proposal',
@@ -504,7 +511,7 @@ def suggest_budget():
 
 @app.route('/api/preview-outline', methods=['POST'])
 def preview_outline():
-    data = normalize_payload(request.json or {})
+    data = _request_payload_with_kak_defaults(request.json or {})
     _warm_request_context(data)
     outline = proposal_generator.build_preview_outline(data)
     return jsonify({"outline": outline})
@@ -512,7 +519,7 @@ def preview_outline():
 
 @app.route('/api/prefetch-context', methods=['POST'])
 def prefetch_context():
-    data = normalize_payload(request.json or {})
+    data = _request_payload_with_kak_defaults(request.json or {})
     status = _warm_request_context(data)
     return jsonify({"status": status})
 
@@ -538,7 +545,7 @@ def set_active_kak_context():
 
 @app.route('/generate', methods=['POST'])
 def generate_proposal():
-    data = normalize_payload(request.json or {})
+    data = _request_payload_with_kak_defaults(request.json or {})
     required_fields = [
         'nama_perusahaan',
         'konteks_organisasi',

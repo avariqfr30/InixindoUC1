@@ -3,7 +3,14 @@ from __future__ import annotations
 
 from .proposal_shared import *
 from .schema_mapping import SchemaMapper
-from .text_hygiene import compact_context_lines, formalize_caps_text, normalize_field_value, normalize_payload
+from .text_hygiene import (
+    compact_context_lines,
+    formalize_caps_text,
+    is_kak_reference,
+    normalize_duration_text,
+    normalize_field_value,
+    normalize_payload,
+)
 
 class AppStateStore:
     def __init__(self, db_path: Optional[Path] = None, asset_root: Optional[Path] = None) -> None:
@@ -860,6 +867,17 @@ class AppStateStore:
 
     @staticmethod
     def _best_duration_signal(text: str) -> str:
+        explicit_duration = AppStateStore._first_non_empty_match(
+            text,
+            [
+                r"(?:jangka waktu(?:\s+pelaksanaan)?|durasi|masa pelaksanaan|waktu pelaksanaan)\s*\|+\s*([^\n|]{3,80})",
+                r"(?:jangka waktu(?:\s+pelaksanaan)?|durasi|masa pelaksanaan|waktu pelaksanaan)\s*[:\-]?\s*([^\n.;|]{3,80})",
+            ],
+        )
+        explicit_duration = normalize_duration_text(explicit_duration)
+        if explicit_duration:
+            return explicit_duration
+
         timeline_items = AppStateStore._extract_kak_timeline_items(text)
         max_week = 0
         max_month = 0
@@ -893,6 +911,8 @@ class AppStateStore:
         for raw_line in source.splitlines():
             line = re.sub(r"\s+", " ", raw_line).strip()
             if not line or not re.search(r"\b(minggu|pekan|bulan|hari)\b", line, flags=re.IGNORECASE):
+                continue
+            if re.search(r"\b(jangka\s+waktu|durasi|masa\s+pelaksanaan|waktu\s+pelaksanaan)\b", line, flags=re.IGNORECASE):
                 continue
             if re.search(r"\b(no|periode|fase|aktivitas|deliverable)\b", line, flags=re.IGNORECASE) and "|" in line:
                 continue
@@ -950,7 +970,16 @@ class AppStateStore:
         if not match:
             return ""
         raw = re.sub(r"\n{2,}", "\n", str(match.group(1) or "")).strip()
-        lines = [re.sub(r"\s+", " ", line).strip(" -•\t") for line in raw.splitlines() if re.sub(r"\s+", " ", line).strip()]
+        lines: List[str] = []
+        for raw_section_line in raw.splitlines():
+            normalized_line = re.sub(r"\s+", " ", raw_section_line).strip(" -•\t")
+            if not normalized_line:
+                continue
+            if normalized_line.startswith("|"):
+                break
+            if re.search(r"\b(jangka\s+waktu|durasi|masa\s+pelaksanaan|waktu\s+pelaksanaan)\b", normalized_line, flags=re.IGNORECASE):
+                break
+            lines.append(normalized_line)
         if not lines:
             return ""
         return " ".join(lines[:max_lines]).strip()
@@ -1382,6 +1411,32 @@ class AppStateStore:
             "portfolio_context": "\n".join(portfolio_lines),
             "credential_context": "\n".join(credential_lines),
         }
+
+    def resolve_kak_references_in_payload(
+        self,
+        payload: Dict[str, Any],
+        company_candidates: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        normalized = normalize_payload(payload or {})
+        kak = self.get_latest_kak_context(company_candidates=company_candidates).get("analysis", {})
+        suggestions = normalize_payload(kak.get("suggestions") or {}) if kak.get("available") else {}
+        if not suggestions:
+            return normalized
+        reference_fields = {
+            "nama_perusahaan",
+            "konteks_organisasi",
+            "permasalahan",
+            "klasifikasi_kebutuhan",
+            "estimasi_waktu",
+            "estimasi_biaya",
+            "potensi_framework",
+        }
+        for field in reference_fields:
+            if field in normalized and is_kak_reference(normalized.get(field)):
+                replacement = suggestions.get(field)
+                if replacement:
+                    normalized[field] = replacement
+        return normalize_payload(normalized)
 
     def save_template(self, filename: str, raw_bytes: bytes) -> Dict[str, Any]:
         safe_name = self._sanitize_filename(filename or "template_blanko.docx", fallback="template_blanko.docx")

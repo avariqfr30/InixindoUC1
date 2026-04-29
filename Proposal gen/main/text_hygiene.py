@@ -30,6 +30,11 @@ FIELD_MAX_CHARS = {
     "potensi_framework": 500,
 }
 
+KAK_REFERENCE_PATTERN = re.compile(
+    r"^\s*(?:sesuai|mengacu|berdasarkan|ikut)\s+(?:dokumen\s+)?(?:kak|tor)\s*\.?\s*$",
+    re.IGNORECASE,
+)
+
 
 def normalize_spacing(text: Any) -> str:
     value = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -68,6 +73,38 @@ def _format_word(word: str, index: int = 0) -> str:
     return f"{punctuation_prefix}{replacement}{punctuation_suffix}"
 
 
+def _format_sentence_word(word: str, capitalize: bool = False) -> str:
+    punctuation_prefix = word[: len(word) - len(word.lstrip("([{\"'"))]
+    punctuation_suffix = word[len(word.rstrip(")]}\"'.,;:")) :]
+    core = word[len(punctuation_prefix) : len(word) - len(punctuation_suffix) if punctuation_suffix else len(word)]
+    if not core:
+        return word
+    normalized_core = re.sub(r"[^A-Za-z0-9]+", "", core).upper()
+    if normalized_core in ACRONYMS:
+        replacement = normalized_core
+    elif re.fullmatch(r"PT\.?|CV\.?|TBK\.?", core, re.IGNORECASE):
+        replacement = core.upper().replace("TBK", "Tbk").rstrip(".")
+    else:
+        replacement = core.lower()
+        if capitalize:
+            replacement = replacement[:1].upper() + replacement[1:]
+    return f"{punctuation_prefix}{replacement}{punctuation_suffix}"
+
+
+def _sentence_case_caps_line(line: str) -> str:
+    tokens = line.split()
+    formatted: List[str] = []
+    capitalize_next = True
+    for token in tokens:
+        formatted_token = _format_sentence_word(token, capitalize=capitalize_next)
+        formatted.append(formatted_token)
+        if re.search(r"[.!?:]$", token):
+            capitalize_next = True
+        elif formatted_token:
+            capitalize_next = False
+    return " ".join(formatted)
+
+
 def formalize_caps_text(text: Any) -> str:
     value = normalize_spacing(text)
     if not value:
@@ -79,15 +116,52 @@ def formalize_caps_text(text: Any) -> str:
             formatted_lines.append("")
             continue
         words = line.split()
-        should_title = _uppercase_ratio(line) >= 0.72 and len(words) <= 28
-        if should_title:
+        is_mostly_caps = _uppercase_ratio(line) >= 0.72
+        looks_like_sentence = bool(re.search(r"[.!?]$", line)) and len(words) >= 5
+        if is_mostly_caps and not looks_like_sentence and len(words) <= 28:
             line = " ".join(_format_word(word, idx) for idx, word in enumerate(words))
+        elif is_mostly_caps:
+            line = _sentence_case_caps_line(line)
         formatted_lines.append(line)
     return normalize_spacing("\n".join(formatted_lines))
 
 
-def normalize_field_value(key: str, value: Any) -> str:
+def is_kak_reference(value: Any) -> bool:
+    return bool(KAK_REFERENCE_PATTERN.match(str(value or "").strip()))
+
+
+def normalize_duration_text(value: Any) -> str:
     cleaned = formalize_caps_text(value)
+    cleaned = re.sub(r"\|", " ", cleaned)
+    cleaned = re.sub(r"\(\s*[^)]*?\s*\)", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" :;-,.")
+    match = re.search(
+        r"(\d+(?:[.,]\d+)?)\s*(hari|minggu|pekan|bulan|tahun)(?:\s+(kalender|kerja))?",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return normalize_spacing(cleaned)
+    raw_number = match.group(1).replace(",", ".")
+    number = raw_number[:-2] if raw_number.endswith(".0") else raw_number
+    unit_map = {
+        "hari": "Hari",
+        "minggu": "Minggu",
+        "pekan": "Minggu",
+        "bulan": "Bulan",
+        "tahun": "Tahun",
+    }
+    unit = unit_map.get(match.group(2).lower(), match.group(2).title())
+    qualifier = match.group(3)
+    return " ".join(part for part in [number, unit, qualifier.title() if qualifier else ""] if part)
+
+
+def normalize_field_value(key: str, value: Any) -> str:
+    if key == "estimasi_waktu":
+        return normalize_duration_text(value)
+    cleaned = formalize_caps_text(value)
+    if key == "estimasi_biaya":
+        cleaned = re.sub(r"(?<=\d)\.\s+(?=\d)", ".", cleaned)
     cleaned = re.sub(r"^\s*[-*•]\s*", "- ", cleaned, flags=re.MULTILINE)
     cleaned = re.sub(r"^\s*(\d+)[)]\s+", r"\1. ", cleaned, flags=re.MULTILINE)
     max_chars = FIELD_MAX_CHARS.get(key)
