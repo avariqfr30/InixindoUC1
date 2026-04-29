@@ -21,9 +21,11 @@ from .config import (
     APP_HOST,
     APP_PORT,
     APP_SECRET_KEY,
+    AUTH_ALLOW_SIGNUP,
     AUTH_FORCE_SINGLE_SESSION,
     AUTH_MAX_GLOBAL_ACTIVE_SESSIONS,
     AUTH_MAX_SESSIONS_PER_USER,
+    AUTH_REQUIRE_SIGNUP_APPROVAL,
     DB_URI,
     GENERATION_PROFILE,
     JOB_POLL_INTERVAL_MS,
@@ -193,6 +195,7 @@ def auth_page():
         signup_error=request.args.get("signup_error", "").strip(),
         signup_success=request.args.get("signup_success", "").strip(),
         next_target=auth_flow.login_redirect_target(),
+        allow_signup=AUTH_ALLOW_SIGNUP,
     )
 
 
@@ -234,6 +237,16 @@ def login():
             )
         return redirect(url_for("auth_page", login_error="Username atau password tidak cocok.", next=next_target))
 
+    if str(user.get("status") or "approved") != "approved":
+        app_state_store.clear_login_failures(username=username, remote_ip=remote_ip)
+        return redirect(
+            url_for(
+                "auth_page",
+                login_error="Akun belum dikonfirmasi admin. Hubungi admin internal untuk mengaktifkan akses.",
+                next=next_target,
+            )
+        )
+
     app_state_store.clear_login_failures(username=username, remote_ip=remote_ip)
     try:
         auth_flow.set_authenticated_user(str(user.get("username") or username))
@@ -251,6 +264,16 @@ def login():
 
 @app.route('/signup', methods=['POST'])
 def signup():
+    if not AUTH_ALLOW_SIGNUP:
+        next_target = auth_flow.safe_next_target(request.form.get("next"))
+        return redirect(
+            url_for(
+                "auth_page",
+                login_error="Pendaftaran mandiri dinonaktifkan. Hubungi admin internal untuk dibuatkan akun.",
+                next=next_target,
+            )
+        )
+
     username = str(request.form.get("username") or "").strip()
     password = str(request.form.get("password") or "")
     confirm_password = str(request.form.get("confirm_password") or "")
@@ -268,11 +291,17 @@ def signup():
     created = app_state_store.create_user(
         username=username,
         password_hash=generate_password_hash(password, method="pbkdf2:sha256"),
+        status="pending" if AUTH_REQUIRE_SIGNUP_APPROVAL else "approved",
+        approved_by="signup-auto",
     )
     if not created:
         return redirect(url_for("auth_page", signup_error="Username sudah dipakai. Gunakan username lain.", next=next_target))
 
-    return redirect(url_for("auth_page", signup_success="Akun berhasil dibuat. Silakan login.", next=next_target))
+    if AUTH_REQUIRE_SIGNUP_APPROVAL:
+        message = "Permintaan akun berhasil dikirim dan menunggu konfirmasi admin."
+    else:
+        message = "Akun berhasil dibuat. Silakan login."
+    return redirect(url_for("auth_page", signup_success=message, next=next_target))
 
 
 @app.route('/logout', methods=['POST'])

@@ -90,7 +90,10 @@ class AppStateStore:
                     username TEXT NOT NULL UNIQUE,
                     username_key TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
-                    created_at REAL NOT NULL
+                    created_at REAL NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'approved',
+                    approved_at REAL,
+                    approved_by TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
@@ -136,6 +139,27 @@ class AppStateStore:
             for column_name, ddl in column_backfills.items():
                 if column_name not in existing_columns:
                     conn.execute(f"ALTER TABLE proposal_history ADD COLUMN {column_name} {ddl}")
+            user_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(app_users)").fetchall()
+            }
+            user_column_backfills = {
+                "status": "TEXT NOT NULL DEFAULT 'approved'",
+                "approved_at": "REAL",
+                "approved_by": "TEXT NOT NULL DEFAULT ''",
+            }
+            for column_name, ddl in user_column_backfills.items():
+                if column_name not in user_columns:
+                    conn.execute(f"ALTER TABLE app_users ADD COLUMN {column_name} {ddl}")
+            conn.execute(
+                """
+                UPDATE app_users
+                SET status = 'approved',
+                    approved_at = COALESCE(approved_at, created_at),
+                    approved_by = CASE WHEN approved_by = '' THEN 'legacy' ELSE approved_by END
+                WHERE status IS NULL OR status = ''
+                """
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_app_sessions_username_active ON app_sessions(username_key, revoked_at, expires_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_app_sessions_active ON app_sessions(revoked_at, expires_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_login_attempts_user_ip ON app_login_attempts(username_key, remote_ip)")
@@ -238,7 +262,7 @@ class AppStateStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id, username, username_key, password_hash, created_at
+                SELECT id, username, username_key, password_hash, created_at, status, approved_at, approved_by
                 FROM app_users
                 WHERE username_key = ?
                 """,
@@ -252,19 +276,27 @@ class AppStateStore:
             "username_key": row["username_key"],
             "password_hash": row["password_hash"],
             "created_at": float(row["created_at"] or 0.0),
+            "status": str(row["status"] or "approved"),
+            "approved_at": float(row["approved_at"] or 0.0),
+            "approved_by": str(row["approved_by"] or ""),
         }
 
-    def create_user(self, username: str, password_hash: str) -> bool:
+    def create_user(self, username: str, password_hash: str, status: str = "approved", approved_by: str = "system") -> bool:
         normalized_username = self._normalize_username(username)
         username_key = self._username_key(normalized_username)
         if not normalized_username or not username_key or not password_hash:
             return False
+        normalized_status = str(status or "approved").strip().lower()
+        if normalized_status not in {"approved", "pending"}:
+            normalized_status = "approved"
+        approved_at = time.time() if normalized_status == "approved" else None
+        approver = str(approved_by or "system").strip() if normalized_status == "approved" else ""
         try:
             with self._connect() as conn:
                 conn.execute(
                     """
-                    INSERT INTO app_users(id, username, username_key, password_hash, created_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO app_users(id, username, username_key, password_hash, created_at, status, approved_at, approved_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         uuid.uuid4().hex,
@@ -272,12 +304,54 @@ class AppStateStore:
                         username_key,
                         str(password_hash),
                         time.time(),
+                        normalized_status,
+                        approved_at,
+                        approver,
                     ),
                 )
                 conn.commit()
             return True
         except sqlite3.IntegrityError:
             return False
+
+    def approve_user(self, username: str, approved_by: str = "admin") -> bool:
+        username_key = self._username_key(username)
+        if not username_key:
+            return False
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE app_users
+                SET status = 'approved',
+                    approved_at = ?,
+                    approved_by = ?
+                WHERE username_key = ?
+                  AND status != 'approved'
+                """,
+                (time.time(), str(approved_by or "admin").strip()[:96], username_key),
+            )
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def pending_users(self) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, username, username_key, created_at
+                FROM app_users
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+                """
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "username": row["username"],
+                "username_key": row["username_key"],
+                "created_at": float(row["created_at"] or 0.0),
+            }
+            for row in rows
+        ]
 
     @staticmethod
     def _login_attempt_key(username_key: str, remote_ip: str) -> str:
@@ -399,6 +473,8 @@ class AppStateStore:
     ) -> str:
         user = self.get_user(username)
         if not user:
+            return ""
+        if str(user.get("status") or "approved") != "approved":
             return ""
         now = time.time()
         self._cleanup_auth_state(now)

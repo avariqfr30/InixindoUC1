@@ -281,16 +281,18 @@
             </div>
         </section>
 
-        <section class="auth-panel" data-initial-tab="{{ 'signup-form' if signup_error else 'login-form' }}">
+        <section class="auth-panel" data-initial-tab="{{ 'signup-form' if allow_signup and signup_error else 'login-form' }}">
             <div class="tab-switcher" role="tablist" aria-label="Pilihan akses">
                 <button type="button" class="tab-button" id="tab-login" role="tab" data-target="login-form" aria-controls="login-form" aria-selected="false">Masuk</button>
+                {% if allow_signup %}
                 <button type="button" class="tab-button" id="tab-signup" role="tab" data-target="signup-form" aria-controls="signup-form" aria-selected="false">Daftar</button>
+                {% endif %}
             </div>
 
             <form method="POST" action="/login" id="login-form" class="auth-form" role="tabpanel" aria-labelledby="tab-login">
                 <input type="hidden" name="next" value="{{ next_target }}">
                 <h2 class="panel-title">Masuk</h2>
-                <p class="panel-subtitle">Masukkan username dan password yang sudah terdaftar untuk melanjutkan ke aplikasi.</p>
+                <p class="panel-subtitle">Masukkan username dan password yang sudah dikonfirmasi admin untuk melanjutkan ke aplikasi.</p>
 
                 {% if login_error %}
                 <div class="notice error">{{ login_error }}</div>
@@ -307,16 +309,21 @@
 
                 <button type="submit" class="submit-button">Masuk ke Sistem</button>
 
-                <p class="switch-note">
-                    Belum punya akun?
-                    <button type="button" class="switch-link" data-show-tab="signup-form">Daftar di sini.</button>
-                </p>
+                {% if allow_signup %}
+                    <p class="switch-note">
+                        Belum punya akun?
+                        <button type="button" class="switch-link" data-show-tab="signup-form">Daftar di sini.</button>
+                    </p>
+                {% else %}
+                    <p class="switch-note">Pendaftaran mandiri dinonaktifkan. Hubungi admin internal untuk akses akun.</p>
+                {% endif %}
             </form>
 
+            {% if allow_signup %}
             <form method="POST" action="/signup" id="signup-form" class="auth-form" role="tabpanel" aria-labelledby="tab-signup">
                 <input type="hidden" name="next" value="{{ next_target }}">
                 <h2 class="panel-title">Buat Akun</h2>
-                <p class="panel-subtitle">Buat username dan password internal sederhana agar bisa mengakses aplikasi dengan aman.</p>
+                <p class="panel-subtitle">Ajukan username dan password internal. Akses baru aktif setelah dikonfirmasi admin.</p>
 
                 {% if signup_error %}
                 <div class="notice error">{{ signup_error }}</div>
@@ -333,13 +340,14 @@
                 <label for="signup-confirm-password">Konfirmasi Password</label>
                 <input id="signup-confirm-password" name="confirm_password" type="password" minlength="6" autocomplete="new-password" required>
 
-                <button type="submit" class="submit-button">Buat Akun</button>
+                <button type="submit" class="submit-button">Ajukan Akun</button>
 
                 <p class="switch-note">
                     Sudah punya akun?
                     <button type="button" class="switch-link" data-show-tab="login-form">Masuk di sini.</button>
                 </p>
             </form>
+            {% endif %}
         </section>
     </div>
 
