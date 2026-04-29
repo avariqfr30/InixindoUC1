@@ -26,6 +26,7 @@ from .config import (
     AUTH_MAX_GLOBAL_ACTIVE_SESSIONS,
     AUTH_MAX_SESSIONS_PER_USER,
     AUTH_REQUIRE_SIGNUP_APPROVAL,
+    AUTH_SIGNUP_EMAIL_DOMAIN,
     DB_URI,
     GENERATION_PROFILE,
     JOB_POLL_INTERVAL_MS,
@@ -177,6 +178,22 @@ def _write_internal_api_config(config_payload: Dict[str, Any]) -> Path:
     return target
 
 
+def _normalize_signup_email(raw_value: str) -> str:
+    return re.sub(r"\s+", "", str(raw_value or "").strip()).lower()
+
+
+def _signup_email_error(email: str) -> str:
+    required_domain = AUTH_SIGNUP_EMAIL_DOMAIN
+    if not required_domain:
+        return ""
+    if not re.fullmatch(r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}", email or ""):
+        return f"Gunakan email internal @{required_domain} untuk mendaftar."
+    _, _, domain = email.rpartition("@")
+    if domain != required_domain:
+        return f"Pendaftaran hanya untuk email internal @{required_domain}."
+    return ""
+
+
 @app.route('/')
 @login_required
 def home():
@@ -274,15 +291,16 @@ def signup():
             )
         )
 
-    username = str(request.form.get("username") or "").strip()
+    username = _normalize_signup_email(request.form.get("username") or "")
     password = str(request.form.get("password") or "")
     confirm_password = str(request.form.get("confirm_password") or "")
     next_target = auth_flow.safe_next_target(request.form.get("next"))
 
     if not username or not password:
-        return redirect(url_for("auth_page", signup_error="Username dan password wajib diisi.", next=next_target))
-    if len(username) < 3:
-        return redirect(url_for("auth_page", signup_error="Username minimal 3 karakter.", next=next_target))
+        return redirect(url_for("auth_page", signup_error="Email internal dan password wajib diisi.", next=next_target))
+    email_error = _signup_email_error(username)
+    if email_error:
+        return redirect(url_for("auth_page", signup_error=email_error, next=next_target))
     if len(password) < 6:
         return redirect(url_for("auth_page", signup_error="Password minimal 6 karakter.", next=next_target))
     if password != confirm_password:

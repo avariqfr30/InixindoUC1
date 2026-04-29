@@ -111,7 +111,8 @@ _raw_internal_data_fallback = _normalize_internal_data_fallback(os.getenv("INTER
 INTERNAL_DATA_FALLBACK = _raw_internal_data_fallback or "none"
 DEMO_MODE = INTERNAL_DATA_SOURCE == "demo"
 AUTH_ALLOW_SIGNUP = os.getenv("AUTH_ALLOW_SIGNUP", "true").strip().lower() in {"1", "true", "yes", "on"}
-AUTH_REQUIRE_SIGNUP_APPROVAL = os.getenv("AUTH_REQUIRE_SIGNUP_APPROVAL", "true").strip().lower() in {"1", "true", "yes", "on"}
+AUTH_REQUIRE_SIGNUP_APPROVAL = os.getenv("AUTH_REQUIRE_SIGNUP_APPROVAL", "false").strip().lower() in {"1", "true", "yes", "on"}
+AUTH_SIGNUP_EMAIL_DOMAIN = os.getenv("AUTH_SIGNUP_EMAIL_DOMAIN", "inixindojogja.co.id").strip().lower().lstrip("@")
 FIRM_API_URL = os.getenv("FIRM_API_URL", "https://api.perusahaan-anda.com/v1").strip() or "https://api.perusahaan-anda.com/v1"
 FIRM_API_AUTH_MODE = os.getenv("FIRM_API_AUTH_MODE", "bearer").strip().lower() or "bearer"
 API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "isi_token_disini_nanti")

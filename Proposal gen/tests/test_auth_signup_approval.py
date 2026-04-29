@@ -1,4 +1,4 @@
-"""Regression tests for signup approval behavior."""
+"""Regression tests for internal-email signup access behavior."""
 from __future__ import annotations
 
 import os
@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
-class SignupApprovalTest(unittest.TestCase):
+class SignupAccessTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.tmp = tempfile.TemporaryDirectory()
@@ -31,9 +31,10 @@ class SignupApprovalTest(unittest.TestCase):
                 "APP_PROFILE": "demo",
                 "INTERNAL_DATA_SOURCE": "demo",
                 "AUTH_ALLOW_SIGNUP": "true",
-                "AUTH_REQUIRE_SIGNUP_APPROVAL": "true",
+                "AUTH_SIGNUP_EMAIL_DOMAIN": "inixindojogja.co.id",
             }
         )
+        os.environ.pop("AUTH_REQUIRE_SIGNUP_APPROVAL", None)
         from main.app import app, app_state_store
 
         cls.app = app
@@ -43,13 +44,13 @@ class SignupApprovalTest(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.tmp.cleanup()
 
-    def test_signup_creates_pending_user_that_cannot_login_until_approved(self) -> None:
+    def test_internal_email_signup_can_login_immediately(self) -> None:
         client = self.app.test_client()
 
         signup_response = client.post(
             "/signup",
             data={
-                "username": "pending.user",
+                "username": "pending.user@inixindojogja.co.id",
                 "password": "secret123",
                 "confirm_password": "secret123",
             },
@@ -58,32 +59,37 @@ class SignupApprovalTest(unittest.TestCase):
 
         self.assertEqual(signup_response.status_code, 302)
         signup_query = parse_qs(urlparse(signup_response.headers["Location"]).query)
-        self.assertIn("menunggu konfirmasi admin", signup_query.get("signup_success", [""])[0].lower())
-        user = self.store.get_user("pending.user")
+        self.assertIn("silakan login", signup_query.get("signup_success", [""])[0].lower())
+        user = self.store.get_user("pending.user@inixindojogja.co.id")
         self.assertIsNotNone(user)
-        self.assertEqual(user["status"], "pending")
-
-        blocked_login = client.post(
-            "/login",
-            data={"username": "pending.user", "password": "secret123"},
-            follow_redirects=False,
-        )
-
-        self.assertEqual(blocked_login.status_code, 302)
-        blocked_query = parse_qs(urlparse(blocked_login.headers["Location"]).query)
-        self.assertIn("belum dikonfirmasi", blocked_query.get("login_error", [""])[0].lower())
-
-        self.assertTrue(self.store.approve_user("pending.user", approved_by="admin"))
+        self.assertEqual(user["status"], "approved")
 
         allowed_login = client.post(
             "/login",
-            data={"username": "pending.user", "password": "secret123"},
+            data={"username": "pending.user@inixindojogja.co.id", "password": "secret123"},
             follow_redirects=False,
         )
 
         self.assertEqual(allowed_login.status_code, 302)
         self.assertEqual(urlparse(allowed_login.headers["Location"]).path, "/")
-        self.assertEqual(self.store.get_user("pending.user")["status"], "approved")
+
+    def test_signup_rejects_non_internal_email_domain(self) -> None:
+        client = self.app.test_client()
+
+        response = client.post(
+            "/signup",
+            data={
+                "username": "rogue@example.com",
+                "password": "secret123",
+                "confirm_password": "secret123",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        query = parse_qs(urlparse(response.headers["Location"]).query)
+        self.assertIn("@inixindojogja.co.id", query.get("signup_error", [""])[0].lower())
+        self.assertIsNone(self.store.get_user("rogue@example.com"))
 
 
 if __name__ == "__main__":
