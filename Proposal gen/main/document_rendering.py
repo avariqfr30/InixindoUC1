@@ -123,12 +123,75 @@ class LogoManager:
         return opaque_count / max(1, len(border_coords))
 
     @staticmethod
+    def _logo_identity_terms(client_name: str) -> List[str]:
+        ignored = {
+            "pt", "cv", "tbk", "persero", "company", "corp", "corporate",
+            "indonesia", "indo", "the", "and", "bank", "dinas", "kabupaten",
+            "kota", "provinsi", "pemerintah",
+        }
+        legal_ignored = {"pt", "cv", "tbk", "persero", "company", "corp", "corporate", "the", "and"}
+        acronym_words = [
+            word.lower()
+            for word in re.findall(r"[A-Za-z0-9]+", client_name or "")
+            if len(word) >= 3 and word.lower() not in legal_ignored
+        ]
+        words = [
+            word.lower()
+            for word in re.findall(r"[A-Za-z0-9]+", client_name or "")
+            if len(word) >= 3 and word.lower() not in ignored
+        ]
+        terms: List[str] = []
+        seen = set()
+        for word in words:
+            if word not in seen:
+                seen.add(word)
+                terms.append(word)
+        if len(acronym_words) >= 2:
+            acronym = "".join(word[0] for word in acronym_words[:4])
+            if len(acronym) >= 3 and acronym not in seen:
+                terms.append(acronym)
+        return terms
+
+    @staticmethod
+    def _logo_metadata_text(item: Dict[str, Any]) -> str:
+        values = [
+            item.get("title", ""),
+            item.get("source", ""),
+            item.get("link", ""),
+            item.get("imageUrl", ""),
+        ]
+        return " ".join(re.sub(r"[^A-Za-z0-9]+", " ", str(value or "")).lower() for value in values)
+
+    @staticmethod
+    def _logo_identity_score(item: Dict[str, Any], client_name: str) -> float:
+        terms = LogoManager._logo_identity_terms(client_name)
+        if not terms:
+            return 0.0
+        metadata = LogoManager._logo_metadata_text(item)
+        source_host = ""
+        for key in ("source", "link", "imageUrl"):
+            try:
+                source_host += " " + (urlparse(str(item.get(key) or "")).netloc or "")
+            except Exception:
+                continue
+        source_host = re.sub(r"[^A-Za-z0-9]+", " ", source_host).lower()
+        hit_count = sum(1 for term in terms if re.search(rf"\b{re.escape(term)}\b", metadata))
+        host_hit_count = sum(1 for term in terms if term in source_host)
+        required_hits = 1 if len(terms) <= 1 else 2
+        if (hit_count + host_hit_count) < required_hits:
+            return 0.0
+        score = float(hit_count) + (0.75 * host_hit_count)
+        if "logo" in metadata:
+            score += 0.35
+        return score
+
+    @staticmethod
     def get_logo_and_color(client_name: str) -> Tuple[Optional[io.BytesIO], Tuple[int, int, int]]:
         if not Researcher._has_serper_key():
             return LogoManager._create_fallback_logo(client_name), DEFAULT_COLOR
         try:
             url = "https://google.serper.dev/images"
-            payload = json.dumps({"q": f"{client_name} corporate logo png transparent", "num": 3})
+            payload = json.dumps({"q": f"official {client_name} logo png transparent", "num": 6})
             headers = {'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'}
             res = requests.post(url, headers=headers, data=payload, timeout=8).json()
             
@@ -136,6 +199,9 @@ class LogoManager:
                 best_candidate: Optional[Tuple[float, io.BytesIO, Tuple[int, int, int]]] = None
                 for item in res['images']:
                     try:
+                        identity_score = LogoManager._logo_identity_score(item, client_name)
+                        if identity_score <= 0:
+                            continue
                         img_resp = requests.get(item['imageUrl'], headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
                         if img_resp.status_code == 200:
                             stream = io.BytesIO(img_resp.content)
@@ -154,7 +220,7 @@ class LogoManager:
                             png_stream = io.BytesIO()
                             img.save(png_stream, format='PNG')
                             png_stream.seek(0)
-                            score = border_ratio + (0.01 * abs((img.width / max(1, img.height)) - 3.0))
+                            score = border_ratio + (0.01 * abs((img.width / max(1, img.height)) - 3.0)) - (0.08 * identity_score)
                             candidate = (score, png_stream, tuple(dom_color))
                             if best_candidate is None or candidate[0] < best_candidate[0]:
                                 best_candidate = candidate

@@ -132,6 +132,17 @@ def is_kak_reference(value: Any) -> bool:
 
 def normalize_duration_text(value: Any) -> str:
     cleaned = formalize_caps_text(value)
+    canonical_match = re.search(
+        r"(\d+(?:[.,]\d+)?)\s*(bulan|month|months)\s*\((\d+(?:[.,]\d+)?)\s*(hari|day|days)(?:\s+(kalender|kerja))?\)",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if canonical_match:
+        month_number = canonical_match.group(1).replace(",", ".")
+        day_number = canonical_match.group(3).replace(",", ".")
+        qualifier = canonical_match.group(5)
+        day_label = " ".join(part for part in [day_number, "Hari", qualifier.title() if qualifier else ""] if part)
+        return f"{month_number} Bulan ({day_label})"
     cleaned = re.sub(r"\|", " ", cleaned)
     cleaned = re.sub(r"\(\s*[^)]*?\s*\)", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" :;-,.")
@@ -151,9 +162,22 @@ def normalize_duration_text(value: Any) -> str:
         "bulan": "Bulan",
         "tahun": "Tahun",
     }
-    unit = unit_map.get(match.group(2).lower(), match.group(2).title())
+    raw_unit = match.group(2).lower()
+    unit = unit_map.get(raw_unit, match.group(2).title())
     qualifier = match.group(3)
-    return " ".join(part for part in [number, unit, qualifier.title() if qualifier else ""] if part)
+    canonical = " ".join(part for part in [number, unit, qualifier.title() if qualifier else ""] if part)
+    try:
+        numeric = float(raw_number)
+    except ValueError:
+        numeric = 0.0
+    if raw_unit == "hari" and numeric >= 28:
+        months = numeric / 30.0
+        if abs(months - round(months)) < 0.05:
+            month_label = str(int(round(months)))
+        else:
+            month_label = f"{months:.1f}".rstrip("0").rstrip(".")
+        return f"{month_label} Bulan ({canonical})"
+    return canonical
 
 
 def normalize_field_value(key: str, value: Any) -> str:

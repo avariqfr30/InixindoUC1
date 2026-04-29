@@ -2439,6 +2439,8 @@ class ProposalSupportMixin:
         if unit in {"minggu", "pekan", "week", "weeks"}:
             return "Minggu", max(4, int(round(value)))
         if unit in {"hari", "day", "days"}:
+            if value >= 28:
+                return "Bulan", max(1, int(round(value / 30.0)))
             return "Minggu", max(2, int((value + 6) // 7))
         return "Bulan", max(2, int(round(value)))
 

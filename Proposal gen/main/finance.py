@@ -150,12 +150,13 @@ class FinancialAnalyzer:
 
     @classmethod
     def _duration_to_months(cls, timeline: str) -> Optional[float]:
-        text = (timeline or "").lower().strip()
+        text = re.sub(r"\([^)]*\)", " ", (timeline or "").lower()).strip()
         if not text: return None
         patterns = [
             (r"(\d+(?:[.,]\d+)?)\s*(tahun|thn|year|years)", 12.0),
             (r"(\d+(?:[.,]\d+)?)\s*(bulan|bln|month|months)", 1.0),
             (r"(\d+(?:[.,]\d+)?)\s*(minggu|week|weeks)", 1.0 / 4.345),
+            (r"(\d+(?:[.,]\d+)?)\s*(hari|day|days)", 1.0 / 30.0),
         ]
         months = 0.0
         found = False
@@ -284,4 +285,3 @@ class FinancialAnalyzer:
             if markdown: llm_financial_data = self._extract_financials_with_llm(client_name, markdown)
         
         return self._dynamic_budget_from_osint(client_name, finance_snippets, benchmark_snippets, timeline, project_type, service_type, project_goal, objective, notes, frameworks, llm_financial_data)
-
