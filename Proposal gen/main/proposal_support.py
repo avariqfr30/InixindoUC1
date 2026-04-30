@@ -5404,6 +5404,78 @@ class ProposalSupportMixin:
 
     # ========== ENHANCED CLOSING CHAPTER METHODS ==========
     # Helper methods for enhancing closing chapters with OSINT firm information
+
+    @staticmethod
+    def _low_confidence_osint_firm_text(firm_name: str, value: str) -> bool:
+        cleaned = re.sub(r"\s+", " ", str(value or "")).strip()
+        if not cleaned:
+            return True
+        lowered = cleaned.lower()
+        firm_lower = str(firm_name or "").lower()
+        placeholder_bits = [
+            f"tim profesional {firm_lower} memiliki pengalaman di berbagai domain strategis",
+            f"portofolio {firm_lower} mencakup berbagai klien enterprise",
+            f"hubungi {firm_lower} melalui saluran resmi",
+            f"{firm_lower} terus membangun reputasi melalui proyek-proyek tepat guna",
+            "tersedia di saluran publik resmi",
+        ]
+        return any(bit and bit in lowered for bit in placeholder_bits)
+
+    @staticmethod
+    def _source_safe_firm_evidence_text(firm_name: str, value: str) -> str:
+        cleaned = re.sub(r"\s+", " ", str(value or "").replace("\xa0", " ")).strip()
+        if ProposalSupportMixin._low_confidence_osint_firm_text(firm_name, cleaned):
+            return ""
+        if re.match(r"^(dirangkum|berdasarkan|menurut|sumber)\b", cleaned, flags=re.IGNORECASE):
+            return cleaned
+        return f"Dirangkum dari sumber publik/OSINT: {cleaned}"
+
+    @staticmethod
+    def _merge_writer_firm_evidence_profile(
+        firm_name: str,
+        firm_profile: Optional[Dict[str, Any]],
+        comprehensive_profile: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        profile = dict(firm_profile or {})
+        evidence = comprehensive_profile or {}
+        for field in (
+            "values_approach",
+            "team_expertise",
+            "portfolio_scale",
+            "certifications",
+            "accolades",
+        ):
+            source_safe = ProposalSupportMixin._source_safe_firm_evidence_text(
+                firm_name,
+                str(evidence.get(field) or ""),
+            )
+            if source_safe:
+                profile[field] = source_safe
+
+        source_urls = profile.get("official_source_urls") or []
+        if isinstance(source_urls, str):
+            source_urls = [item.strip() for item in source_urls.split(",") if item.strip()]
+        elif isinstance(source_urls, list):
+            source_urls = [str(item).strip() for item in source_urls if str(item).strip()]
+        else:
+            source_urls = []
+        for key in ("official_source_urls", "source_urls", "sources"):
+            values = evidence.get(key)
+            if isinstance(values, str):
+                values = [item.strip() for item in values.split(",") if item.strip()]
+            if isinstance(values, list):
+                source_urls.extend(str(item).strip() for item in values if str(item).strip())
+        if source_urls:
+            deduped = []
+            seen = set()
+            for url in source_urls:
+                if url in seen:
+                    continue
+                deduped.append(url)
+                seen.add(url)
+            profile["official_source_urls"] = deduped
+        profile["_osint_firm_evidence_loaded"] = True
+        return profile
     
     @staticmethod
     def _build_firm_information_section(firm_name: str, office_location: str = "") -> str:
@@ -5482,6 +5554,20 @@ class ProposalSupportMixin:
         """
         if not comprehensive_profile:
             return ""
+        evidence_profile = ProposalSupportMixin._merge_writer_firm_evidence_profile(
+            firm_name,
+            firm_profile,
+            comprehensive_profile,
+        )
+        evidence_fields = (
+            "values_approach",
+            "team_expertise",
+            "portfolio_scale",
+            "certifications",
+            "accolades",
+        )
+        if not any(evidence_profile.get(field) for field in evidence_fields):
+            return ""
         
         sections = []
         sections.append("## Tentang Mitra Penulis Proposal")
@@ -5496,28 +5582,28 @@ class ProposalSupportMixin:
         sections.append("")
         
         # Firm values and approach from OSINT
-        if comprehensive_profile.get("values_approach"):
-            sections.append(f"**Pendekatan & Nilai Kami:** {comprehensive_profile['values_approach']}")
+        if evidence_profile.get("values_approach"):
+            sections.append(f"**Pendekatan & Nilai Kami:** {evidence_profile['values_approach']}")
             sections.append("")
         
         # Team expertise from OSINT
-        if comprehensive_profile.get("team_expertise"):
-            sections.append(f"**Keahlian Tim:** {comprehensive_profile['team_expertise']}")
+        if evidence_profile.get("team_expertise"):
+            sections.append(f"**Keahlian Tim:** {evidence_profile['team_expertise']}")
             sections.append("")
         
         # Portfolio and scale (external numbers from OSINT)
-        if comprehensive_profile.get("portfolio_scale"):
-            sections.append(f"**Portofolio & Skala Pengalaman:** {comprehensive_profile['portfolio_scale']}")
+        if evidence_profile.get("portfolio_scale"):
+            sections.append(f"**Portofolio & Skala Pengalaman:** {evidence_profile['portfolio_scale']}")
             sections.append("")
         
         # Certifications and credentials from OSINT
-        if comprehensive_profile.get("certifications"):
-            sections.append(f"**Sertifikasi & Kredensial:** {comprehensive_profile['certifications']}")
+        if evidence_profile.get("certifications"):
+            sections.append(f"**Sertifikasi & Kredensial:** {evidence_profile['certifications']}")
             sections.append("")
         
         # Industry recognition and accolades
-        if comprehensive_profile.get("accolades"):
-            sections.append(f"**Pengakuan Industri:** {comprehensive_profile['accolades']}")
+        if evidence_profile.get("accolades"):
+            sections.append(f"**Pengakuan Industri:** {evidence_profile['accolades']}")
             sections.append("")
         
         # Contact information

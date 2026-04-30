@@ -51,17 +51,13 @@ class ProposalEngineMixin:
             Enhanced closing content with firm information from OSINT/Serper
         """
         try:
-            # Gather comprehensive firma profile with OSINT data from Serper
-            firm_comprehensive_profile = Researcher.build_comprehensive_firm_profile(
-                WRITER_FIRM_NAME,
-                firm_profile.get("office_address", "") if firm_profile else ""
-            )
+            firm_evidence_profile = ProposalEngineMixin._build_writer_firm_evidence_profile(firm_profile)
             
             # Build firm information section leveraging OSINT for credentials, scale, etc.
             firm_section = ProposalSupportMixin._build_firm_information_section_from_osint(
                 firm_name=WRITER_FIRM_NAME,
-                comprehensive_profile=firm_comprehensive_profile,
-                firm_profile=firm_profile
+                comprehensive_profile=firm_evidence_profile,
+                firm_profile=firm_evidence_profile
             )
             
             # Combine original closing content with enhanced firm section
@@ -76,6 +72,42 @@ class ProposalEngineMixin:
         except Exception as e:
             logger.warning(f"Error enhancing closing with firm OSINT: {e}")
             return closing_content
+
+    @staticmethod
+    def _build_writer_firm_evidence_profile(
+        firm_profile: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        profile = dict(firm_profile or {})
+        if profile.get("_osint_firm_evidence_loaded"):
+            return profile
+        try:
+            comprehensive_profile = Researcher.build_comprehensive_firm_profile(
+                WRITER_FIRM_NAME,
+                profile.get("office_address", ""),
+            )
+        except Exception as e:
+            logger.warning(f"Could not build writer firm OSINT evidence profile: {e}")
+            comprehensive_profile = {}
+        return ProposalSupportMixin._merge_writer_firm_evidence_profile(
+            WRITER_FIRM_NAME,
+            profile,
+            comprehensive_profile,
+        )
+
+    @staticmethod
+    def _strip_writer_firm_profile_from_closing(closing_content: str) -> str:
+        content = (closing_content or "").strip()
+        if not content:
+            return ""
+        split_pattern = (
+            r'(?im)^\s*##\s*('
+            r'Informasi Kontak dan Langkah Lanjutan|'
+            r'Tentang Mitra Penulis Proposal|'
+            r'Tentang Penulis Proposal|'
+            r'Profil Penulis Proposal'
+            r')\s*$'
+        )
+        return re.split(split_pattern, content, maxsplit=1)[0].rstrip()
 
     def _apply_global_coherence(
         self,
@@ -365,6 +397,12 @@ class ProposalEngineMixin:
         firm_profile = self.firm_api.get_firm_profile()
         if app_state_store:
             firm_profile = app_state_store.enrich_firm_profile(firm_profile)
+        includes_writer_profile = any(chapter.get("id") == "c_closing" for chapter in selected_chapters)
+        writer_firm_profile = (
+            self._build_writer_firm_evidence_profile(firm_profile)
+            if includes_writer_profile
+            else dict(firm_profile or {})
+        )
         base_client = re.sub(r'\b(Cabang|Branch|Tbk)\b.*$|^(PT\.|CV\.)', '', client, flags=re.IGNORECASE).strip()
         ai_context = " ".join([
             project,
@@ -615,7 +653,7 @@ class ProposalEngineMixin:
             try:
                 chapter_outputs["c_closing"] = self._enhance_closing_with_firm_osint(
                     chapter_outputs["c_closing"],
-                    firm_profile
+                    writer_firm_profile
                 )
             except Exception as e:
                 logger.warning(f"Could not enhance closing with OSINT firm information: {e}")
@@ -684,7 +722,7 @@ class ProposalEngineMixin:
                     try:
                         chapter_outputs["c_closing"] = self._enhance_closing_with_firm_osint(
                             chapter_outputs["c_closing"],
-                            firm_profile
+                            writer_firm_profile
                         )
                     except Exception as e:
                         logger.warning(f"Could not enhance closing with OSINT firm information: {e}")
@@ -824,24 +862,9 @@ class ProposalEngineMixin:
             is_first_rendered_chapter = not rendered_any
             rendered_any = True
             if chapter['id'] == "c_closing":
-                # Enhance closing chapter with firm OSINT data (external numbers, credentials, portfolio)
-                # to help persuade the client they're hiring the right team
-                try:
-                    enhanced = self._enhance_closing_with_firm_osint(
-                        closing_content=content,
-                        firm_profile=firm_profile
-                    )
-                    if enhanced and len(enhanced.strip()) > len(content.strip()):
-                        content = enhanced
-                except Exception:
-                    pass
                 # The rendered DOCX appends a structured firm profile/contact block,
-                # so keep the closing narrative clean by stripping the inline contact section.
-                content = re.split(
-                    r'(?im)^\s*##\s*Informasi Kontak dan Langkah Lanjutan\s*$',
-                    content,
-                    maxsplit=1,
-                )[0].rstrip()
+                # so keep the closing narrative clean by stripping any inline profile/contact section.
+                content = self._strip_writer_firm_profile_from_closing(content)
             if not is_first_rendered_chapter:
                 doc.add_page_break()
             DocumentBuilder.add_reference_chapter_heading(
@@ -852,7 +875,7 @@ class ProposalEngineMixin:
             )
             DocumentBuilder.process_content(doc, content, theme_color, chapter['title'])
             if chapter['id'] == "c_closing" and not rendered_firm_profile:
-                DocumentBuilder.add_writer_firm_profile_section(doc, firm_profile, theme_color)
+                DocumentBuilder.add_writer_firm_profile_section(doc, writer_firm_profile, theme_color)
                 rendered_firm_profile = True
 
         if not rendered_any:

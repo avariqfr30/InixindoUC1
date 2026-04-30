@@ -176,6 +176,16 @@ python scripts/internal_api_config_tool.py init \
   --body-encoding form
 ```
 
+Dataset APIDog/Inworx yang sudah cocok dengan aplikasi saat ini:
+
+| Dataset | Pemakaian |
+| --- | --- |
+| `ConsultantProjectExpertHistory` | Sumber `project_records` dan bukti relasi/riwayat proyek berbasis `project_name`, `product_name`, `expert_name`, `position_name`. |
+| `ReferenceAccount` | Fallback referensi akun/klien berbasis `company_name`, wilayah, provinsi, dan segmentasi. |
+| `ReferenceDataset` | Katalog dataset, bukan sumber proposal langsung. |
+
+Dataset laporan kelas (`ClassReport`, `ReferenceClassReport`) sengaja belum dipakai sebagai sumber proposal langsung karena perlu agregasi kualitas pelatihan terlebih dahulu.
+
 Jika APIDog menyediakan contoh response JSON, mapping dapat dibantu otomatis:
 
 ```bash
@@ -198,7 +208,7 @@ Resource minimum yang perlu tersedia:
 | --- | --- |
 | `firm_profile` | `office_address`, `email`, `phone`, `website` |
 | `project_standards` | `methodology`, `team`, `commercial` |
-| `client_relationship` | `summary`, `mode` |
+| `client_relationship` | `summary` (`mode` dapat diturunkan otomatis dari riwayat proyek internal) |
 | `project_records` | `entity`, `topic` |
 
 Catatan penting:

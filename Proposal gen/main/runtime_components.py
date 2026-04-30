@@ -49,7 +49,7 @@ class FirmAPIClient:
     REQUIRED_RESOURCE_FIELDS: Dict[str, Tuple[str, ...]] = {
         "firm_profile": ("office_address", "email", "phone", "website"),
         "project_standards": ("methodology", "team", "commercial"),
-        "client_relationship": ("summary", "mode"),
+        "client_relationship": ("summary",),
         "project_records": ("entity", "topic"),
     }
 
@@ -286,8 +286,19 @@ class FirmAPIClient:
                 if isinstance(item, dict):
                     match = True
                     for k, expected in filters.items():
-                        actual = item.get(k)
-                        if str(actual).strip().lower() != str(expected).strip().lower():
+                        field_name = str(k)
+                        operator = "eq"
+                        if "__" in field_name:
+                            field_name, operator = field_name.rsplit("__", 1)
+                        actual = item.get(field_name)
+                        actual_text = str(actual or "").strip().lower()
+                        expected_text = str(expected or "").strip().lower()
+                        if operator in {"icontains", "contains"}:
+                            if expected_text not in actual_text:
+                                match = False
+                                break
+                            continue
+                        if actual_text != expected_text:
                             match = False
                             break
                     if match:
@@ -380,6 +391,49 @@ class FirmAPIClient:
         return {"summary": "", "mode": "new", "source": source, "verified": False}
 
     @staticmethod
+    def _project_history_relationship_summary(payload: Dict[str, Any]) -> str:
+        project_name = str(payload.get("project_name") or payload.get("summary") or "").strip()
+        product_name = str(payload.get("product_name") or "").strip()
+        expert_name = str(payload.get("expert_name") or "").strip()
+        position_name = str(payload.get("position_name") or "").strip()
+        if not project_name:
+            return ""
+
+        parts = [f"Data internal mencatat riwayat proyek: {project_name}."]
+        if product_name:
+            parts.append(f"Lingkup/produk terkait: {product_name}.")
+        if expert_name:
+            role = f" sebagai {position_name}" if position_name else ""
+            parts.append(f"Tenaga ahli tercatat: {expert_name}{role}.")
+        return " ".join(parts)
+
+    @staticmethod
+    def _account_reference_relationship_summary(payload: Dict[str, Any]) -> str:
+        company_name = str(payload.get("company_name") or "").strip()
+        if not company_name:
+            return ""
+        region = str(payload.get("company_region_name") or "").strip()
+        province = str(payload.get("company_province_name") or "").strip()
+        segment = str(payload.get("company_segment") or "").strip()
+        sub_segment = str(payload.get("company_sub_segment") or "").strip()
+        location = ", ".join(part for part in (region, province) if part)
+        classification = " / ".join(part for part in (segment, sub_segment) if part)
+        details = []
+        if location:
+            details.append(f"lokasi {location}")
+        if classification:
+            details.append(f"segmentasi {classification}")
+        suffix = f" ({'; '.join(details)})" if details else ""
+        return f"Data internal ReferenceAccount mencatat {company_name}{suffix}."
+
+    @staticmethod
+    def _normalized_relationship_mode(raw_mode: str, summary: str) -> str:
+        mode = str(raw_mode or "").strip().lower()
+        if mode in {"existing", "new"}:
+            return mode
+        return "existing" if str(summary or "").strip() else "new"
+
+    @staticmethod
     def _has_osint_evidence(summary: str) -> bool:
         return any(line.strip().startswith("Sumber eksternal") for line in (summary or "").splitlines())
 
@@ -430,14 +484,34 @@ class FirmAPIClient:
             return {"summary": "", "mode": "new", "source": "osint", "verified": False}
         try:
             payload = self._resolve_resource_payload("client_relationship", client_name=client_name)
-            data = GenericClientRelationshipSchema.model_validate(payload).model_dump()
-            data["mode"] = str(data.get("mode") or data.get("status") or "new").strip().lower() or "new"
+            raw_payload = payload if isinstance(payload, dict) else {}
+            data = GenericClientRelationshipSchema.model_validate(raw_payload).model_dump()
+            summary = self._project_history_relationship_summary(raw_payload) or str(data.get("summary") or "").strip()
+            data["summary"] = summary
+            data["mode"] = self._normalized_relationship_mode(data.get("mode") or data.get("status"), summary)
             data["source"] = "internal_api"
             data["verified"] = bool(data.get("summary"))
-            return data
+            if data["verified"]:
+                return data
         except Exception as e:
             logger.error(f"Internal API Error: {e}")
-            return self._empty_relationship_context()
+
+        try:
+            account_payload = self._resolve_resource_payload("account_records", client_name=client_name)
+            account_summary = self._account_reference_relationship_summary(
+                account_payload if isinstance(account_payload, dict) else {}
+            )
+            if account_summary:
+                return {
+                    "summary": account_summary,
+                    "mode": "new",
+                    "source": "internal_api",
+                    "verified": True,
+                }
+        except Exception as e:
+            logger.error(f"Internal API Account Reference Error: {e}")
+
+        return self._empty_relationship_context()
 
     @staticmethod
     def _extract_first(pattern: str, text: str) -> str:

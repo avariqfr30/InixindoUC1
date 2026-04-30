@@ -34,14 +34,22 @@ RESOURCE_ALIASES: Dict[str, Dict[str, List[str]]] = {
         "topic": ["topic", "strategic_initiative", "initiative", "project", "project_name", "program", "inisiatif"],
         "budget": ["budget", "investment_estimation", "investment", "estimated_budget", "anggaran", "nilai_proyek"],
     },
+    "account_records": {
+        "company_name": ["company_name", "company", "client", "client_name", "nama_perusahaan", "nama_klien"],
+        "company_region_name": ["company_region_name", "region", "city", "kota", "wilayah"],
+        "company_province_name": ["company_province_name", "province", "provinsi"],
+        "company_segment": ["company_segment", "segment", "segmen"],
+        "company_sub_segment": ["company_sub_segment", "sub_segment", "subsegmen"],
+    },
 }
 
 
 DEFAULT_DATASETS = {
     "firm_profile": "ReferenceAccount",
     "project_standards": "ProjectStandards",
-    "client_relationship": "ClientRelationship",
-    "project_records": "Projects",
+    "client_relationship": "ConsultantProjectExpertHistory",
+    "project_records": "ConsultantProjectExpertHistory",
+    "account_records": "ReferenceAccount",
 }
 
 
@@ -50,6 +58,7 @@ DEFAULT_RESPONSE_PATHS = {
     "project_standards": "data.dataset_result",
     "client_relationship": "data.dataset_result",
     "project_records": "data.dataset_result",
+    "account_records": "data.dataset_result",
 }
 
 
@@ -128,19 +137,38 @@ def build_internal_api_config(data: Dict[str, Any]) -> Dict[str, Any]:
             "client_relationship": {
                 "request": {"body": {"dataset": str(datasets.get("client_relationship") or DEFAULT_DATASETS["client_relationship"])}},
                 "response_path": str(paths.get("client_relationship") or DEFAULT_RESPONSE_PATHS["client_relationship"]),
-                "record_filters": {"client_name": "{client_name}"},
+                "record_filters": {"project_name__icontains": "{client_name}"},
                 "field_mapping": {
-                    "summary": "relationship_summary",
-                    "mode": "relationship_status",
+                    "summary": "project_name",
+                    "project_name": "project_name",
+                    "product_name": "product_name",
+                    "expert_name": "expert_name",
+                    "position_name": "position_name",
                 },
             },
             "project_records": {
                 "request": {"body": {"dataset": str(datasets.get("project_records") or DEFAULT_DATASETS["project_records"])}},
                 "response_path": str(paths.get("project_records") or DEFAULT_RESPONSE_PATHS["project_records"]),
                 "field_mapping": {
-                    "entity": "client_entity",
-                    "topic": "strategic_initiative",
-                    "budget": "investment_estimation",
+                    "entity": "project_name",
+                    "topic": "product_name",
+                    "project_name": "project_name",
+                    "expert_name": "expert_name",
+                    "position_name": "position_name",
+                },
+            },
+            "account_records": {
+                "request": {"body": {"dataset": str(datasets.get("account_records") or DEFAULT_DATASETS["account_records"])}},
+                "response_path": str(paths.get("account_records") or DEFAULT_RESPONSE_PATHS["account_records"]),
+                "record_filters": {"company_name__icontains": "{client_name}"},
+                "field_mapping": {
+                    "company_name": "company_name",
+                    "company_region_name": "company_region_name",
+                    "company_province_name": "company_province_name",
+                    "company_segment": "company_segment",
+                    "company_sub_segment": "company_sub_segment",
+                    "company_category_name": "company_category_name",
+                    "company_category_desc": "company_category_desc",
                 },
             },
         },

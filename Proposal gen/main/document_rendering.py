@@ -891,6 +891,11 @@ class DocumentBuilder:
         portfolio = str(profile.get("portfolio_highlights") or "").strip()
         credentials = str(profile.get("credential_highlights") or "").strip()
         legal_name = str(profile.get("legal_name") or "").strip()
+        values_approach = str(profile.get("values_approach") or "").strip()
+        team_expertise = str(profile.get("team_expertise") or "").strip()
+        portfolio_scale = str(profile.get("portfolio_scale") or "").strip()
+        certifications = str(profile.get("certifications") or "").strip()
+        accolades = str(profile.get("accolades") or "").strip()
 
         contact_rows = [
             ("Alamat kantor", profile.get("office_address", "")),
@@ -905,6 +910,11 @@ class DocumentBuilder:
             ("Fokus layanan", "Pelatihan IT, sertifikasi, dan konsultasi IT."),
             ("Portofolio", portfolio),
             ("Kapabilitas", credentials),
+            ("Pendekatan berbasis sumber publik", values_approach),
+            ("Keahlian tim berbasis sumber publik", team_expertise),
+            ("Skala dan bukti portofolio", portfolio_scale),
+            ("Sertifikasi dan kredensial eksternal", certifications),
+            ("Pengakuan eksternal", accolades),
         ]
         visible_detail_rows = [(label, str(value or "").strip()) for label, value in detail_rows if str(value or "").strip()]
         visible_contact_rows = [(label, str(value or "").strip()) for label, value in contact_rows if str(value or "").strip()]
