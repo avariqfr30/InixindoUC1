@@ -171,7 +171,7 @@ Lewat terminal:
 
 ```bash
 python scripts/internal_api_config_tool.py init \
-  --url "https://inworx.inixindojogja.co.id/api/Resource/dataset" \
+  --url "https://internal-api.example.com/api/Resource/dataset" \
   --out internal_api_config.json \
   --body-encoding form
 ```
@@ -183,8 +183,6 @@ Dataset APIDog/Inworx yang sudah cocok dengan aplikasi saat ini:
 | `ConsultantProjectExpertHistory` | Sumber `project_records` dan bukti relasi/riwayat proyek berbasis `project_name`, `product_name`, `expert_name`, `position_name`. |
 | `ReferenceAccount` | Fallback referensi akun/klien berbasis `company_name`, wilayah, provinsi, dan segmentasi. |
 | `ReferenceDataset` | Katalog dataset, bukan sumber proposal langsung. |
-
-Dataset laporan kelas (`ClassReport`, `ReferenceClassReport`) sengaja belum dipakai sebagai sumber proposal langsung karena perlu agregasi kualitas pelatihan terlebih dahulu.
 
 Jika APIDog menyediakan contoh response JSON, mapping dapat dibantu otomatis:
 
@@ -224,12 +222,12 @@ Jika operator tidak ingin mengedit `.env` manual, gunakan helper berikut:
 ```bash
 python scripts/profilectl.py demo --env-file .env
 python scripts/profilectl.py production --env-file .env \
-  --api-url "https://inworx.inixindojogja.co.id/api/Resource/dataset" \
+  --api-url "https://internal-api.example.com/api/Resource/dataset" \
   --auth-mode basic \
   --api-config /srv/apps/proposal-gen/internal_api_config.json \
   --project-data-source api
 python scripts/profilectl.py production --env-file .env \
-  --api-url "https://inworx.inixindojogja.co.id/api/Resource/dataset" \
+  --api-url "https://internal-api.example.com/api/Resource/dataset" \
   --auth-mode basic \
   --api-config /srv/apps/proposal-gen/internal_api_config.json \
   --project-data-source api \

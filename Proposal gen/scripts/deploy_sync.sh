@@ -93,6 +93,7 @@ declare -a RSYNC_ARGS=(
   --exclude '.venv'
   --exclude '__pycache__'
   --exclude '.env'
+  --exclude 'internal_api_config.json'
   --exclude 'generated/'
   --exclude 'app_assets/'
   --exclude 'app_state.db'

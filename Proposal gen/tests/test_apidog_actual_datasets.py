@@ -41,7 +41,7 @@ class ApidogActualDatasetTest(unittest.TestCase):
 
         config = build_internal_api_config(
             {
-                "url": "https://inworx.inixindojogja.co.id/api/Resource/dataset",
+                "url": "https://internal-api.example.com/api/Resource/dataset",
                 "method": "POST",
                 "body_encoding": "form",
                 "auth_mode": "basic",
