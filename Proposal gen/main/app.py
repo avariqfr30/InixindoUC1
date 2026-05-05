@@ -492,6 +492,12 @@ def internal_api_setup():
 
 @app.route('/api/companies')
 def get_companies():
+    try:
+        api_companies = proposal_generator.firm_api.get_client_options()
+        if api_companies:
+            return jsonify(api_companies)
+    except Exception:
+        logger.exception("Internal client option lookup failed; falling back to knowledge-base entities")
     if knowledge_base.df is None or knowledge_base.df.empty or 'entity' not in knowledge_base.df.columns:
         return jsonify([])
     companies = knowledge_base.df['entity'].dropna().astype(str).str.strip().unique().tolist()
@@ -500,10 +506,35 @@ def get_companies():
 
 
 def _company_candidates() -> list[str]:
+    try:
+        api_companies = proposal_generator.firm_api.get_client_options()
+        if api_companies:
+            return api_companies
+    except Exception:
+        logger.exception("Internal client candidate lookup failed; falling back to knowledge-base entities")
     if knowledge_base.df is None or knowledge_base.df.empty or 'entity' not in knowledge_base.df.columns:
         return []
     companies = knowledge_base.df['entity'].dropna().astype(str).str.strip().unique().tolist()
     return sorted([c for c in companies if c.lower() != 'nan' and c])
+
+
+@app.route('/api/client-context')
+def get_client_context():
+    client_name = _normalize_client_name(str(request.args.get("client_name") or "").strip())
+    if not client_name:
+        return jsonify({
+            "available": False,
+            "client_name": "",
+            "account_summary": "",
+            "use_case_summary": "",
+            "use_cases": [],
+            "expert_guidance": "",
+        })
+    try:
+        return jsonify(proposal_generator.firm_api.get_client_context(client_name))
+    except Exception as exc:
+        logger.exception("Internal client context lookup failed for %s", client_name)
+        return jsonify({"available": False, "client_name": client_name, "error": str(exc), "use_cases": []}), 502
 
 
 def _request_payload_with_kak_defaults(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -511,6 +542,36 @@ def _request_payload_with_kak_defaults(data: Dict[str, Any]) -> Dict[str, Any]:
         normalize_payload(data or {}),
         company_candidates=_company_candidates(),
     )
+
+
+def _client_internal_context_text(client_name: str) -> str:
+    try:
+        context = proposal_generator.firm_api.get_client_context(client_name)
+    except Exception:
+        logger.exception("Internal client context enrichment failed for %s", client_name)
+        return ""
+    if not context.get("available"):
+        return ""
+    lines = [
+        str(context.get("account_summary") or "").strip(),
+        str(context.get("use_case_summary") or "").strip(),
+        str(context.get("expert_guidance") or "").strip(),
+    ]
+    for item in (context.get("use_cases") or [])[:4]:
+        if not isinstance(item, dict):
+            continue
+        project_name = str(item.get("project_name") or "").strip()
+        product_name = str(item.get("product_name") or "").strip()
+        expert_name = str(item.get("expert_name") or "").strip()
+        position_name = str(item.get("position_name") or "").strip()
+        line = " | ".join(part for part in [
+            f"Riwayat proyek: {project_name}" if project_name else "",
+            f"Konteks/produk: {product_name}" if product_name else "",
+            f"Tenaga ahli: {expert_name}{f' sebagai {position_name}' if position_name else ''}" if expert_name else "",
+        ] if part)
+        if line:
+            lines.append(line)
+    return "\n".join(line for line in lines if line).strip()
 
 
 @app.route('/api/suggest-budget', methods=['POST'])
@@ -611,7 +672,11 @@ def generate_proposal():
         return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
 
     try:
-        data["_supporting_context"] = app_state_store.build_generation_context(company_candidates=_company_candidates())
+        supporting_context = app_state_store.build_generation_context(company_candidates=_company_candidates())
+        client_internal_context = _client_internal_context_text(data.get("nama_perusahaan", ""))
+        if client_internal_context:
+            supporting_context["client_internal_context"] = client_internal_context
+        data["_supporting_context"] = supporting_context
         ticket = generation_queue.submit(data)
     except OverflowError as exc:
         return jsonify({"error": str(exc)}), 429

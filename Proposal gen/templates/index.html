@@ -82,6 +82,8 @@
         .kak-summary-box { background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 0.86rem; line-height: 1.5; }
         .kak-summary-box strong { color: #7c2d12; }
         .kak-warning-list { margin: 8px 0 0 18px; padding: 0; color: #9a3412; font-size: 0.82rem; }
+        .client-context-box { background: #ecfdf5; border: 1px solid #86efac; color: #14532d; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 0.86rem; line-height: 1.5; }
+        .client-context-box strong { color: #064e3b; }
         
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
@@ -111,6 +113,16 @@
             
             <label for="select-perusahaan">Nama Perusahaan Klien</label>
             <select id="select-perusahaan"></select>
+
+            <div id="client-context-panel" class="finance-panel hidden">
+                <label for="select-client-context">Konteks Internal Klien</label>
+                <p class="small-note">Pilih konteks proyek internal yang paling dekat dengan proposal saat ini. Nama klien tetap berasal dari ReferenceAccount, sementara konteks proyek dan tenaga ahli berasal dari riwayat konsultan.</p>
+                <select id="select-client-context"></select>
+                <div id="client-context-summary" class="client-context-box">Pilih klien untuk membaca konteks internal.</div>
+                <div class="modal-actions">
+                    <button type="button" id="btn-apply-client-context" class="secondary" disabled>Gunakan Konteks Internal</button>
+                </div>
+            </div>
 
             <div class="finance-panel">
                 <label for="input-kak-files">Dokumen KAK / TOR</label>
@@ -156,8 +168,8 @@
                     </div>
                 </div>
 
-                <label for="input-konteks">Tujuan Objektif Proyek</label>
-                <textarea id="input-konteks" class="rich-editor-source" placeholder="Singkat dan padat..."></textarea>
+                <label for="input-konteks">Konteks Klien</label>
+                <textarea id="input-konteks" class="rich-editor-source" placeholder="Ringkas kondisi klien saat ini, outlook ke depan, manfaat inisiatif yang diusulkan, dan best practice yang relevan."></textarea>
 
                 <label for="input-permasalahan">Permasalahan Utama (Pain Points)</label>
                 <textarea id="input-permasalahan" class="rich-editor-source" placeholder="Sebutkan root cause..."></textarea>
@@ -310,6 +322,10 @@
             successStep: document.getElementById('step-success'),
             successMessage: document.getElementById('success-message'),
             selPerusahaan: document.getElementById('select-perusahaan'),
+            clientContextPanel: document.getElementById('client-context-panel'),
+            selClientContext: document.getElementById('select-client-context'),
+            clientContextSummary: document.getElementById('client-context-summary'),
+            btnApplyClientContext: document.getElementById('btn-apply-client-context'),
             selModeProposal: document.getElementById('select-mode-proposal'),
             selProposal: document.getElementById('select-proposal'),
             selProyek: document.getElementById('select-proyek'),
@@ -369,6 +385,7 @@
         let prefetchTimer = null;
         let lastPrefetchKey = '';
         let latestKakSuggestions = null;
+        let latestClientContext = null;
         const richEditors = new Map();
 
         function escapeHtml(value) {
@@ -645,6 +662,98 @@
             return data;
         }
 
+        function selectedClientUseCase() {
+            if (!latestClientContext || !Array.isArray(latestClientContext.use_cases)) return null;
+            const index = Number(ui.selClientContext.value);
+            if (!Number.isInteger(index) || index < 0) return null;
+            return latestClientContext.use_cases[index] || null;
+        }
+
+        function renderClientContext(context = {}) {
+            latestClientContext = context || null;
+            const useCases = Array.isArray(context.use_cases) ? context.use_cases : [];
+            ui.clientContextPanel.classList.toggle('hidden', !ui.selPerusahaan.value);
+            ui.selClientContext.innerHTML = '';
+            ui.btnApplyClientContext.disabled = !context.available;
+            if (!context.available) {
+                ui.selClientContext.add(new Option('Belum ada konteks proyek internal yang cocok', ''));
+                ui.clientContextSummary.textContent = context.error || 'ReferenceAccount belum menemukan konteks tambahan untuk klien ini.';
+                return;
+            }
+            if (!useCases.length) {
+                ui.selClientContext.add(new Option('Gunakan metadata akun klien', ''));
+            } else {
+                useCases.forEach((item, index) => {
+                    const label = [
+                        item.product_name || 'Konteks proyek',
+                        item.project_name || '',
+                        item.expert_name ? `oleh ${item.expert_name}` : ''
+                    ].filter(Boolean).join(' · ');
+                    ui.selClientContext.add(new Option(label, String(index)));
+                });
+            }
+            const lines = [
+                context.account_summary,
+                context.use_case_summary,
+                context.expert_guidance ? `Arahan tenaga ahli: ${context.expert_guidance}` : ''
+            ].filter(Boolean);
+            ui.clientContextSummary.innerHTML = lines.length
+                ? lines.map(line => `<div>${escapeHtml(line)}</div>`).join('')
+                : 'Konteks internal tersedia, tetapi detail ringkas belum terbaca.';
+        }
+
+        async function loadClientContext(clientName) {
+            if (!clientName) {
+                latestClientContext = null;
+                ui.clientContextPanel.classList.add('hidden');
+                ui.btnApplyClientContext.disabled = true;
+                return;
+            }
+            ui.clientContextPanel.classList.remove('hidden');
+            ui.clientContextSummary.textContent = 'Membaca konteks internal klien...';
+            ui.btnApplyClientContext.disabled = true;
+            try {
+                const res = await fetch(`/api/client-context?client_name=${encodeURIComponent(clientName)}`);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Konteks internal belum bisa dibaca.');
+                renderClientContext(data);
+            } catch (err) {
+                renderClientContext({ available: false, error: err.message || 'Konteks internal belum bisa dibaca.', use_cases: [] });
+            }
+        }
+
+        function appendEditorContext(editorEl, text) {
+            const cleaned = String(text || '').trim();
+            if (!cleaned) return;
+            const current = String(editorEl.value || '').trim();
+            setRichEditorValue(editorEl, current ? `${current}\n\n${cleaned}` : cleaned);
+        }
+
+        function applyClientContext() {
+            if (!latestClientContext || !latestClientContext.available) {
+                alert('Belum ada konteks internal klien yang bisa dipakai.');
+                return;
+            }
+            const useCase = selectedClientUseCase();
+            const contextLines = [
+                latestClientContext.account_summary,
+                latestClientContext.use_case_summary,
+                useCase && useCase.project_name ? `Konteks proyek internal terdekat: ${useCase.project_name}.` : '',
+                useCase && useCase.product_name ? `Fokus yang relevan: ${useCase.product_name}.` : '',
+                useCase && useCase.expert_name ? `Tenaga ahli yang dapat diposisikan: ${useCase.expert_name}${useCase.position_name ? ` sebagai ${useCase.position_name}` : ''}.` : '',
+            ].filter(Boolean);
+            appendEditorContext(ui.inpKonteks, contextLines.join('\n'));
+            if (useCase && useCase.product_name && !ui.inpPermasalahan.value.trim()) {
+                setRichEditorValue(
+                    ui.inpPermasalahan,
+                    `Proposal perlu menurunkan konteks ${useCase.product_name} menjadi manfaat bisnis, prioritas implementasi, risiko yang dikendalikan, dan best practice yang sesuai dengan kondisi klien saat ini.`
+                );
+            }
+            schedulePrefetch(true);
+            updateActionState();
+            alert('Konteks internal klien sudah ditambahkan ke form.');
+        }
+
         async function init() {
             try {
                 const [data, configRes] = await Promise.all([
@@ -723,6 +832,9 @@
             ui.financeResult.classList.add('hidden');
             ui.previewPanel.classList.add('hidden');
             updateActionState();
+            if (ui.selPerusahaan.value) {
+                loadClientContext(ui.selPerusahaan.value);
+            }
             schedulePrefetch(true);
         }
 
@@ -857,6 +969,7 @@
                     ui.selPerusahaan.add(new Option(payload.nama_perusahaan, payload.nama_perusahaan));
                 }
                 ui.selPerusahaan.value = payload.nama_perusahaan;
+                loadClientContext(payload.nama_perusahaan);
             }
             if (payload.jenis_proposal && (!onlyEmpty || !ui.selProposal.value)) {
                 ui.selProposal.value = payload.jenis_proposal;
@@ -1059,9 +1172,12 @@
         ui.selPerusahaan.addEventListener('change', () => {
             ui.containerDynamic.classList.remove('hidden');
             ui.financeResult.classList.add('hidden'); 
+            loadClientContext(ui.selPerusahaan.value);
             updateActionState();
             schedulePrefetch(true);
         });
+
+        ui.btnApplyClientContext.addEventListener('click', applyClientContext);
 
         ui.btnHistory.addEventListener('click', async () => {
             await loadHistory();

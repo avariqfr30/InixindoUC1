@@ -3867,6 +3867,7 @@ class ProposalSupportMixin:
             "|".join(value_map.get("proof_points", []) or []),
             str((supporting_context or {}).get("kak_context", "")),
             str((supporting_context or {}).get("settings_context", "")),
+            str((supporting_context or {}).get("client_internal_context", "")),
         )
         cached = self._cache_get(self._proposal_contract_cache, cache_key)
         if cached:
@@ -3883,6 +3884,7 @@ class ProposalSupportMixin:
             supporting_context=supporting_context,
         ) if normalized_mode == "kak_response" else ""
         settings_context = str((supporting_context or {}).get("settings_context") or "").strip()
+        client_internal_context = str((supporting_context or {}).get("client_internal_context") or "").strip()
         prompt = f"""
         Buat "Proposal Contract" ringkas untuk menjaga kualitas dan koherensi lintas bab.
         Konteks:
@@ -3917,6 +3919,7 @@ class ProposalSupportMixin:
         - Mode Proposal: {normalized_mode}
         - KAK Context Base: {kak_context_base}
         - Konteks Pendukung Pengaturan: {settings_context}
+        - Konteks Internal Klien: {client_internal_context}
         - Review Rule: Draft ini targetnya 80% siap pakai; sisakan ruang bagi reviewer manusia untuk menyempurnakan nuansa relasi, komersial, dan pesan penutup.
         - Aturan AI tersembunyi: bila konteks proposal terkait AI, narasi harus terasa dimulai dari use case bisnis, lalu dikendalikan oleh kesiapan data/model, arsitektur, governance, kapabilitas tim, dan perubahan cara kerja. Jangan menuliskan enam label itu secara eksplisit.
 
@@ -4019,6 +4022,7 @@ class ProposalSupportMixin:
             normalized_mode = self._normalize_proposal_mode(proposal_mode)
             settings_context = str((supporting_context or {}).get("settings_context") or "").strip()
             kak_supporting_context = str((supporting_context or {}).get("kak_context") or "").strip()
+            client_internal_context = str((supporting_context or {}).get("client_internal_context") or "").strip()
             ai_posture = research_bundle.get("ai_posture", "")
             ai_guidance = str((ai_profile.get("chapter_guidance") or {}).get(chapter.get("id", ""), "")).strip()
             initiative_facts = personalization_pack.get("initiative_facts", []) or []
@@ -4040,6 +4044,11 @@ class ProposalSupportMixin:
                 extra += (
                     f" [SETTINGS_CONTEXT] Gunakan konteks pengaturan internal berikut hanya sebagai penguat, "
                     f"bukan sebagai konteks utama dan bukan untuk mengubah struktur standar: {settings_context}"
+                )
+            if client_internal_context:
+                extra += (
+                    f" [CLIENT_INTERNAL_CONTEXT] Gunakan konteks internal klien berikut untuk membuat bab terasa spesifik, "
+                    f"memilih contoh/use case yang relevan, dan menempatkan tenaga ahli pada bagian yang sesuai tanpa mengklaim hal di luar data: {client_internal_context}"
                 )
             extra += (
                 " [DRAFT_POLICY] Tulis sebagai draft proposal berkualitas tinggi yang siap dipakai sekitar 80%, "

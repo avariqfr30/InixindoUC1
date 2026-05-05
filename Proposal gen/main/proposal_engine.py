@@ -413,6 +413,7 @@ class ProposalEngineMixin:
             notes,
             str(supporting_context.get("kak_context") or ""),
             str(supporting_context.get("settings_context") or ""),
+            str(supporting_context.get("client_internal_context") or ""),
         ]).strip()
         relationship_context = self.firm_api.get_client_relationship(base_client)
         research_bundle = self._get_research_bundle(

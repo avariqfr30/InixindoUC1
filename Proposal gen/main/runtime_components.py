@@ -333,7 +333,7 @@ class FirmAPIClient:
         return []
 
     def get_project_records(self) -> List[Dict[str, Any]]:
-        if self.demo_mode:
+        if getattr(self, "demo_mode", False):
             return []
         resource_spec = dict((self.resource_config or {}).get("project_records") or {})
         if not resource_spec:
@@ -357,6 +357,61 @@ class FirmAPIClient:
             records = mapped_records
 
         return [SchemaMapper.normalize_record(record, PROJECT_DATA_FIELD_ALIASES) for record in records]
+
+    def _get_mapped_resource_records(
+        self,
+        resource_name: str,
+        apply_filters: bool = True,
+        **context: Any,
+    ) -> List[Dict[str, Any]]:
+        if getattr(self, "demo_mode", False):
+            return []
+        resource_spec = dict((self.resource_config or {}).get(resource_name) or {})
+        if not resource_spec:
+            return []
+
+        payload = self._request_from_spec(resource_spec, **context)
+        response_path = self._render_template_value(resource_spec.get("response_path") or "", context)
+        if response_path:
+            payload = self._extract_with_jmespath(payload, response_path)
+
+        filters = self._render_template_payload(resource_spec.get("record_filters") or {}, context) if apply_filters else {}
+        records = self._coerce_record_list(payload)
+        if filters:
+            filtered_records: List[Dict[str, Any]] = []
+            for item in records:
+                match = True
+                for key, expected in filters.items():
+                    field_name = str(key)
+                    operator = "eq"
+                    if "__" in field_name:
+                        field_name, operator = field_name.rsplit("__", 1)
+                    actual_text = str(item.get(field_name) or "").strip().lower()
+                    expected_text = str(expected or "").strip().lower()
+                    if operator in {"icontains", "contains"}:
+                        if expected_text not in actual_text:
+                            match = False
+                            break
+                    elif actual_text != expected_text:
+                        match = False
+                        break
+                if match:
+                    filtered_records.append(item)
+            records = filtered_records
+
+        field_mapping = resource_spec.get("field_mapping") or {}
+        if not field_mapping:
+            return records
+        return [
+            {
+                target_field: self._extract_with_jmespath(record, str(json_path))
+                for target_field, json_path in field_mapping.items()
+            }
+            for record in records
+        ]
+
+    def get_account_records(self) -> List[Dict[str, Any]]:
+        return self._get_mapped_resource_records("account_records", apply_filters=False)
 
     def uses_demo_logic(self) -> bool:
         return self.demo_mode or self.data_acquisition_mode == "demo"
@@ -389,6 +444,55 @@ class FirmAPIClient:
     @staticmethod
     def _empty_relationship_context(source: str = "internal_api") -> Dict[str, Any]:
         return {"summary": "", "mode": "new", "source": source, "verified": False}
+
+    @staticmethod
+    def _normalize_client_match_key(value: str) -> str:
+        cleaned = re.sub(r"\b(Cabang|Branch|Tbk)\b.*$", "", str(value or ""), flags=re.IGNORECASE)
+        cleaned = re.sub(r"^(PT\.?|CV\.?)\s+", "", cleaned.strip(), flags=re.IGNORECASE)
+        return "".join(ch for ch in cleaned.lower() if ch.isalnum())
+
+    @staticmethod
+    def _looks_like_project_title(value: str) -> bool:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        if not text:
+            return True
+        if re.match(r"^[A-Z]{1,4}\d{1,5}\s*[-–]\s+", text):
+            return True
+        project_terms = (
+            "penyusunan", "roadmap", "asesmen", "assessment", "audit", "implementasi",
+            "pengembangan", "konsultansi", "pelatihan", "training", "pendampingan",
+            "soc", "noc", "governance", "tata kelola"
+        )
+        return " - " in text and any(term in text.lower() for term in project_terms)
+
+    @classmethod
+    def _dedupe_records(cls, records: List[Dict[str, Any]], keys: Tuple[str, ...], limit: int = 12) -> List[Dict[str, Any]]:
+        deduped: List[Dict[str, Any]] = []
+        seen = set()
+        for record in records:
+            marker = tuple(str(record.get(key) or "").strip().lower() for key in keys)
+            if not any(marker) or marker in seen:
+                continue
+            seen.add(marker)
+            deduped.append(record)
+            if len(deduped) >= limit:
+                break
+        return deduped
+
+    @staticmethod
+    def _dedupe_phrases(items: List[str], limit: int = 6) -> List[str]:
+        values: List[str] = []
+        seen = set()
+        for item in items:
+            cleaned = re.sub(r"\s+", " ", str(item or "").strip())
+            key = cleaned.lower()
+            if not cleaned or key in seen:
+                continue
+            seen.add(key)
+            values.append(cleaned)
+            if len(values) >= limit:
+                break
+        return values
 
     @staticmethod
     def _project_history_relationship_summary(payload: Dict[str, Any]) -> str:
@@ -436,6 +540,87 @@ class FirmAPIClient:
     @staticmethod
     def _has_osint_evidence(summary: str) -> bool:
         return any(line.strip().startswith("Sumber eksternal") for line in (summary or "").splitlines())
+
+    def get_client_options(self, limit: int = 500) -> List[str]:
+        names: List[str] = []
+        seen = set()
+        for record in self.get_account_records():
+            company_name = re.sub(r"\s+", " ", str(record.get("company_name") or "").strip())
+            if not company_name or self._looks_like_project_title(company_name):
+                continue
+            key = self._normalize_client_match_key(company_name)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            names.append(company_name)
+            if len(names) >= limit:
+                break
+        return sorted(names, key=lambda item: item.lower())
+
+    def get_client_context(self, client_name: str) -> Dict[str, Any]:
+        client_key = self._normalize_client_match_key(client_name)
+        account_records = self.get_account_records()
+        matched_account = next(
+            (
+                record for record in account_records
+                if client_key
+                and (
+                    client_key in self._normalize_client_match_key(str(record.get("company_name") or ""))
+                    or self._normalize_client_match_key(str(record.get("company_name") or "")) in client_key
+                )
+            ),
+            {},
+        )
+        account_name = str(matched_account.get("company_name") or client_name or "").strip()
+        account_key = self._normalize_client_match_key(account_name)
+        match_keys = {key for key in (client_key, account_key) if key}
+
+        project_matches: List[Dict[str, Any]] = []
+        for record in self.get_project_records():
+            project_name = str(record.get("project_name") or record.get("entity") or "").strip()
+            project_key = self._normalize_client_match_key(project_name)
+            if not project_key or not any(key in project_key or project_key in key for key in match_keys):
+                continue
+            project_matches.append(
+                {
+                    "project_name": project_name,
+                    "product_name": str(record.get("product_name") or record.get("topic") or "").strip(),
+                    "expert_name": str(record.get("expert_name") or "").strip(),
+                    "position_name": str(record.get("position_name") or "").strip(),
+                }
+            )
+
+        use_cases = self._dedupe_records(
+            project_matches,
+            keys=("project_name", "product_name", "expert_name", "position_name"),
+            limit=8,
+        )
+        expert_bits = []
+        for item in use_cases[:4]:
+            expert = str(item.get("expert_name") or "").strip()
+            role = str(item.get("position_name") or "").strip()
+            product = str(item.get("product_name") or "").strip()
+            if expert:
+                expert_bits.append(
+                    f"{expert}{f' sebagai {role}' if role else ''}{f' untuk konteks {product}' if product else ''}"
+                )
+        account_summary = self._account_reference_relationship_summary(matched_account if isinstance(matched_account, dict) else {})
+        use_case_summary = ""
+        if use_cases:
+            products = self._dedupe_phrases([str(item.get("product_name") or "") for item in use_cases], limit=4)
+            focus = f" dengan fokus {', '.join(products)}" if products else ""
+            use_case_summary = (
+                f"Riwayat internal mencatat {len(use_cases)} konteks proyek relevan"
+                f"{focus}."
+            )
+        return {
+            "available": bool(account_summary or use_cases),
+            "client_name": account_name,
+            "account_summary": account_summary,
+            "use_case_summary": use_case_summary,
+            "use_cases": use_cases,
+            "expert_guidance": "; ".join(expert_bits),
+        }
 
     def get_project_standards(self, project_type: str) -> Dict[str, str]:
         if self.demo_mode:
@@ -804,6 +989,19 @@ class DemoDataProvider:
             "verified": has_evidence,
         }
 
+    def get_client_options(self, limit: int = 500) -> List[str]:
+        return []
+
+    def get_client_context(self, client_name: str) -> Dict[str, Any]:
+        return {
+            "available": False,
+            "client_name": client_name,
+            "account_summary": "",
+            "use_case_summary": "",
+            "use_cases": [],
+            "expert_guidance": "",
+        }
+
 
 class InternalDataClient:
     def __init__(self, force_source: str = "") -> None:
@@ -860,6 +1058,24 @@ class InternalDataClient:
             logger.warning("Internal data fallback triggered for client_relationship(%s)", client_name)
             return self.demo_provider.get_client_relationship(client_name)
         return normalized
+
+    def get_client_options(self, limit: int = 500) -> List[str]:
+        if self.internal_data_source == "demo":
+            return self.demo_provider.get_client_options(limit=limit)
+        options = self.api_provider.get_client_options(limit=limit)
+        if self._use_demo_fallback() and not options:
+            logger.warning("Internal data fallback triggered for client options")
+            return self.demo_provider.get_client_options(limit=limit)
+        return options
+
+    def get_client_context(self, client_name: str) -> Dict[str, Any]:
+        if self.internal_data_source == "demo":
+            return self.demo_provider.get_client_context(client_name)
+        context = self.api_provider.get_client_context(client_name)
+        if self._use_demo_fallback() and not context.get("available"):
+            logger.warning("Internal data fallback triggered for client_context(%s)", client_name)
+            return self.demo_provider.get_client_context(client_name)
+        return context
 
     def doctor_snapshot(self, project_type: str = "Implementation", client_name: str = "PT Contoh Klien") -> Dict[str, Any]:
         snapshot: Dict[str, Any] = {

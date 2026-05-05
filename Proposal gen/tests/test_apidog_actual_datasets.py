@@ -175,6 +175,7 @@ class ApidogActualDatasetTest(unittest.TestCase):
             "project_records": {
                 "request": {"body": {"dataset": "ConsultantProjectExpertHistory"}},
                 "response_path": "data.dataset_result",
+                "record_filters": {"company_name__icontains": "{client_name}"},
                 "field_mapping": {
                     "entity": "project_name",
                     "topic": "product_name",
@@ -203,6 +204,117 @@ class ApidogActualDatasetTest(unittest.TestCase):
         self.assertEqual(records[0]["entity"], "PI07 - Penyusunan Roadmap SOC & NOC BPRS Dinar Ashri NTB")
         self.assertEqual(records[0]["topic"], "Asesmen Jaringan")
         self.assertEqual(records[0]["expert_name"], "Dickyfli Perdana Putra")
+
+    def test_reference_account_supplies_clean_client_names_not_project_titles(self) -> None:
+        from main.runtime_components import FirmAPIClient
+
+        client = FirmAPIClient.__new__(FirmAPIClient)
+        client.resource_config = {
+            "account_records": {
+                "request": {"body": {"dataset": "ReferenceAccount"}},
+                "response_path": "data.dataset_result",
+                "record_filters": {"company_name__icontains": "{client_name}"},
+                "field_mapping": {
+                    "company_name": "company_name",
+                    "company_region_name": "company_region_name",
+                    "company_province_name": "company_province_name",
+                    "company_segment": "company_segment",
+                    "company_sub_segment": "company_sub_segment",
+                },
+            }
+        }
+        client._request_from_spec = lambda spec, **context: {
+            "data": {
+                "dataset_result": [
+                    {"company_name": "BPRS Dinar Ashri NTB", "company_region_name": "Mataram"},
+                    {"company_name": "PI07 - Penyusunan Roadmap SOC & NOC BPRS Dinar Ashri NTB"},
+                    {"company_name": "PT Sumberdaya Andalan Mandiri", "company_region_name": "Jakarta"},
+                    {"company_name": "BPRS Dinar Ashri NTB", "company_region_name": "Mataram"},
+                ]
+            }
+        }
+
+        options = client.get_client_options()
+
+        self.assertEqual(options, ["BPRS Dinar Ashri NTB", "PT Sumberdaya Andalan Mandiri"])
+
+    def test_client_context_uses_consultant_history_for_use_cases_and_expert_fit(self) -> None:
+        from main.runtime_components import FirmAPIClient
+
+        client = FirmAPIClient.__new__(FirmAPIClient)
+        client.resource_config = {
+            "account_records": {
+                "request": {"body": {"dataset": "ReferenceAccount"}},
+                "response_path": "data.dataset_result",
+                "field_mapping": {
+                    "company_name": "company_name",
+                    "company_region_name": "company_region_name",
+                    "company_province_name": "company_province_name",
+                    "company_segment": "company_segment",
+                    "company_sub_segment": "company_sub_segment",
+                    "company_category_name": "company_category_name",
+                },
+            },
+            "project_records": {
+                "request": {"body": {"dataset": "ConsultantProjectExpertHistory"}},
+                "response_path": "data.dataset_result",
+                "field_mapping": {
+                    "entity": "project_name",
+                    "topic": "product_name",
+                    "project_name": "project_name",
+                    "expert_name": "expert_name",
+                    "position_name": "position_name",
+                },
+            },
+        }
+
+        def request_from_spec(spec, **context):
+            dataset = (((spec or {}).get("request") or {}).get("body") or {}).get("dataset")
+            if dataset == "ReferenceAccount":
+                return {
+                    "data": {
+                        "dataset_result": [
+                            {
+                                "company_name": "BPRS Dinar Ashri NTB",
+                                "company_region_name": "Mataram",
+                                "company_province_name": "Nusa Tenggara Barat",
+                                "company_segment": "Banking",
+                                "company_sub_segment": "BPRS",
+                                "company_category_name": "Financial Services",
+                            }
+                        ]
+                    }
+                }
+            return {
+                "data": {
+                    "dataset_result": [
+                        {
+                            "project_name": "PI07 - Penyusunan Roadmap SOC & NOC BPRS Dinar Ashri NTB",
+                            "product_name": "Asesmen Jaringan",
+                            "expert_name": "Dickyfli Perdana Putra",
+                            "position_name": "Project Manager",
+                        },
+                        {
+                            "project_name": "PX10 - IT Governance PT Lain",
+                            "product_name": "IT Governance",
+                            "expert_name": "Nama Lain",
+                            "position_name": "Consultant",
+                        },
+                    ]
+                }
+            }
+
+        client._request_from_spec = request_from_spec
+
+        context = client.get_client_context("BPRS Dinar Ashri")
+
+        self.assertTrue(context["available"])
+        self.assertIn("BPRS Dinar Ashri NTB", context["client_name"])
+        self.assertIn("Mataram", context["account_summary"])
+        self.assertEqual(len(context["use_cases"]), 1)
+        self.assertEqual(context["use_cases"][0]["product_name"], "Asesmen Jaringan")
+        self.assertEqual(context["use_cases"][0]["expert_name"], "Dickyfli Perdana Putra")
+        self.assertIn("Project Manager", context["expert_guidance"])
 
 
 if __name__ == "__main__":
