@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .proposal_shared import *
 from .research import Researcher
+from .text_hygiene import clean_markup_artifacts
 
 class LogoManager:
     @staticmethod
@@ -1200,9 +1201,63 @@ class DocumentBuilder:
             elif child.name == 'br':
                 paragraph.add_run("\n")
             elif child.name is None:
-                DocumentBuilder._append_text_run(paragraph, str(child))
+                DocumentBuilder._append_text_run(paragraph, clean_markup_artifacts(str(child)))
             else:
                 DocumentBuilder._process_inline_html(paragraph, child, skip_nested_lists=skip_nested_lists)
+
+    @staticmethod
+    def _markdown_table_cells(line: str) -> List[str]:
+        stripped = (line or "").strip()
+        if not stripped.startswith("|"):
+            return []
+        return [cell.strip() for cell in stripped.strip("|").split("|")]
+
+    @staticmethod
+    def _is_markdown_table_separator(line: str) -> bool:
+        cells = DocumentBuilder._markdown_table_cells(line)
+        return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell or "") for cell in cells)
+
+    @staticmethod
+    def _is_valid_markdown_table_block(lines: List[str]) -> bool:
+        if len(lines) < 3 or not DocumentBuilder._is_markdown_table_separator(lines[1]):
+            return False
+        header = DocumentBuilder._markdown_table_cells(lines[0])
+        separator = DocumentBuilder._markdown_table_cells(lines[1])
+        body_rows = [DocumentBuilder._markdown_table_cells(line) for line in lines[2:]]
+        if len(header) < 2 or len(separator) != len(header):
+            return False
+        return any(len(row) == len(header) and any(cell for cell in row) for row in body_rows)
+
+    @staticmethod
+    def _demote_invalid_markdown_tables(raw_text: str) -> str:
+        output: List[str] = []
+        pending: List[str] = []
+
+        def flush_pending() -> None:
+            nonlocal pending
+            if not pending:
+                return
+            if DocumentBuilder._is_valid_markdown_table_block(pending):
+                output.extend(pending)
+            else:
+                for row in pending:
+                    if DocumentBuilder._is_markdown_table_separator(row):
+                        continue
+                    cells = [cell for cell in DocumentBuilder._markdown_table_cells(row) if cell]
+                    demoted = "; ".join(cells).strip()
+                    if demoted:
+                        output.append(demoted)
+            pending = []
+
+        for raw_line in (raw_text or "").splitlines():
+            line = raw_line.strip()
+            if line.startswith("|"):
+                pending.append(line)
+                continue
+            flush_pending()
+            output.append(raw_line)
+        flush_pending()
+        return "\n".join(output).strip()
 
     @staticmethod
     def _normalize_markdown_blocks(raw_text: str) -> str:
@@ -1273,7 +1328,8 @@ class DocumentBuilder:
     def process_content(doc: Document, raw_text: str, theme_color: Tuple[int, int, int], chapter_title: str) -> None:
         clean_lines = []
         in_table = False
-        normalized_text = DocumentBuilder._normalize_markdown_blocks(raw_text)
+        normalized_text = DocumentBuilder._normalize_markdown_blocks(clean_markup_artifacts(raw_text))
+        normalized_text = DocumentBuilder._demote_invalid_markdown_tables(normalized_text)
         for raw_line in normalized_text.split('\n'):
             line = raw_line.rstrip()
             stripped_line = line.strip()

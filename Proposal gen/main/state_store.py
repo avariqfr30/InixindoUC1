@@ -1383,6 +1383,24 @@ class AppStateStore:
         source = str(text or "")
         if not source.strip():
             return fallback
+        expert_rows = cls._extract_internal_expert_rows(source, limit=4)
+        if expert_rows:
+            expert_bits: List[str] = []
+            for row in expert_rows[:3]:
+                certs = row.get("certifications", [])
+                cert_line = ", ".join(certs[:4]) if isinstance(certs, list) else str(certs or "")
+                role = str(row.get("proposed_role") or "Tenaga Ahli").strip()
+                name = str(row.get("name") or "").strip()
+                if not name:
+                    continue
+                suffix = f" dengan sertifikasi {cert_line}" if cert_line else ""
+                expert_bits.append(f"{name} ({role}{suffix})")
+            if expert_bits:
+                return (
+                    "Kapabilitas internal didukung tenaga ahli bernama, termasuk "
+                    + "; ".join(expert_bits)
+                    + "."
+                )
         certifications = re.findall(
             r"\b(?:TOGAF|COBIT(?:\s*\d+)?|ITIL(?:\s*[A-Za-z0-9.+-]+)?|ISO\s*\/?\s*IEC?\s*\d+|ISO\s*\d+|CEH|CISA|CHFI|CCNA|CAPM|Project\+|Lead Auditor ISO 27001|Microsoft Certified Database Administrator)\b",
             source,
@@ -1412,6 +1430,99 @@ class AppStateStore:
         if parts:
             return ". ".join(parts) + "."
         return cls._summarize_profile_blob(source, fallback, max_items=3)
+
+    @staticmethod
+    def _looks_like_person_name(line: str) -> bool:
+        text = re.sub(r"\s+", " ", str(line or "")).strip()
+        if not text or len(text.split()) < 2 or len(text.split()) > 5:
+            return False
+        if re.search(r"\b(no|nama|posisi|sertifikasi|peran|lama|tahun|universitas|certified|foundation)\b", text, re.IGNORECASE):
+            return False
+        return bool(re.fullmatch(r"[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){1,4}", text))
+
+    @staticmethod
+    def _is_expert_role_line(line: str) -> bool:
+        return bool(re.search(
+            r"\b(project\s+manager|tenaga\s+ahli|lead|consultant|konsultan|trainer|reviewer|arsitek|architect|pmo)\b",
+            str(line or ""),
+            flags=re.IGNORECASE,
+        ))
+
+    @classmethod
+    def _extract_internal_expert_rows(cls, text: str, limit: int = 6) -> List[Dict[str, Any]]:
+        source = formalize_caps_text(text)
+        if not source.strip():
+            return []
+        raw_lines = [
+            re.sub(r"^\s*[·•*-]\s*", "", line).strip()
+            for line in source.splitlines()
+            if line.strip()
+        ]
+        header_pattern = re.compile(
+            r"^(no|nama tenaga ahli|posisi diusulkan|tingkat pendidikan|sertifikasi|peran dalam penugasan|lama pengalaman(?:\s*\(tahun\))?)$",
+            flags=re.IGNORECASE,
+        )
+        lines = [line for line in raw_lines if not header_pattern.match(line)]
+        rows: List[Dict[str, Any]] = []
+        idx = 0
+        while idx < len(lines):
+            line = lines[idx]
+            if re.fullmatch(r"\d{1,3}", line):
+                idx += 1
+                continue
+            if not cls._looks_like_person_name(line):
+                idx += 1
+                continue
+            name = line
+            role = ""
+            if idx + 1 < len(lines) and cls._is_expert_role_line(lines[idx + 1]):
+                role = lines[idx + 1]
+                idx += 1
+            block: List[str] = []
+            idx += 1
+            while idx < len(lines):
+                candidate = lines[idx]
+                if re.fullmatch(r"\d{1,3}", candidate):
+                    idx += 1
+                    break
+                if cls._looks_like_person_name(candidate) and rows:
+                    break
+                block.append(candidate)
+                idx += 1
+            certs: List[str] = []
+            education: List[str] = []
+            assignment_bits: List[str] = []
+            experience_years = ""
+            cert_pattern = re.compile(
+                r"\b(Lead Auditor ISO 27001|TOGAF(?:\s*9\s*Foundations)?|COBIT(?:\s*\d+)?|ITIL(?:\s+[A-Za-z0-9.+-]+){0,3}|ISO\s*/?\s*IEC?\s*\d+(?::\d+)?|ISO\s*\d+|CEH(?:\s*\([^)]+\))?|CISA|CHFI|CCNA(?:\s+Routing and Switching)?|CAPM(?:\s*\([^)]+\))?|CompTIA Project\+|Project\+|EDRP(?:\s*\([^)]+\))?|Microsoft Certified Database Administrator)\b",
+                flags=re.IGNORECASE,
+            )
+            for item in block:
+                if re.search(r"\b\d+\s*tahun\b", item, flags=re.IGNORECASE):
+                    experience_years = re.search(r"\b\d+\s*tahun\b", item, flags=re.IGNORECASE).group(0)
+                    continue
+                if re.search(r"\b(S1|S2|S3|Universitas|Master|Sarjana)\b", item, flags=re.IGNORECASE):
+                    education.append(item)
+                found_certs = cert_pattern.findall(item)
+                if found_certs:
+                    certs.extend(found_certs)
+                    continue
+                if len(item.split()) >= 5:
+                    assignment_bits.append(item)
+            certs = cls._dedupe_phrases(certs, limit=8)
+            rows.append(
+                {
+                    "name": name,
+                    "proposed_role": role,
+                    "education": cls._dedupe_phrases(education, limit=3),
+                    "certifications": certs,
+                    "assignment_role": " ".join(assignment_bits[:2]).strip(),
+                    "experience_years": experience_years,
+                }
+            )
+            if len(rows) >= limit:
+                break
+        return rows
 
     @classmethod
     def _summarize_portfolio_blob(cls, text: str, fallback: str) -> str:
@@ -1461,7 +1572,10 @@ class AppStateStore:
         )
         credential_lines = compact_context_lines(
             [
-                settings.get("internal_credentials", ""),
+                self._summarize_credential_blob(
+                    str(settings.get("internal_credentials") or ""),
+                    "",
+                ),
                 self._collect_supporting_document_text("credentials", max_documents=3, max_words=100),
             ],
             limit=4,
@@ -1625,6 +1739,7 @@ class AppStateStore:
                 credential_text,
                 str(profile.get("credential_highlights") or "").strip() or "Kapabilitas inti dan sertifikasi relevan perusahaan penyusun.",
             )
+            profile["internal_expert_rows"] = self._extract_internal_expert_rows(credential_text)
         structured_rows = self._parse_structured_portfolio_rows(internal_portfolio)
         if not structured_rows and "|" in portfolio_docs_text:
             structured_rows = self._parse_structured_portfolio_rows(portfolio_docs_text)

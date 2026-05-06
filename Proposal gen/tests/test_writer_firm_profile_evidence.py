@@ -65,7 +65,9 @@ class WriterFirmProfileEvidenceTest(unittest.TestCase):
         build_profile.assert_called_once()
         self.assertIn("1.200 alumni", evidence_profile["portfolio_scale"])
         self.assertIn("ISO 27001", evidence_profile["certifications"])
-        self.assertIn("Dirangkum dari sumber publik", evidence_profile["team_expertise"])
+        self.assertIn("praktisi cloud", evidence_profile["team_expertise"])
+        self.assertNotIn("Dirangkum dari sumber", evidence_profile["team_expertise"])
+        self.assertNotIn("sumber=", evidence_profile["team_expertise"])
 
     def test_docx_profile_renders_external_credentials_scale_and_source_note(self) -> None:
         from main.document_rendering import DocumentBuilder
@@ -75,9 +77,9 @@ class WriterFirmProfileEvidenceTest(unittest.TestCase):
             "profile_summary": "Inixindo Jogja membantu organisasi mempercepat kapabilitas digital.",
             "portfolio_highlights": "Portofolio internal training dan konsultasi IT.",
             "credential_highlights": "Instruktur bersertifikasi internasional.",
-            "portfolio_scale": "Dirangkum dari sumber publik/OSINT: lebih dari 1.200 alumni profesional.",
-            "certifications": "Dirangkum dari sumber publik/OSINT: ISO 27001 dan EC-Council.",
-            "team_expertise": "Dirangkum dari sumber publik/OSINT: praktisi cloud dan cyber security.",
+            "portfolio_scale": "Bukti publik yang tersedia menunjukkan lebih dari 1.200 alumni profesional.",
+            "certifications": "Bukti publik yang tersedia menunjukkan ISO 27001 dan EC-Council.",
+            "team_expertise": "Bukti publik yang tersedia menunjukkan praktisi cloud dan cyber security.",
             "official_source_urls": [
                 "https://inixindojogja.co.id/",
                 "https://www.inixindo.id/training/it-risk-management/",
@@ -100,6 +102,27 @@ class WriterFirmProfileEvidenceTest(unittest.TestCase):
         self.assertIn("Keahlian tim berbasis sumber publik", rendered_text)
         self.assertIn("Profil dan kontak pada bagian ini dirangkum", rendered_text)
         self.assertIn("inixindojogja.co.id", rendered_text)
+        self.assertNotIn("Dirangkum dari sumber", rendered_text)
+        self.assertNotIn("sumber=", rendered_text)
+        self.assertNotIn("fakta=", rendered_text)
+
+    def test_source_safe_firm_evidence_humanizes_osint_wire_format(self) -> None:
+        from main.proposal_support import ProposalSupportMixin
+
+        raw = (
+            "Sumber eksternal 1: fakta=Inixindo Jogja memiliki layanan pelatihan ISO 27001 "
+            "| sumber=Inixindo Jogja | url=https://inixindojogja.co.id/iso "
+            "| sitasi_apa=(Inixindo Jogja, n.d.)"
+        )
+
+        cleaned = ProposalSupportMixin._source_safe_firm_evidence_text("Inixindo Jogja", raw)
+
+        self.assertIn("Bukti publik", cleaned)
+        self.assertIn("ISO 27001", cleaned)
+        self.assertNotIn("Sumber eksternal", cleaned)
+        self.assertNotIn("fakta=", cleaned)
+        self.assertNotIn("sumber=", cleaned)
+        self.assertNotIn("url=", cleaned)
 
     def test_closing_render_text_strips_inline_writer_profile(self) -> None:
         from main.proposal_engine import ProposalEngineMixin

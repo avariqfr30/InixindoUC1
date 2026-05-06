@@ -4,6 +4,7 @@ from .proposal_shared import *
 from .document_rendering import DocumentBuilder, LogoManager, StyleEngine
 from .research import Researcher
 from .proposal_support import ProposalSupportMixin
+from .text_hygiene import naturalize_generation_text
 
 
 class ProposalEngineMixin:
@@ -387,6 +388,12 @@ class ProposalEngineMixin:
         supporting_context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Document, str, Dict[str, Any]]:
         supporting_context = dict(supporting_context or {})
+        client = naturalize_generation_text(client, field="nama_perusahaan", client_name=client)
+        project = naturalize_generation_text(project, field="konteks_organisasi", client_name=client)
+        project_goal = naturalize_generation_text(project_goal, field="klasifikasi_kebutuhan", client_name=client)
+        timeline = naturalize_generation_text(timeline, field="estimasi_waktu", client_name=client)
+        notes = naturalize_generation_text(notes, field="permasalahan", client_name=client)
+        regulations = naturalize_generation_text(regulations, field="potensi_framework", client_name=client)
         selected_chapters = self._resolve_chapters(chapter_id, proposal_mode=proposal_mode)
         chapter_targets = self._chapter_word_targets(selected_chapters)
         content_word_budget = self._content_word_budget()

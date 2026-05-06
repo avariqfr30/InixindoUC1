@@ -6,6 +6,7 @@ from .data_sources import FirmAPIClient, SchemaMapper
 from .finance import FinancialAnalyzer
 from .proposal_shared import *
 from .research import Researcher
+from .text_hygiene import clean_markup_artifacts
 
 bundle_cache_dir = Path(APP_STATE_DB_PATH).parent / ".research_bundle_cache"
 bundle_cache = dc.Cache(str(bundle_cache_dir))
@@ -258,6 +259,14 @@ class ProposalSupportMixin:
     def _infer_industry(client: str, project: str, notes: str, regulations: str) -> str:
         combined = " ".join([client or "", project or "", notes or "", regulations or ""]).lower()
         rules = [
+            (
+                "Game Technology & Digital Platform",
+                [
+                    "accelbyte", "game backend", "gaming services", "live game", "live service",
+                    "matchmaking", "multiplayer", "game analytics", "player identity",
+                    "backend game", "game service", "unity", "unreal",
+                ],
+            ),
             ("Perbankan", ["bank", "bri", "bca", "mandiri", "bni", "btn", "fintech", "kredit"]),
             ("Telekomunikasi", ["telkom", "telkomsel", "indosat", "xl", "axiata", "operator"]),
             ("Energi & Utilitas", ["pertamina", "pln", "energi", "listrik", "oil", "gas"]),
@@ -274,6 +283,13 @@ class ProposalSupportMixin:
     @staticmethod
     def _industry_terms(industry: str) -> List[str]:
         terms_map = {
+            "Game Technology & Digital Platform": [
+                "live service reliability",
+                "player identity",
+                "matchmaking",
+                "cross-platform operations",
+                "developer workflow",
+            ],
             "Perbankan": ["nasabah", "core banking", "risk appetite", "kepatuhan POJK", "fraud control"],
             "Telekomunikasi": ["subscriber", "network availability", "service assurance", "NOC", "customer churn"],
             "Energi & Utilitas": ["operational reliability", "asset integrity", "outage window", "HSSE", "dispatch"],
@@ -348,7 +364,7 @@ class ProposalSupportMixin:
 
     @staticmethod
     def _sanitize_anchor_fact(raw_text: str) -> str:
-        text = str(raw_text or "").strip()
+        text = clean_markup_artifacts(raw_text)
         if not text:
             return ""
         text = re.sub(r"https?://\S+|www\.\S+", "", text, flags=re.IGNORECASE)
@@ -360,7 +376,10 @@ class ProposalSupportMixin:
         )
         text = re.sub(r"\b(?:instagram|facebook|linkedin|twitter|tiktok|youtube|x)\.com\b", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s+", " ", text)
-        return text.strip(" ,;:-.")
+        text = text.strip(" ,;:-.")
+        if re.search(r"\b(awardee|scholarship|beasiswa)\b", text, flags=re.IGNORECASE):
+            return ""
+        return text
 
     @staticmethod
     def _extract_anchor_keywords(facts: List[Dict[str, str]], max_terms: int = 10) -> List[str]:
@@ -619,6 +638,11 @@ class ProposalSupportMixin:
 
         if not kpis:
             default_by_industry = {
+                "Game Technology & Digital Platform": [
+                    f"Reliability layanan dan kesiapan operasi live service meningkat dalam {horizon}.",
+                    f"Lead time integrasi, playtest, atau rilis fitur digital lebih terkendali dalam {horizon}.",
+                    f"Kualitas governance platform, security, dan monitoring teknis membaik dalam {horizon}.",
+                ],
                 "Perbankan": [
                     f"Pertumbuhan transaksi digital nasabah dalam {horizon}.",
                     f"Kepatuhan & risiko operasional (audit findings) membaik dalam {horizon}.",
@@ -985,6 +1009,15 @@ class ProposalSupportMixin:
 
         cleaned = re.sub(pattern, "", content or "", flags=re.IGNORECASE)
         cleaned = re.sub(internal_pattern, "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(
+            r"(?im)^\s*Sumber eksternal\s+\d+\s*:\s*fakta=([^|\n]+)(?:\|[^\n]*)?$",
+            r"\1",
+            cleaned,
+        )
+        cleaned = re.sub(r"(?i)\bDirangkum dari sumber publik/?OSINT\s*:?", "", cleaned)
+        cleaned = re.sub(r"(?i)\s*\|\s*(?:sumber|url|sitasi_apa)\s*=[^|\n]+", "", cleaned)
+        cleaned = re.sub(r"(?i)\bfakta\s*=", "", cleaned)
+        cleaned = re.sub(r"(?i)\bData internal ReferenceAccount mencatat\s+([^.]+)\.", r"\1.", cleaned)
         cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
         cleaned = re.sub(r"\(\s*\)", "", cleaned)
         cleaned = re.sub(r"\s+([,.;:])", r"\1", cleaned)
@@ -2427,6 +2460,46 @@ class ProposalSupportMixin:
             )
         return rows[:5]
 
+    @classmethod
+    def _expert_rows_from_internal_profile(
+        cls,
+        firm_profile: Optional[Dict[str, Any]],
+        project_type: str,
+        service_type: str,
+        regulations: str,
+        team_points: List[str],
+        ai_mode: bool = False,
+    ) -> List[Dict[str, str]]:
+        profile = firm_profile or {}
+        raw_rows = profile.get("internal_expert_rows") or []
+        rows: List[Dict[str, str]] = []
+        if isinstance(raw_rows, list):
+            for raw in raw_rows[:5]:
+                if not isinstance(raw, dict):
+                    continue
+                name = cls._normalize_prose_fragment(str(raw.get("name") or ""))
+                role = cls._normalize_prose_fragment(str(raw.get("proposed_role") or "Tenaga Ahli"))
+                certs = raw.get("certifications") or []
+                if isinstance(certs, list):
+                    cert_line = ", ".join(cls._split_plain_points(", ".join(str(item) for item in certs), max_items=5))
+                else:
+                    cert_line = cls._normalize_prose_fragment(str(certs or ""))
+                assignment = cls._normalize_prose_fragment(str(raw.get("assignment_role") or ""))
+                years = cls._normalize_prose_fragment(str(raw.get("experience_years") or ""))
+                if not name:
+                    continue
+                rows.append(
+                    {
+                        "peran": f"{name} - {role}",
+                        "fokus": assignment or f"mengawal area {service_type.lower()} dan kebutuhan {project_type.lower()}",
+                        "kompetensi": cert_line or "pengalaman konsultasi dan pengendalian mutu delivery",
+                        "keterlibatan": f"aktif sesuai fase kritikal; pengalaman {years}" if years else "aktif sesuai fase kritikal dan kebutuhan review",
+                    }
+                )
+        if rows:
+            return rows[:5]
+        return cls._expert_rows(project_type, service_type, regulations, team_points, ai_mode=ai_mode)
+
     @staticmethod
     def _duration_unit_count(timeline: str, default_months: int = 6) -> Tuple[str, int]:
         text = str(timeline or "").lower()
@@ -2742,6 +2815,11 @@ class ProposalSupportMixin:
             firm_profile.get("credential_highlights", ""),
             "kapabilitas inti dan sertifikasi relevan perusahaan penyusun",
             max_words=24,
+        )
+        internal_capability_line = self._summarize_phrase(
+            (supporting_context or {}).get("client_internal_context", ""),
+            "",
+            max_words=34,
         )
         ai_governance = self._summarize_phrase(
             ai_profile.get("governance_posture", ""),
@@ -3466,6 +3544,10 @@ class ProposalSupportMixin:
                 if positioning_line.lower().startswith("adalah "):
                     positioning_line = positioning_line[7:].strip()
             positioning_line = positioning_line or "mitra delivery dan konsultasi yang terstruktur"
+            internal_capability_bullet = (
+                f"- Bukti riwayat internal yang paling dekat dengan kebutuhan ini: {internal_capability_line}.\n"
+                if internal_capability_line else ""
+            )
             return (
                 f"Profil perusahaan tidak dimaksudkan sebagai brosur umum, melainkan sebagai bukti bahwa {WRITER_FIRM_NAME} memiliki modal kerja yang relevan untuk membantu {client}. "
                 f"Yang ditekankan bukan hanya deskripsi perusahaan, tetapi keterkaitan antara kapabilitas, pengalaman serupa, dan bentuk dukungan yang dibutuhkan oleh inisiatif {short_project.lower()}. {chapter_transition}{chain_clause} (Data Internal, {year}).\n\n"
@@ -3479,6 +3561,7 @@ class ProposalSupportMixin:
                 f"- Modal kapabilitas yang ditonjolkan meliputi {proof_line}.\n"
                 f"- Portofolio internal dan bahan pengalaman perusahaan penyusun dirangkum untuk menunjukkan bukti kerja yang lebih nyata terhadap kebutuhan {client}.\n"
                 f"- Kapabilitas dan sertifikasi inti yang relevan: {credential_highlights}.\n"
+                f"{internal_capability_bullet}"
                 f"- Nilai tambah utama yang dibawa adalah {gains_line}.\n\n"
                 "## 10.2 Pengalaman Serupa dan Nilai Tambah\n"
                 "| Area Pengalaman | Relevansi terhadap Inisiatif | Bukti Kapabilitas | Nilai Tambah untuk Klien |\n"
@@ -3491,7 +3574,14 @@ class ProposalSupportMixin:
         if chapter["id"] == "c_11":
             expert_rows = "\n".join(
                 f"| {item['peran']} | {item['fokus']} | {item['kompetensi']} | {item['keterlibatan']} |"
-                for item in self._expert_rows(project_type, service_type, regulations, team_points, ai_mode=ai_mode)
+                for item in self._expert_rows_from_internal_profile(
+                    firm_profile,
+                    project_type,
+                    service_type,
+                    regulations,
+                    team_points,
+                    ai_mode=ai_mode,
+                )
             )
             role_list = "\n".join(
                 [
@@ -3514,6 +3604,10 @@ class ProposalSupportMixin:
                 ] + ([("AI Lead", 75)] if ai_mode else []),
                 unit="Skor keterlibatan",
             )
+            internal_capability_bullet = (
+                f"- Riwayat proyek internal yang relevan dipakai sebagai bukti kecocokan peran, bukan sebagai klaim pernah menangani {client}: {internal_capability_line}.\n"
+                if internal_capability_line else ""
+            )
             return (
                 f"Struktur tim proyek untuk {client} dibentuk agar pengambilan keputusan, pengawasan mutu, dan eksekusi lapangan bergerak seirama. "
                 f"Komposisi tim tidak diperlakukan sebagai daftar jabatan semata, tetapi sebagai mekanisme untuk menjaga kualitas output terhadap target {kpi_line} dan kebutuhan {short_goal.lower()}. {chapter_transition}{chain_clause} (Data Internal, {year}).\n\n"
@@ -3521,6 +3615,7 @@ class ProposalSupportMixin:
                 f"{role_list}\n"
                 f"- Komposisi inti yang direncanakan mengacu pada baseline internal: {team_summary}.\n"
                 f"- Referensi kapabilitas dan sertifikasi internal yang mendukung tim: {credential_highlights}.\n"
+                f"{internal_capability_bullet}"
                 f"- Counterpart dari pihak {client} idealnya mencakup sponsor bisnis, PIC operasional, PIC teknologi/data, dan reviewer governance.\n"
                 "- Alokasi resource dapat dinaikkan atau disesuaikan mengikuti fase kerja, tingkat risiko, dan kebutuhan keputusan cepat.\n\n"
                 f"{involvement_chart}\n\n"
@@ -3922,6 +4017,7 @@ class ProposalSupportMixin:
         - Konteks Internal Klien: {client_internal_context}
         - Review Rule: Draft ini targetnya 80% siap pakai; sisakan ruang bagi reviewer manusia untuk menyempurnakan nuansa relasi, komersial, dan pesan penutup.
         - Aturan AI tersembunyi: bila konteks proposal terkait AI, narasi harus terasa dimulai dari use case bisnis, lalu dikendalikan oleh kesiapan data/model, arsitektur, governance, kapabilitas tim, dan perubahan cara kerja. Jangan menuliskan enam label itu secara eksplisit.
+        - Aturan kebersihan sumber: jangan keluarkan frasa "Dirangkum dari sumber", "Sumber eksternal", "fakta=", "sumber=", "url=", nama dataset internal, atau salinan tabel kredensial mentah. Semua bukti harus ditulis sebagai narasi proposal natural.
 
         OUTPUT WAJIB (tanpa markdown code block, <= 220 kata):
         1) Narasi Inti (1-2 kalimat)
@@ -4059,7 +4155,8 @@ class ProposalSupportMixin:
                 " [STYLE_GUARD] Jangan membuka kalimat dengan frasa meta seperti 'Bab ini', 'Bagian ini', "
                 "'Pada proposal ini', 'Sebagai acuan konteks', atau 'Sebagai konteks eksternal'. "
                 "Mulai langsung dari konteks klien, tekanan bisnis, risiko, keputusan, dependensi, atau hasil yang ingin dicapai. "
-                "Jangan membuat H2/H3 kosong."
+                "Jangan membuat H2/H3 kosong. Jangan menyalin mentah nama dataset, frasa 'Data internal ReferenceAccount mencatat', "
+                "'Sumber eksternal', 'Dirangkum dari sumber', 'fakta=', 'sumber=', 'url=', atau teks tabel kredensial mentah; ubah semuanya menjadi kalimat proposal yang natural."
             )
             if chapter_chain_context:
                 extra += f" [CHAPTER_CHAIN] {chapter_chain_context}"
@@ -5433,11 +5530,29 @@ class ProposalSupportMixin:
     @staticmethod
     def _source_safe_firm_evidence_text(firm_name: str, value: str) -> str:
         cleaned = re.sub(r"\s+", " ", str(value or "").replace("\xa0", " ")).strip()
+        if cleaned.startswith("Sumber eksternal"):
+            facts = ProposalSupportMixin._extract_osint_facts(cleaned, max_items=2)
+            fact_text = ProposalSupportMixin._human_join(
+                [item.get("fact", "") for item in facts],
+                fallback="",
+                max_items=2,
+            )
+            if fact_text:
+                cleaned = fact_text
+        cleaned = re.sub(r"(?i)\bdirangkum\s+dari\s+sumber\s+publik/?OSINT\s*:?", "", cleaned).strip()
+        cleaned = re.sub(r"(?i)\bSumber eksternal\s+\d+\s*:\s*", "", cleaned)
+        cleaned = re.sub(r"(?i)\bfakta\s*=", "", cleaned)
+        cleaned = re.sub(r"(?i)\s*\|\s*sumber\s*=[^|]+", "", cleaned)
+        cleaned = re.sub(r"(?i)\s*\|\s*url\s*=\S+", "", cleaned)
+        cleaned = re.sub(r"(?i)\s*\|\s*sitasi_apa\s*=\([^)]+\)", "", cleaned)
+        cleaned = ProposalSupportMixin._normalize_prose_fragment(cleaned)
         if ProposalSupportMixin._low_confidence_osint_firm_text(firm_name, cleaned):
             return ""
-        if re.match(r"^(dirangkum|berdasarkan|menurut|sumber)\b", cleaned, flags=re.IGNORECASE):
+        if not cleaned:
+            return ""
+        if re.match(r"^(bukti publik|berdasarkan|menurut)\b", cleaned, flags=re.IGNORECASE):
             return cleaned
-        return f"Dirangkum dari sumber publik/OSINT: {cleaned}"
+        return f"Bukti publik yang tersedia menunjukkan {cleaned[0].lower() + cleaned[1:] if cleaned else cleaned}"
 
     @staticmethod
     def _merge_writer_firm_evidence_profile(

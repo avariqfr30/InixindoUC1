@@ -5,7 +5,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 from flask_cors import CORS
@@ -443,15 +443,34 @@ def get_base_config():
     })
 
 
+def _internal_api_has_runtime_resources(api_client: FirmAPIClient) -> bool:
+    resources = getattr(api_client, "resource_config", {}) or {}
+    return bool(resources.get("project_records") or resources.get("account_records"))
+
+
 @app.route('/api/internal-api/setup', methods=['GET', 'POST'])
 def internal_api_setup():
     if request.method == 'GET':
         api_client = FirmAPIClient(force_source="api")
         config_file = api_client.config_file or str(MANAGED_INTERNAL_API_CONFIG_PATH)
+        project_data_source = getattr(knowledge_base, "project_data_source", "local")
+        config_exists = bool(config_file and Path(config_file).exists())
+        api_connection_active = project_data_source == "api" and (
+            config_exists or _internal_api_has_runtime_resources(api_client)
+        )
         return jsonify({
             "config_file": config_file,
-            "config_exists": bool(config_file and Path(config_file).exists()),
-            "project_data_source": getattr(knowledge_base, "project_data_source", "local"),
+            "config_exists": config_exists,
+            "project_data_source": project_data_source,
+            "api_connection_active": api_connection_active,
+            "can_refresh_dataset": api_connection_active,
+            "sync_in_progress": getattr(knowledge_base, "sync_in_progress", False),
+            "last_refresh_error": getattr(knowledge_base, "last_refresh_error", ""),
+            "connection_label": (
+                "Aktif memakai Internal API/APIDog"
+                if api_connection_active
+                else "Belum aktif untuk sesi berjalan"
+            ),
             "runtime": api_client.describe_runtime(),
             "validation": api_client.validate_config(),
         })
@@ -482,12 +501,52 @@ def internal_api_setup():
         "activated": activated,
         "refresh_started": refresh_started,
         "project_data_source": getattr(knowledge_base, "project_data_source", "local"),
+        "api_connection_active": getattr(knowledge_base, "project_data_source", "local") == "api",
+        "can_refresh_dataset": getattr(knowledge_base, "project_data_source", "local") == "api",
+        "sync_in_progress": getattr(knowledge_base, "sync_in_progress", False),
+        "last_refresh_error": getattr(knowledge_base, "last_refresh_error", ""),
+        "connection_label": "Aktif memakai Internal API/APIDog" if activated else "Belum aktif untuk sesi berjalan",
         "validation": validation,
         "notes": [
             "Kredensial tetap dibaca dari environment variable agar password tidak disimpan di UI.",
             "Agar aktif permanen setelah restart, set PROJECT_DATA_SOURCE=api dan FIRM_API_CONFIG_FILE ke path config ini.",
         ],
     })
+
+
+@app.route('/api/internal-api/refresh', methods=['POST'])
+def internal_api_refresh():
+    if generation_queue.has_live_jobs():
+        return jsonify({
+            "status": "error",
+            "error": "Dataset internal tidak bisa di-refresh saat masih ada generate job yang berjalan atau mengantre.",
+        }), 409
+
+    api_client = FirmAPIClient(force_source="api")
+    config_file = api_client.config_file or str(MANAGED_INTERNAL_API_CONFIG_PATH)
+    config_exists = bool(config_file and Path(config_file).exists())
+    if not config_exists and not _internal_api_has_runtime_resources(api_client):
+        return jsonify({
+            "status": "error",
+            "error": "Config Internal API belum tersedia. Aktifkan endpoint Internal API terlebih dahulu.",
+            "config_file": config_file,
+        }), 400
+
+    proposal_generator.firm_api = InternalDataClient(force_source="api")
+    knowledge_base.set_project_data_source("api")
+    refresh_started = knowledge_base.refresh_data(force=True, background=True)
+    return jsonify({
+        "status": "refreshing" if refresh_started else "current",
+        "refresh_started": refresh_started,
+        "project_data_source": getattr(knowledge_base, "project_data_source", "api"),
+        "api_connection_active": True,
+        "can_refresh_dataset": True,
+        "config_file": config_file,
+        "sync_in_progress": getattr(knowledge_base, "sync_in_progress", False),
+        "last_refresh_error": getattr(knowledge_base, "last_refresh_error", ""),
+        "connection_label": "Aktif memakai Internal API/APIDog",
+        "message": "Dataset internal sedang diambil ulang dari endpoint API.",
+    }), 202 if refresh_started else 200
 
 
 @app.route('/api/companies')
@@ -544,33 +603,70 @@ def _request_payload_with_kak_defaults(data: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-def _client_internal_context_text(client_name: str) -> str:
+def _client_internal_context_text(client_name: str, payload: Optional[Dict[str, Any]] = None) -> str:
+    payload = payload or {}
     try:
         context = proposal_generator.firm_api.get_client_context(client_name)
     except Exception:
         logger.exception("Internal client context enrichment failed for %s", client_name)
-        return ""
-    if not context.get("available"):
-        return ""
-    lines = [
-        str(context.get("account_summary") or "").strip(),
-        str(context.get("use_case_summary") or "").strip(),
-        str(context.get("expert_guidance") or "").strip(),
+        context = {}
+    lines = []
+    if context.get("available"):
+        lines.extend([
+            str(context.get("account_summary") or "").strip(),
+            str(context.get("use_case_summary") or "").strip(),
+            str(context.get("expert_guidance") or "").strip(),
+        ])
+        for item in (context.get("use_cases") or [])[:4]:
+            if not isinstance(item, dict):
+                continue
+            project_name = str(item.get("project_name") or "").strip()
+            product_name = str(item.get("product_name") or "").strip()
+            expert_name = str(item.get("expert_name") or "").strip()
+            position_name = str(item.get("position_name") or "").strip()
+            line = " | ".join(part for part in [
+                f"Riwayat proyek: {project_name}" if project_name else "",
+                f"Konteks/produk: {product_name}" if product_name else "",
+                f"Tenaga ahli: {expert_name}{f' sebagai {position_name}' if position_name else ''}" if expert_name else "",
+            ] if part)
+            if line:
+                lines.append(line)
+    focus_terms = [
+        str(payload.get("konteks_organisasi") or ""),
+        str(payload.get("permasalahan") or ""),
+        str(payload.get("klasifikasi_kebutuhan") or ""),
+        str(payload.get("potensi_framework") or ""),
     ]
-    for item in (context.get("use_cases") or [])[:4]:
-        if not isinstance(item, dict):
-            continue
-        project_name = str(item.get("project_name") or "").strip()
-        product_name = str(item.get("product_name") or "").strip()
-        expert_name = str(item.get("expert_name") or "").strip()
-        position_name = str(item.get("position_name") or "").strip()
-        line = " | ".join(part for part in [
-            f"Riwayat proyek: {project_name}" if project_name else "",
-            f"Konteks/produk: {product_name}" if product_name else "",
-            f"Tenaga ahli: {expert_name}{f' sebagai {position_name}' if position_name else ''}" if expert_name else "",
-        ] if part)
-        if line:
-            lines.append(line)
+    try:
+        capability = proposal_generator.firm_api.get_capability_context(
+            project_type=str(payload.get("jenis_proyek") or ""),
+            service_type=str(payload.get("jenis_proposal") or ""),
+            focus_terms=focus_terms,
+            limit=5,
+        )
+    except Exception:
+        logger.exception("Internal capability context enrichment failed for %s", client_name)
+        capability = {}
+    if capability.get("available"):
+        lines.append(str(capability.get("summary") or "").strip())
+        expert_guidance = str(capability.get("expert_guidance") or "").strip()
+        if expert_guidance:
+            lines.append(f"Tenaga ahli relevan dari riwayat proyek internal: {expert_guidance}.")
+        for item in (capability.get("matches") or [])[:4]:
+            if not isinstance(item, dict):
+                continue
+            product_name = str(item.get("product_name") or "").strip()
+            project_name = str(item.get("project_name") or "").strip()
+            expert_name = str(item.get("expert_name") or "").strip()
+            position_name = str(item.get("position_name") or "").strip()
+            if product_name or expert_name:
+                lines.append(
+                    " | ".join(part for part in [
+                        f"Kapabilitas relevan: {product_name}" if product_name else "",
+                        f"Contoh riwayat: {project_name}" if project_name else "",
+                        f"Tenaga ahli: {expert_name}{f' sebagai {position_name}' if position_name else ''}" if expert_name else "",
+                    ] if part)
+                )
     return "\n".join(line for line in lines if line).strip()
 
 
@@ -673,7 +769,7 @@ def generate_proposal():
 
     try:
         supporting_context = app_state_store.build_generation_context(company_candidates=_company_candidates())
-        client_internal_context = _client_internal_context_text(data.get("nama_perusahaan", ""))
+        client_internal_context = _client_internal_context_text(data.get("nama_perusahaan", ""), data)
         if client_internal_context:
             supporting_context["client_internal_context"] = client_internal_context
         data["_supporting_context"] = supporting_context

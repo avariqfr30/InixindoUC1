@@ -1,6 +1,7 @@
 """Input cleanup helpers for user, settings, and KAK/TOR context."""
 from __future__ import annotations
 
+import html
 import re
 from typing import Any, Dict, Iterable, List
 
@@ -45,6 +46,23 @@ def normalize_spacing(text: Any) -> str:
     value = re.sub(r"([,.;:])(?=\S)", r"\1 ", value)
     value = re.sub(r"\.{2,}", ".", value)
     return value.strip()
+
+
+def clean_markup_artifacts(value: Any) -> str:
+    """Remove escaped HTML and source-wire tokens before text becomes proposal prose."""
+    text = str(value or "")
+    if not text:
+        return ""
+    text = html.unescape(html.unescape(text)).replace("\\/", "/")
+    text = re.sub(r"</?\s*[A-Za-z][A-Za-z0-9:-]*(?:\s+[^>]*)?>", " ", text)
+    text = re.sub(r"(?im)^\s*Sumber\s+eksternal\s*\d*\s*:\s*", "", text)
+    text = re.sub(r"(?i)\bDirangkum\s+dari\s+sumber(?:\s+publik)?(?:/OSINT)?\s*:?", "", text)
+    text = re.sub(r"(?i)\bfakta\s*=\s*", "", text)
+    text = re.sub(r"(?i)\s*\|\s*(?:sumber|url|sitasi_apa)\s*=\s*[^|\n]+", "", text)
+    text = re.sub(r"(?im)^\s*(?:sumber|url|sitasi_apa)\s*=\s*.+$", "", text)
+    text = re.sub(r"(?i)\bSumber\s+eksternal\s*\d*\b\s*:?", "", text)
+    text = re.sub(r"\s+\.", ".", text)
+    return normalize_spacing(text)
 
 
 def _uppercase_ratio(text: str) -> float:
@@ -194,11 +212,78 @@ def normalize_field_value(key: str, value: Any) -> str:
     return cleaned
 
 
+def naturalize_generation_text(value: Any, field: str = "", client_name: str = "") -> str:
+    """Turn UI/API helper snippets into prose-safe proposal context."""
+    text = clean_markup_artifacts(value)
+    if not text:
+        return ""
+    field_key = str(field or "").strip().lower()
+    if field_key == "estimasi_waktu" and re.fullmatch(r"jangka\s+waktu\s+pelaksanaan", text, flags=re.IGNORECASE):
+        return "durasi pelaksanaan disepakati pada tahap klarifikasi"
+    if field_key == "klasifikasi_kebutuhan":
+        lowered = text.lower()
+        selected = [token for token in ("problem", "opportunity", "directive") if token in lowered]
+        if selected:
+            if len(selected) == 3:
+                return "kombinasi masalah, peluang, dan arahan prioritas yang perlu diterjemahkan menjadi rencana kerja"
+            labels = {
+                "problem": "masalah yang perlu ditangani",
+                "opportunity": "peluang nilai bisnis yang bisa dikejar",
+                "directive": "arahan prioritas yang perlu dipatuhi",
+            }
+            return ", ".join(labels[token] for token in selected)
+    if field_key == "permasalahan" and re.search(r"\bmengadopsi\s+SPBE\b", text, flags=re.IGNORECASE):
+        client = normalize_spacing(client_name) or "klien"
+        return (
+            f"{client} perlu memperkuat tata kelola layanan digital dengan prinsip SPBE yang relevan sebagai "
+            "disiplin arsitektur layanan, integrasi, keamanan, dan pengukuran kinerja; narasinya tetap disesuaikan "
+            "dengan konteks organisasi sektor privat."
+        )
+
+    text = re.sub(r"(?im)^\s*pembina\s+tk\.?\s*[ivxlcdm]+,\s*[ivxlcdm]+/[a-z]\s*$", "", text)
+    reference_pattern = re.compile(
+        r"Data internal ReferenceAccount mencatat\s+(?P<name>[^(\n.]+)"
+        r"(?:\s*\((?P<details>[^)]*)\))?\.?",
+        flags=re.IGNORECASE,
+    )
+
+    def replace_reference(match: re.Match[str]) -> str:
+        name = normalize_spacing(match.group("name") or client_name or "")
+        details = normalize_spacing(match.group("details") or "")
+        location = ""
+        classification = ""
+        if details:
+            location_match = re.search(r"lokasi\s+([^;]+)", details, flags=re.IGNORECASE)
+            segment_match = re.search(r"segmentasi\s+(.+)$", details, flags=re.IGNORECASE)
+            location = normalize_spacing(location_match.group(1)) if location_match else ""
+            classification = normalize_spacing(segment_match.group(1)) if segment_match else ""
+        parts = [f"{name} tercatat sebagai klien" if name else "Klien tercatat"]
+        qualifiers = []
+        if location:
+            qualifiers.append(f"di {location}")
+        if classification:
+            classification = re.sub(r"\s*/\s*", " / ", classification.lower())
+            qualifiers.append(f"dengan segmentasi {classification}")
+        if qualifiers:
+            parts.append(" ".join(qualifiers))
+        return " ".join(parts).strip() + "."
+
+    text = reference_pattern.sub(replace_reference, text)
+    text = re.sub(r"\bData internal\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bReferenceAccount\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip(" ,;:\n")
+    return clean_markup_artifacts(text)
+
+
 def normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(payload or {})
     for key in FIELD_MAX_CHARS:
         if key in normalized:
-            normalized[key] = normalize_field_value(key, normalized.get(key))
+            normalized[key] = naturalize_generation_text(
+                normalize_field_value(key, normalized.get(key)),
+                field=key,
+                client_name=str(normalized.get("nama_perusahaan") or ""),
+            )
     return normalized
 
 

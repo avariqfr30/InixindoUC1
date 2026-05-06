@@ -165,6 +165,8 @@ class ApidogActualDatasetTest(unittest.TestCase):
         self.assertEqual(relationship["source"], "internal_api")
         self.assertIn("Penyusunan Roadmap SOC & NOC", relationship["summary"])
         self.assertIn("Asesmen Jaringan", relationship["summary"])
+        self.assertNotIn("ConsultantProjectExpertHistory", relationship["summary"])
+        self.assertNotIn("Data internal", relationship["summary"])
 
     def test_project_records_map_consultant_history_into_knowledge_base_rows(self) -> None:
         from main.runtime_components import FirmAPIClient
@@ -311,10 +313,69 @@ class ApidogActualDatasetTest(unittest.TestCase):
         self.assertTrue(context["available"])
         self.assertIn("BPRS Dinar Ashri NTB", context["client_name"])
         self.assertIn("Mataram", context["account_summary"])
+        self.assertIn("klien", context["account_summary"])
+        self.assertNotIn("ReferenceAccount", context["account_summary"])
+        self.assertNotIn("Data internal", context["account_summary"])
         self.assertEqual(len(context["use_cases"]), 1)
         self.assertEqual(context["use_cases"][0]["product_name"], "Asesmen Jaringan")
         self.assertEqual(context["use_cases"][0]["expert_name"], "Dickyfli Perdana Putra")
         self.assertIn("Project Manager", context["expert_guidance"])
+
+    def test_capability_context_uses_broader_consultant_history_without_client_match(self) -> None:
+        from main.runtime_components import FirmAPIClient
+
+        client = FirmAPIClient.__new__(FirmAPIClient)
+        client.resource_config = {
+            "project_records": {
+                "request": {"body": {"dataset": "ConsultantProjectExpertHistory"}},
+                "response_path": "data.dataset_result",
+                "field_mapping": {
+                    "entity": "project_name",
+                    "topic": "product_name",
+                    "project_name": "project_name",
+                    "expert_name": "expert_name",
+                    "position_name": "position_name",
+                },
+            }
+        }
+        client._request_from_spec = lambda spec, **context: {
+            "data": {
+                "dataset_result": [
+                    {
+                        "project_name": "PI06 - Kajian Arsitektur SPBE Domain Infrastruktur",
+                        "product_name": "Arsitektur SPBE",
+                        "expert_name": "Julizar Handi Wijaya",
+                        "position_name": "Project Manager",
+                    },
+                    {
+                        "project_name": "PI05 - Pendampingan ISO/IEC 27001:2022 Kota Semarang",
+                        "product_name": "Pendampingan ISO 27001",
+                        "expert_name": "Citra Arfanudin",
+                        "position_name": "Project Manager",
+                    },
+                    {
+                        "project_name": "PX99 - Pelatihan Umum",
+                        "product_name": "Office Productivity",
+                        "expert_name": "Nama Lain",
+                        "position_name": "Trainer",
+                    },
+                ]
+            }
+        }
+
+        context = client.get_capability_context(
+            project_type="Strategic",
+            service_type="Konsultan",
+            focus_terms=["Ingin mengadopsi SPBE", "ISO", "Regulasi"],
+            limit=3,
+        )
+
+        self.assertTrue(context["available"])
+        self.assertGreaterEqual(len(context["matches"]), 2)
+        self.assertIn("SPBE", context["summary"])
+        self.assertIn("ISO 27001", context["summary"])
+        self.assertIn("Julizar Handi Wijaya", context["expert_guidance"])
+        self.assertIn("Citra Arfanudin", context["expert_guidance"])
 
 
 if __name__ == "__main__":

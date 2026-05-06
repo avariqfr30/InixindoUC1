@@ -484,7 +484,7 @@ class FirmAPIClient:
         values: List[str] = []
         seen = set()
         for item in items:
-            cleaned = re.sub(r"\s+", " ", str(item or "").strip())
+            cleaned = FirmAPIClient._naturalize_internal_text(item)
             key = cleaned.lower()
             if not cleaned or key in seen:
                 continue
@@ -495,15 +495,37 @@ class FirmAPIClient:
         return values
 
     @staticmethod
+    def _naturalize_internal_text(value: Any) -> str:
+        text = re.sub(r"\s+", " ", str(value or "").strip())
+        if not text:
+            return ""
+        text = re.sub(r"(?i)\bData internal\b", "", text)
+        text = re.sub(r"(?i)\bReferenceAccount\b", "", text)
+        text = re.sub(r"(?i)\bConsultantProjectExpertHistory\b", "", text)
+        text = re.sub(r"^[A-Z]{1,4}\d{1,5}\s*[-–]\s*", "", text)
+        text = re.sub(r"\s+", " ", text).strip(" .:-")
+        if text.isupper() and len(text) > 3:
+            preserved = {"AI", "API", "BPR", "BPRS", "BUMN", "ISO", "IT", "NOC", "NTB", "PT", "SOC", "SPBE"}
+            words = []
+            for word in text.split():
+                stripped = re.sub(r"[^A-Za-z0-9/]+", "", word)
+                if stripped in preserved:
+                    words.append(word)
+                else:
+                    words.append(word.lower().capitalize())
+            text = " ".join(words)
+        return text
+
+    @staticmethod
     def _project_history_relationship_summary(payload: Dict[str, Any]) -> str:
-        project_name = str(payload.get("project_name") or payload.get("summary") or "").strip()
-        product_name = str(payload.get("product_name") or "").strip()
-        expert_name = str(payload.get("expert_name") or "").strip()
-        position_name = str(payload.get("position_name") or "").strip()
+        project_name = FirmAPIClient._naturalize_internal_text(payload.get("project_name") or payload.get("summary"))
+        product_name = FirmAPIClient._naturalize_internal_text(payload.get("product_name"))
+        expert_name = FirmAPIClient._naturalize_internal_text(payload.get("expert_name"))
+        position_name = FirmAPIClient._naturalize_internal_text(payload.get("position_name"))
         if not project_name:
             return ""
 
-        parts = [f"Data internal mencatat riwayat proyek: {project_name}."]
+        parts = [f"Riwayat internal menunjukkan pengalaman proyek pada {project_name}."]
         if product_name:
             parts.append(f"Lingkup/produk terkait: {product_name}.")
         if expert_name:
@@ -513,22 +535,22 @@ class FirmAPIClient:
 
     @staticmethod
     def _account_reference_relationship_summary(payload: Dict[str, Any]) -> str:
-        company_name = str(payload.get("company_name") or "").strip()
+        company_name = FirmAPIClient._naturalize_internal_text(payload.get("company_name"))
         if not company_name:
             return ""
-        region = str(payload.get("company_region_name") or "").strip()
-        province = str(payload.get("company_province_name") or "").strip()
-        segment = str(payload.get("company_segment") or "").strip()
-        sub_segment = str(payload.get("company_sub_segment") or "").strip()
+        region = FirmAPIClient._naturalize_internal_text(payload.get("company_region_name"))
+        province = FirmAPIClient._naturalize_internal_text(payload.get("company_province_name"))
+        segment = FirmAPIClient._naturalize_internal_text(payload.get("company_segment"))
+        sub_segment = FirmAPIClient._naturalize_internal_text(payload.get("company_sub_segment"))
         location = ", ".join(part for part in (region, province) if part)
         classification = " / ".join(part for part in (segment, sub_segment) if part)
         details = []
         if location:
-            details.append(f"lokasi {location}")
+            details.append(f"berbasis di {location}")
         if classification:
-            details.append(f"segmentasi {classification}")
-        suffix = f" ({'; '.join(details)})" if details else ""
-        return f"Data internal ReferenceAccount mencatat {company_name}{suffix}."
+            details.append(f"klasifikasi {classification.lower()}")
+        suffix = f" dengan {'; '.join(details)}" if details else ""
+        return f"{company_name} teridentifikasi sebagai klien{suffix}."
 
     @staticmethod
     def _normalized_relationship_mode(raw_mode: str, summary: str) -> str:
@@ -620,6 +642,84 @@ class FirmAPIClient:
             "use_case_summary": use_case_summary,
             "use_cases": use_cases,
             "expert_guidance": "; ".join(expert_bits),
+        }
+
+    @staticmethod
+    def _capability_terms(project_type: str, service_type: str, focus_terms: Optional[List[str]] = None) -> List[str]:
+        raw_terms = [project_type, service_type, *(focus_terms or [])]
+        expanded: List[str] = []
+        for item in raw_terms:
+            text = re.sub(r"[^A-Za-z0-9/+.\-\s]", " ", str(item or " "))
+            for part in re.split(r"[,;|/\n]+|\s+dan\s+|\s+atau\s+", text, flags=re.IGNORECASE):
+                term = re.sub(r"\s+", " ", part).strip(" .:-")
+                if len(term) < 3:
+                    continue
+                expanded.append(term)
+        lowered = " ".join(raw_terms).lower()
+        if "spbe" in lowered:
+            expanded.extend(["SPBE", "Arsitektur SPBE", "Pemerintahan Digital", "Tata Kelola"])
+        if "iso" in lowered or "27001" in lowered:
+            expanded.extend(["ISO 27001", "ISO/IEC 27001", "Pendampingan ISO"])
+        if "regulasi" in lowered or "governance" in lowered or "tata kelola" in lowered:
+            expanded.extend(["Tata Kelola", "Governance", "SOP", "Kajian"])
+        if "strategic" in lowered or "strategi" in lowered:
+            expanded.extend(["Roadmap", "Kajian", "Arsitektur"])
+        return FirmAPIClient._dedupe_phrases(expanded, limit=12)
+
+    def get_capability_context(
+        self,
+        project_type: str = "",
+        service_type: str = "",
+        focus_terms: Optional[List[str]] = None,
+        limit: int = 5,
+    ) -> Dict[str, Any]:
+        terms = self._capability_terms(project_type, service_type, focus_terms)
+        if not terms:
+            return {"available": False, "summary": "", "matches": [], "expert_guidance": ""}
+        scored: List[Tuple[int, Dict[str, Any]]] = []
+        for record in self.get_project_records():
+            project_name = str(record.get("project_name") or record.get("entity") or "").strip()
+            product_name = str(record.get("product_name") or record.get("topic") or "").strip()
+            haystack = f"{project_name} {product_name}".lower()
+            score = sum(1 for term in terms if term.lower() in haystack)
+            if score <= 0:
+                continue
+            scored.append((
+                score,
+                {
+                    "project_name": project_name,
+                    "product_name": product_name,
+                    "expert_name": str(record.get("expert_name") or "").strip(),
+                    "position_name": str(record.get("position_name") or "").strip(),
+                    "matched_terms": [term for term in terms if term.lower() in haystack],
+                },
+            ))
+        scored.sort(key=lambda item: (-item[0], str(item[1].get("project_name") or "").lower()))
+        matches = self._dedupe_records(
+            [item for _, item in scored],
+            keys=("project_name", "product_name", "expert_name", "position_name"),
+            limit=max(1, int(limit or 5)),
+        )
+        if not matches:
+            return {"available": False, "summary": "", "matches": [], "expert_guidance": ""}
+        products = self._dedupe_phrases([str(item.get("product_name") or "") for item in matches], limit=4)
+        experts = []
+        for item in matches[:4]:
+            expert = str(item.get("expert_name") or "").strip()
+            role = str(item.get("position_name") or "").strip()
+            product = str(item.get("product_name") or "").strip()
+            if expert:
+                experts.append(f"{expert}{f' sebagai {role}' if role else ''}{f' pada {product}' if product else ''}")
+        summary = (
+            "Riwayat proyek internal menunjukkan pengalaman yang relevan pada "
+            + ", ".join(products)
+            + "."
+        )
+        return {
+            "available": True,
+            "summary": summary,
+            "matches": matches,
+            "expert_guidance": "; ".join(experts),
         }
 
     def get_project_standards(self, project_type: str) -> Dict[str, str]:
@@ -1002,6 +1102,15 @@ class DemoDataProvider:
             "expert_guidance": "",
         }
 
+    def get_capability_context(
+        self,
+        project_type: str = "",
+        service_type: str = "",
+        focus_terms: Optional[List[str]] = None,
+        limit: int = 5,
+    ) -> Dict[str, Any]:
+        return {"available": False, "summary": "", "matches": [], "expert_guidance": ""}
+
 
 class InternalDataClient:
     def __init__(self, force_source: str = "") -> None:
@@ -1075,6 +1184,21 @@ class InternalDataClient:
         if self._use_demo_fallback() and not context.get("available"):
             logger.warning("Internal data fallback triggered for client_context(%s)", client_name)
             return self.demo_provider.get_client_context(client_name)
+        return context
+
+    def get_capability_context(
+        self,
+        project_type: str = "",
+        service_type: str = "",
+        focus_terms: Optional[List[str]] = None,
+        limit: int = 5,
+    ) -> Dict[str, Any]:
+        if self.internal_data_source == "demo":
+            return self.demo_provider.get_capability_context(project_type, service_type, focus_terms, limit)
+        context = self.api_provider.get_capability_context(project_type, service_type, focus_terms, limit)
+        if self._use_demo_fallback() and not context.get("available"):
+            logger.warning("Internal data fallback triggered for capability_context(%s)", project_type)
+            return self.demo_provider.get_capability_context(project_type, service_type, focus_terms, limit)
         return context
 
     def doctor_snapshot(self, project_type: str = "Implementation", client_name: str = "PT Contoh Klien") -> Dict[str, Any]:

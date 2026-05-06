@@ -24,6 +24,8 @@
         button:disabled { background: #94a3b8; cursor: not-allowed; }
         button.secondary { background: white; color: #475569; border: 1px solid #cbd5e1; }
         button.secondary:hover { background: #f1f5f9; }
+        button.secondary:disabled { background: #e2e8f0; color: #94a3b8; border-color: #cbd5e1; cursor: not-allowed; }
+        button.secondary:disabled:hover { background: #e2e8f0; }
         
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .checkbox-group { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -309,7 +311,10 @@
                     </div>
                 </div>
                 <div id="internal-api-status" class="status-box">Status Internal API belum dimuat.</div>
-                <button type="button" id="btn-save-internal-api" class="secondary">Simpan & Aktifkan Internal API</button>
+                <div class="upload-row">
+                    <button type="button" id="btn-save-internal-api" class="secondary">Simpan & Aktifkan Internal API</button>
+                    <button type="button" id="btn-refresh-internal-api" class="secondary" disabled>Refresh Dataset Sekarang</button>
+                </div>
             </div>
         </div>
     </div>
@@ -373,6 +378,7 @@
             settingsApiBodyEncoding: document.getElementById('settings-api-body-encoding'),
             internalApiStatus: document.getElementById('internal-api-status'),
             btnSaveInternalApi: document.getElementById('btn-save-internal-api'),
+            btnRefreshInternalApi: document.getElementById('btn-refresh-internal-api'),
             kakFiles: document.getElementById('input-kak-files'),
             btnUploadKakFiles: document.getElementById('btn-upload-kak-files'),
             kakDocList: document.getElementById('kak-doc-list'),
@@ -1049,12 +1055,38 @@
                 const missing = (payload.missing_required_mapping || []).join(', ');
                 return `<div>${escapeHtml(name)}: <strong>${payload.ok ? 'ok' : 'perlu mapping'}</strong>${missing ? ` (${escapeHtml(missing)})` : ''}</div>`;
             }).join('');
+            const connectionClass = data.api_connection_active ? 'status-active' : 'status-inactive';
+            const connectionLabel = data.connection_label || (data.api_connection_active ? 'Aktif memakai Internal API/APIDog' : 'Belum aktif untuk sesi berjalan');
+            const refreshState = data.sync_in_progress ? 'refresh berjalan' : (data.can_refresh_dataset ? 'siap refresh manual' : 'belum tersedia');
             ui.internalApiStatus.innerHTML = `
                 <div>Config: <strong>${data.config_exists ? 'tersedia' : 'belum ada'}</strong></div>
+                <div>Connection: <strong class="${connectionClass}">${escapeHtml(connectionLabel)}</strong></div>
                 <div>Project data source: <strong>${escapeHtml(data.project_data_source || 'local')}</strong></div>
+                <div>Dataset refresh: <strong>${escapeHtml(refreshState)}</strong></div>
+                ${data.last_refresh_error ? `<div>Catatan refresh: ${escapeHtml(data.last_refresh_error)}</div>` : ''}
                 <div>File: ${escapeHtml(data.config_file || '-')}</div>
                 ${resourceRows || '<div>Resource belum dikonfigurasi.</div>'}
             `;
+            setInternalApiConnectionState(data);
+        }
+
+        function setInternalApiConnectionState(data) {
+            const active = Boolean(data && data.api_connection_active);
+            const syncing = Boolean(data && data.sync_in_progress);
+            if (ui.btnSaveInternalApi) {
+                ui.btnSaveInternalApi.disabled = active;
+                ui.btnSaveInternalApi.textContent = active ? 'Internal API Sudah Aktif' : 'Simpan & Aktifkan Internal API';
+                ui.btnSaveInternalApi.title = active
+                    ? 'Internal API sudah aktif. Gunakan Refresh Dataset Sekarang untuk mengambil perubahan dataset terbaru.'
+                    : 'Simpan endpoint dan aktifkan Internal API.';
+            }
+            if (ui.btnRefreshInternalApi) {
+                ui.btnRefreshInternalApi.disabled = !active || syncing;
+                ui.btnRefreshInternalApi.textContent = syncing ? 'Refresh Sedang Berjalan...' : 'Refresh Dataset Sekarang';
+                ui.btnRefreshInternalApi.title = active
+                    ? 'Ambil ulang dataset dari endpoint Internal API dan rebuild knowledge base.'
+                    : 'Aktifkan Internal API sebelum refresh dataset.';
+            }
         }
 
         async function loadInternalApiSetup() {
@@ -1300,7 +1332,12 @@
                     config_file: data.config_file,
                     config_exists: true,
                     project_data_source: data.project_data_source,
-                    validation: data.validation
+                    validation: data.validation,
+                    api_connection_active: data.api_connection_active,
+                    can_refresh_dataset: data.can_refresh_dataset,
+                    sync_in_progress: data.sync_in_progress,
+                    last_refresh_error: data.last_refresh_error,
+                    connection_label: data.connection_label
                 });
                 await loadCompanies();
                 alert(data.refresh_started
@@ -1309,8 +1346,34 @@
             } catch (err) {
                 alert(err.message || 'Internal API belum berhasil disimpan.');
             } finally {
-                ui.btnSaveInternalApi.disabled = false;
-                ui.btnSaveInternalApi.textContent = 'Simpan & Aktifkan Internal API';
+                await loadInternalApiSetup();
+            }
+        });
+
+        ui.btnRefreshInternalApi.addEventListener('click', async () => {
+            ui.btnRefreshInternalApi.disabled = true;
+            ui.btnRefreshInternalApi.textContent = 'Refresh Sedang Berjalan...';
+            try {
+                const res = await fetch('/api/internal-api/refresh', { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Dataset internal belum berhasil di-refresh.');
+                renderInternalApiStatus({
+                    config_file: data.config_file,
+                    config_exists: true,
+                    project_data_source: data.project_data_source,
+                    api_connection_active: data.api_connection_active,
+                    can_refresh_dataset: data.can_refresh_dataset,
+                    sync_in_progress: data.sync_in_progress,
+                    last_refresh_error: data.last_refresh_error,
+                    connection_label: data.connection_label,
+                    validation: {}
+                });
+                await loadCompanies();
+                alert(data.message || 'Dataset internal sedang di-refresh dari endpoint API.');
+            } catch (err) {
+                alert(err.message || 'Dataset internal belum berhasil di-refresh.');
+            } finally {
+                await loadInternalApiSetup();
             }
         });
 
