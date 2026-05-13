@@ -590,7 +590,22 @@ def get_client_context():
             "expert_guidance": "",
         })
     try:
-        return jsonify(proposal_generator.firm_api.get_client_context(client_name))
+        context = proposal_generator.firm_api.get_client_context(client_name)
+        try:
+            context["osint_prefetch_status"] = proposal_generator.prefetch_research_bundle(
+                base_client=client_name,
+                regulations="",
+                include_collaboration=proposal_generator.firm_api.uses_demo_logic(),
+                ai_context=client_name,
+            )
+            context["osint_context_note"] = (
+                "OSINT client research is being prepared for generation: public profile, recent signals, "
+                "track record, and persuasive context will be used as proposal helpers."
+            )
+        except Exception:
+            logger.exception("OSINT prefetch failed for selected client %s", client_name)
+            context["osint_prefetch_status"] = "failed"
+        return jsonify(context)
     except Exception as exc:
         logger.exception("Internal client context lookup failed for %s", client_name)
         return jsonify({"available": False, "client_name": client_name, "error": str(exc), "use_cases": []}), 502
@@ -615,7 +630,7 @@ def _client_internal_context_text(client_name: str, payload: Optional[Dict[str, 
         lines.extend([
             str(context.get("account_summary") or "").strip(),
             str(context.get("use_case_summary") or "").strip(),
-            str(context.get("expert_guidance") or "").strip(),
+            str(context.get("expert_history_summary") or context.get("expert_guidance") or "").strip(),
         ])
         for item in (context.get("use_cases") or [])[:4]:
             if not isinstance(item, dict):
@@ -772,6 +787,12 @@ def generate_proposal():
         client_internal_context = _client_internal_context_text(data.get("nama_perusahaan", ""), data)
         if client_internal_context:
             supporting_context["client_internal_context"] = client_internal_context
+        try:
+            expert_bench_context = proposal_generator.firm_api.get_expert_bench_context(limit_products=8)
+            if expert_bench_context.get("available"):
+                supporting_context["expert_bench_context"] = expert_bench_context
+        except Exception:
+            logger.exception("Internal expert bench context enrichment failed")
         data["_supporting_context"] = supporting_context
         ticket = generation_queue.submit(data)
     except OverflowError as exc:

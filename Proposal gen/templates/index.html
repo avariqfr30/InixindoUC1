@@ -701,7 +701,8 @@
             const lines = [
                 context.account_summary,
                 context.use_case_summary,
-                context.expert_guidance ? `Arahan tenaga ahli: ${context.expert_guidance}` : ''
+                context.expert_guidance ? `Arahan tenaga ahli: ${context.expert_guidance}` : '',
+                context.osint_context_note ? `OSINT: ${context.osint_context_note}` : ''
             ].filter(Boolean);
             ui.clientContextSummary.innerHTML = lines.length
                 ? lines.map(line => `<div>${escapeHtml(line)}</div>`).join('')

@@ -458,13 +458,89 @@ class Researcher:
         return year >= (datetime.now().year - max_age_years)
 
     @staticmethod
-    def _filter_recent_entity_results(items: List[Dict[str, Any]], entity_name: str = "", max_age_years: int = 2, strict_entity: bool = False) -> List[Dict[str, Any]]:
-        filtered = []
+    def _host_matches_entity(link: str, entity_name: str) -> bool:
+        host = urlparse(str(link or "")).netloc.lower().replace("www.", "")
+        if not host or not entity_name:
+            return False
+        compact_host = re.sub(r"[^a-z0-9]+", "", host)
+        return any(token in compact_host for token in Researcher._entity_tokens(entity_name))
+
+    @staticmethod
+    def _is_low_signal_osint_item(item: Dict[str, Any]) -> bool:
+        merged = Researcher._normalize_text(
+            " ".join([
+                str(item.get("title", "") or ""),
+                str(item.get("snippet", "") or ""),
+                str(item.get("link", "") or ""),
+            ])
+        )
+        if not merged:
+            return True
+        low_signal_patterns = (
+            "awardee", "scholarship", "beasiswa", "alumni", "curriculum vitae",
+            "linkedin profile", "instagram", "facebook", "tiktok", "lowongan",
+            "job vacancy", "login", "sign in",
+        )
+        return any(pattern in merged for pattern in low_signal_patterns)
+
+    @staticmethod
+    def _context_hit_count(item: Dict[str, Any], context_terms: List[str]) -> int:
+        merged = Researcher._normalize_text(
+            " ".join([str(item.get("title", "") or ""), str(item.get("snippet", "") or "")])
+        )
+        hits = 0
+        for term in context_terms or []:
+            normalized = Researcher._normalize_text(str(term or ""))
+            if normalized and normalized in merged:
+                hits += 1
+        return hits
+
+    @staticmethod
+    def _osint_relevance_score(item: Dict[str, Any], entity_name: str = "", context_terms: Optional[List[str]] = None) -> int:
+        score = 0
+        if entity_name and Researcher._is_entity_match(item, entity_name):
+            score += 40
+        if Researcher._host_matches_entity(str(item.get("link", "") or ""), entity_name):
+            score += 25
+        context_hits = Researcher._context_hit_count(item, context_terms or [])
+        score += min(context_hits, 4) * 12
+        source = Researcher._source_name(str(item.get("link", "") or ""))
+        if source.endswith(".go.id") or source in {"iso.org", "bssn.go.id", "ojk.go.id", "bi.go.id", "kominfo.go.id"}:
+            score += 10
+        if len(re.findall(r"\S+", str(item.get("snippet", "") or ""))) >= 8:
+            score += 6
+        return score
+
+    @staticmethod
+    def _filter_relevant_osint_results(
+        items: List[Dict[str, Any]],
+        entity_name: str = "",
+        context_terms: Optional[List[str]] = None,
+        max_age_years: int = 2,
+        strict_entity: bool = False,
+    ) -> List[Dict[str, Any]]:
+        ranked: List[Tuple[int, int, Dict[str, Any]]] = []
         for item in (items or []):
-            if not Researcher._is_recent(item, max_age_years=max_age_years): continue
-            if entity_name and not Researcher._is_entity_match(item, entity_name, strict=strict_entity): continue
-            filtered.append(item)
-        return Researcher._sort_by_recency(filtered)
+            if Researcher._is_low_signal_osint_item(item):
+                continue
+            if not Researcher._is_recent(item, max_age_years=max_age_years):
+                continue
+            if entity_name and not Researcher._is_entity_match(item, entity_name, strict=strict_entity):
+                continue
+            score = Researcher._osint_relevance_score(item, entity_name=entity_name, context_terms=context_terms or [])
+            ranked.append((score, Researcher._published_sort_key(item), item))
+        ranked.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
+        return [item for _, _, item in ranked]
+
+    @staticmethod
+    def _filter_recent_entity_results(items: List[Dict[str, Any]], entity_name: str = "", max_age_years: int = 2, strict_entity: bool = False) -> List[Dict[str, Any]]:
+        return Researcher._filter_relevant_osint_results(
+            items,
+            entity_name=entity_name,
+            context_terms=[],
+            max_age_years=max_age_years,
+            strict_entity=strict_entity,
+        )
 
     @staticmethod
     def _source_name(link: str) -> str:
@@ -517,7 +593,21 @@ class Researcher:
             f'"{client_name}" {context_clause} roadmap program prioritas {current_year}' if context_clause else "",
         ]
         res = Researcher._search_multi(queries, limit_per_query=5, recency_bucket="month", max_results=10)
-        filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=2)
+        relevance_terms = [
+            plan.get("focus_phrase", ""),
+            *plan.get("focus_terms", []),
+            *plan.get("framework_terms", []),
+            *plan.get("industry_terms", []),
+            "strategic initiative",
+            "digital transformation",
+            "business innovation",
+        ]
+        filtered = Researcher._filter_relevant_osint_results(
+            res,
+            entity_name=client_name,
+            context_terms=relevance_terms,
+            max_age_years=2,
+        )
         
         # Deep Scrape the #1 top news hit
         if filtered and filtered[0].get("link"):
@@ -565,7 +655,20 @@ class Researcher:
             f'"{client_name}" {context_clause} AI data governance {current_year}' if context_clause else "",
         ]
         res = Researcher._search_multi(queries, limit_per_query=5, recency_bucket="year", max_results=10)
-        filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=3)
+        filtered = Researcher._filter_relevant_osint_results(
+            res,
+            entity_name=client_name,
+            context_terms=[
+                *plan.get("focus_terms", []),
+                *plan.get("framework_terms", []),
+                *plan.get("industry_terms", []),
+                "AI",
+                "data analytics",
+                "machine learning",
+                "automation",
+            ],
+            max_age_years=3,
+        )
         
         # Deep Scrape the #1 AI posture link
         if filtered and filtered[0].get("link"):
@@ -636,7 +739,20 @@ class Researcher:
             f'"{entity_name}" {context_clause} profil bisnis {current_year}' if context_clause else "",
         ]
         res = Researcher._search_multi(queries, limit_per_query=5, recency_bucket="year", max_results=10)
-        filtered = Researcher._filter_recent_entity_results(res, entity_name, max_age_years=3, strict_entity=strict_entity)
+        filtered = Researcher._filter_relevant_osint_results(
+            res,
+            entity_name=entity_name,
+            context_terms=[
+                *plan.get("industry_terms", []),
+                *plan.get("framework_terms", []),
+                *plan.get("focus_terms", []),
+                "profil perusahaan",
+                "layanan utama",
+                "annual report",
+            ],
+            max_age_years=3,
+            strict_entity=strict_entity,
+        )
         return Researcher._format_evidence(filtered[:3], label="OSINT_PROFILE", fallback="Data profil terbatas.")
 
     @staticmethod
@@ -656,7 +772,20 @@ class Researcher:
             f'"{client_name}" {context_clause} pencapaian implementasi' if context_clause else "",
         ]
         res = Researcher._search_multi(queries, limit_per_query=5, recency_bucket="year", max_results=10)
-        filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=3)
+        filtered = Researcher._filter_relevant_osint_results(
+            res,
+            entity_name=client_name,
+            context_terms=[
+                plan.get("focus_phrase", ""),
+                *plan.get("focus_terms", []),
+                *plan.get("industry_terms", []),
+                "pencapaian",
+                "kinerja",
+                "implementasi",
+                "transformasi",
+            ],
+            max_age_years=3,
+        )
         return Researcher._format_evidence(filtered[:3], label="OSINT_TRACK", fallback="Track record terbatas.")
 
     @staticmethod
@@ -677,7 +806,21 @@ class Researcher:
         if context_clause:
             queries.append(f'"{writer_firm_name}" "{client_name}" {context_clause}')
         res = Researcher._search_multi(queries, limit_per_query=5, recency_bucket="year", max_results=10)
-        filtered = Researcher._filter_recent_entity_results(res, client_name, max_age_years=6)
+        filtered = Researcher._filter_relevant_osint_results(
+            res,
+            entity_name=client_name,
+            context_terms=[
+                writer_firm_name,
+                plan.get("focus_phrase", ""),
+                *plan.get("framework_terms", []),
+                *plan.get("focus_terms", []),
+                "kerja sama",
+                "proyek",
+                "konsultasi",
+                "pendampingan",
+            ],
+            max_age_years=6,
+        )
         return Researcher._format_evidence(filtered[:2], label="OSINT_COLLAB", fallback="Belum ditemukan bukti publik kolaborasi.")
 
     @staticmethod
@@ -729,4 +872,3 @@ class Researcher:
             "key_contacts": f"Hubungi {firm_name} melalui saluran resmi untuk koordinasi detail.",
             "accolades": f"{firm_name} terus membangun reputasi melalui proyek-proyek tepat guna.",
         }
-

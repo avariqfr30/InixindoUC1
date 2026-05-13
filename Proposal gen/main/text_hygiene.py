@@ -55,6 +55,14 @@ def clean_markup_artifacts(value: Any) -> str:
         return ""
     text = html.unescape(html.unescape(text)).replace("\\/", "/")
     text = re.sub(r"</?\s*[A-Za-z][A-Za-z0-9:-]*(?:\s+[^>]*)?>", " ", text)
+    text = re.sub(
+        r"(?i)\[(?:CHAPTER_RESEARCH_AGENT|CHAPTER_WRITER_AGENT|CHAPTER_HANDOFF|INVISIBLE_CHAPTER_PERSONA|MAIN_SYNTHESIS_AGENT|SPECIALIST_AGENT\s*:?\s*[A-Za-z0-9_-]*|EVIDENCE_CARD_SCHEMA|EVIDENCE_STAGE|RESEARCH_AGENT|INTERNAL_DATA_AGENT|COMMERCIAL_STRATEGY_AGENT|TECHNICAL_SOLUTION_AGENT|RISK_COMPLIANCE_AGENT|EDITOR_MAIN_AGENT|EFFICIENCY_POLICY)\]\s*",
+        " ",
+        text,
+    )
+    text = re.sub(r"(?i)\bfact\s*\|\s*why_it_matters\s*\|\s*source_lane\s*\|\s*confidence\s*\|\s*gap\.?", " ", text)
+    text = re.sub(r"(?i)\bPrompt-only\s+(?:specialist\s+)?(?:research|writing|synthesis)\s+pass\.?", " ", text)
+    text = re.sub(r"(?i)\bPrompt-only\s+lens;?\s*", " ", text)
     text = re.sub(r"(?im)^\s*Sumber\s+eksternal\s*\d*\s*:\s*", "", text)
     text = re.sub(r"(?i)\bDirangkum\s+dari\s+sumber(?:\s+publik)?(?:/OSINT)?\s*:?", "", text)
     text = re.sub(r"(?i)\bfakta\s*=\s*", "", text)
@@ -62,7 +70,9 @@ def clean_markup_artifacts(value: Any) -> str:
     text = re.sub(r"(?im)^\s*(?:sumber|url|sitasi_apa)\s*=\s*.+$", "", text)
     text = re.sub(r"(?i)\bSumber\s+eksternal\s*\d*\b\s*:?", "", text)
     text = re.sub(r"\s+\.", ".", text)
-    return normalize_spacing(text)
+    text = normalize_spacing(text)
+    text = re.sub(r"(?<=\d)\.\s+(?=\d)", ".", text)
+    return text
 
 
 def _uppercase_ratio(text: str) -> float:
@@ -218,8 +228,9 @@ def naturalize_generation_text(value: Any, field: str = "", client_name: str = "
     if not text:
         return ""
     field_key = str(field or "").strip().lower()
+    client = normalize_spacing(client_name) or "klien"
     if field_key == "estimasi_waktu" and re.fullmatch(r"jangka\s+waktu\s+pelaksanaan", text, flags=re.IGNORECASE):
-        return "durasi pelaksanaan disepakati pada tahap klarifikasi"
+        return "periode pelaksanaan akan dikonfirmasi pada tahap klarifikasi"
     if field_key == "klasifikasi_kebutuhan":
         lowered = text.lower()
         selected = [token for token in ("problem", "opportunity", "directive") if token in lowered]
@@ -233,7 +244,6 @@ def naturalize_generation_text(value: Any, field: str = "", client_name: str = "
             }
             return ", ".join(labels[token] for token in selected)
     if field_key == "permasalahan" and re.search(r"\bmengadopsi\s+SPBE\b", text, flags=re.IGNORECASE):
-        client = normalize_spacing(client_name) or "klien"
         return (
             f"{client} perlu memperkuat tata kelola layanan digital dengan prinsip SPBE yang relevan sebagai "
             "disiplin arsitektur layanan, integrasi, keamanan, dan pengukuran kinerja; narasinya tetap disesuaikan "
@@ -257,7 +267,7 @@ def naturalize_generation_text(value: Any, field: str = "", client_name: str = "
             segment_match = re.search(r"segmentasi\s+(.+)$", details, flags=re.IGNORECASE)
             location = normalize_spacing(location_match.group(1)) if location_match else ""
             classification = normalize_spacing(segment_match.group(1)) if segment_match else ""
-        parts = [f"{name} tercatat sebagai klien" if name else "Klien tercatat"]
+        parts = [f"Identitas akun internal mengonfirmasi {name}" if name else "Identitas akun internal mengonfirmasi klien"]
         qualifiers = []
         if location:
             qualifiers.append(f"di {location}")
@@ -269,6 +279,15 @@ def naturalize_generation_text(value: Any, field: str = "", client_name: str = "
         return " ".join(parts).strip() + "."
 
     text = reference_pattern.sub(replace_reference, text)
+    if field_key == "konteks_organisasi" and re.search(
+        r"\b(?:teridentifikasi|tercatat)\s+sebagai\s+klien\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return (
+            f"penajaman kebutuhan, ruang lingkup, dan roadmap kerja yang relevan bagi {client}; "
+            "detail identitas akun internal dipakai hanya sebagai konteks latar, bukan sebagai tujuan proyek."
+        )
     text = re.sub(r"\bData internal\b", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\bReferenceAccount\b", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\s+", " ", text).strip(" ,;:\n")

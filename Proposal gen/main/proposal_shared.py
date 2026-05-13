@@ -20,7 +20,7 @@ import concurrent.futures
 from datetime import datetime
 from functools import lru_cache
 from typing import Dict, List, Any, Tuple, Optional, Set
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import matplotlib
 matplotlib.use('Agg')
@@ -54,7 +54,7 @@ from .config import (
     MANAGED_INTERNAL_API_CONFIG_PATH,
     VECTOR_STORE_DIR, KB_SYNC_STATE_PATH,
     WRITER_FIRM_NAME, DEFAULT_COLOR, UNIVERSAL_STRUCTURE, KAK_RESPONSE_STRUCTURE,
-    PERSONAS, PROPOSAL_SYSTEM_PROMPT,
+    PERSONAS, CHAPTER_PERSONA_LENSES, PROPOSAL_SYSTEM_PROMPT,
     PROJECT_DATA_FIELD_ALIASES, PROJECT_STANDARD_FIELD_ALIASES, FIRM_PROFILE_FIELD_ALIASES,
     CLIENT_RELATIONSHIP_FIELD_ALIASES,
     APP_PROFILE, INTERNAL_DATA_SOURCE, INTERNAL_DATA_FALLBACK,

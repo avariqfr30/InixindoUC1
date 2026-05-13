@@ -34,7 +34,7 @@ class ContextNaturalizationTest(unittest.TestCase):
 
         self.assertEqual(
             naturalize_generation_text("Jangka Waktu Pelaksanaan", field="estimasi_waktu"),
-            "durasi pelaksanaan disepakati pada tahap klarifikasi",
+            "periode pelaksanaan akan dikonfirmasi pada tahap klarifikasi",
         )
         self.assertIn(
             "masalah, peluang, dan arahan",
@@ -61,6 +61,40 @@ class ContextNaturalizationTest(unittest.TestCase):
         self.assertNotIn("<", cleaned)
         self.assertNotIn("span", cleaned.lower())
 
+    def test_prompt_only_agent_labels_are_stripped_from_prose_cleanup(self) -> None:
+        from main.text_hygiene import clean_markup_artifacts
+
+        raw = (
+            "[CHAPTER_RESEARCH_AGENT] Prompt-only research pass. "
+            "[EVIDENCE_CARD_SCHEMA] fact | why_it_matters | source_lane | confidence | gap. "
+            "[EVIDENCE_STAGE] [RESEARCH_AGENT] [INTERNAL_DATA_AGENT] [COMMERCIAL_STRATEGY_AGENT] "
+            "[TECHNICAL_SOLUTION_AGENT] [RISK_COMPLIANCE_AGENT] [EDITOR_MAIN_AGENT] "
+            "[EFFICIENCY_POLICY] single model pass per chapter. "
+            "[SPECIALIST_AGENT:client_intelligence] Role: client intelligence researcher. "
+            "[MAIN_SYNTHESIS_AGENT] Prompt-only synthesis pass. "
+            "[CHAPTER_WRITER_AGENT] Prompt-only writing pass. "
+            "[CHAPTER_HANDOFF] Ajinomoto Indonesia membutuhkan tata kelola kerja yang konkret."
+        )
+
+        cleaned = clean_markup_artifacts(raw)
+
+        self.assertIn("Ajinomoto Indonesia", cleaned)
+        self.assertNotIn("CHAPTER_RESEARCH_AGENT", cleaned)
+        self.assertNotIn("EVIDENCE_CARD_SCHEMA", cleaned)
+        self.assertNotIn("INTERNAL_DATA_AGENT", cleaned)
+        self.assertNotIn("RISK_COMPLIANCE_AGENT", cleaned)
+        self.assertNotIn("EFFICIENCY_POLICY", cleaned)
+        self.assertNotIn("SPECIALIST_AGENT", cleaned)
+        self.assertNotIn("MAIN_SYNTHESIS_AGENT", cleaned)
+        self.assertNotIn("CHAPTER_WRITER_AGENT", cleaned)
+        self.assertNotIn("CHAPTER_HANDOFF", cleaned)
+        self.assertNotIn("Prompt-only", cleaned)
+
+    def test_numeric_currency_separators_survive_markup_cleanup(self) -> None:
+        from main.text_hygiene import clean_markup_artifacts
+
+        self.assertIn("Rp 85.000.000", clean_markup_artifacts("Rp 85.000.000"))
+
     def test_private_client_spbe_input_is_reframed_as_digital_governance(self) -> None:
         from main.text_hygiene import naturalize_generation_text
 
@@ -74,6 +108,51 @@ class ContextNaturalizationTest(unittest.TestCase):
         self.assertIn("AccelByte", cleaned)
         self.assertNotIn("ingin mengadopsi", cleaned.lower())
         self.assertNotIn("instansi pemerintah", cleaned.lower())
+
+    def test_reused_account_identity_is_not_treated_as_project_objective(self) -> None:
+        from main.text_hygiene import naturalize_generation_text
+
+        cleaned = naturalize_generation_text(
+            "Ajinomoto Indonesia teridentifikasi sebagai klien dengan berbasis di Kota Jakarta Utara, "
+            "DKI Jakarta; klasifikasi swasta / swasta.",
+            field="konteks_organisasi",
+            client_name="Ajinomoto Indonesia",
+        )
+
+        self.assertIn("roadmap kerja", cleaned)
+        self.assertIn("Ajinomoto Indonesia", cleaned)
+        self.assertIn("bukan sebagai tujuan proyek", cleaned)
+        self.assertNotIn("teridentifikasi sebagai klien", cleaned)
+
+    def test_spbe_problem_does_not_trigger_fake_channel_adoption_kpi(self) -> None:
+        from main.proposal_support import ProposalSupportMixin
+
+        kpis = ProposalSupportMixin._build_kpi_blueprint(
+            project_goal="Problem, Directive",
+            notes="Ingin mengadopsi SPBE",
+            timeline="Jangka Waktu Pelaksanaan",
+            industry="Lintas Industri",
+            client="Ajinomoto Indonesia",
+        )
+
+        joined = " ".join(kpis)
+        self.assertIn("tata kelola", joined.lower())
+        self.assertIn("arsitektur layanan digital", joined.lower())
+        self.assertNotIn("MAU/Adopsi kanal digital", joined)
+
+    def test_iso_and_regulasi_are_not_described_as_the_same_control(self) -> None:
+        from main.proposal_support import ProposalSupportMixin
+
+        rows = ProposalSupportMixin._framework_reference_rows(
+            "ISO, Regulasi",
+            project_type="Strategic",
+            context_hint="tata kelola layanan digital",
+        )
+        by_name = {row["acuan"].lower(): row for row in rows}
+
+        self.assertIn("standar mutu", by_name["iso"]["ringkas"].lower())
+        self.assertIn("kewajiban", by_name["regulasi"]["ringkas"].lower())
+        self.assertNotEqual(by_name["iso"]["pembeda"], by_name["regulasi"]["pembeda"])
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """Runtime components for internal data access and knowledge-base retrieval."""
 
 from pydantic import BaseModel, Field
+from collections import Counter
 from typing import Optional, List, Dict, Any, Tuple
 
 from .proposal_shared import *
@@ -533,6 +534,102 @@ class FirmAPIClient:
             parts.append(f"Tenaga ahli tercatat: {expert_name}{role}.")
         return " ".join(parts)
 
+    @classmethod
+    def _format_project_expert_history(
+        cls,
+        records: List[Dict[str, Any]],
+        limit_products: int = 5,
+        limit_positions: int = 4,
+        limit_experts: int = 4,
+        limit_projects: int = 3,
+    ) -> Dict[str, Any]:
+        grouped: Dict[str, Dict[str, Any]] = {}
+        product_order: List[str] = []
+        for record in records or []:
+            if not isinstance(record, dict):
+                continue
+            product_name = cls._naturalize_internal_text(record.get("product_name") or record.get("topic"))
+            project_name = cls._naturalize_internal_text(record.get("project_name") or record.get("entity"))
+            expert_name = cls._naturalize_internal_text(record.get("expert_name"))
+            position_name = cls._naturalize_internal_text(record.get("position_name")) or "Tenaga Ahli"
+            if not product_name:
+                product_name = "Produk atau lingkup tidak tercatat"
+            if product_name not in grouped:
+                grouped[product_name] = {
+                    "product_name": product_name,
+                    "positions": {},
+                    "project_examples": [],
+                }
+                product_order.append(product_name)
+            bucket = grouped[product_name]
+            if project_name and project_name not in bucket["project_examples"]:
+                bucket["project_examples"].append(project_name)
+            positions = bucket["positions"]
+            if position_name not in positions:
+                positions[position_name] = []
+            if expert_name and expert_name not in positions[position_name]:
+                positions[position_name].append(expert_name)
+
+        matrix: List[Dict[str, Any]] = []
+        for product_name in product_order[: max(1, int(limit_products or 5))]:
+            bucket = grouped[product_name]
+            positions_payload: List[Dict[str, Any]] = []
+            for position_name, experts in list(bucket["positions"].items())[: max(1, int(limit_positions or 4))]:
+                positions_payload.append(
+                    {
+                        "position_name": position_name,
+                        "experts": experts[: max(1, int(limit_experts or 4))],
+                    }
+                )
+            matrix.append(
+                {
+                    "product_name": product_name,
+                    "positions": positions_payload,
+                    "project_examples": bucket["project_examples"][: max(1, int(limit_projects or 3))],
+                }
+            )
+
+        if not matrix:
+            return {
+                "available": False,
+                "summary": "",
+                "formatted_summary": "",
+                "expert_guidance": "",
+                "product_expert_matrix": [],
+            }
+
+        product_names = [item["product_name"] for item in matrix if item.get("product_name")]
+        summary = (
+            "Riwayat proyek internal menunjukkan kapabilitas pada "
+            + ", ".join(product_names[:4])
+            + "."
+        )
+        guidance_lines: List[str] = []
+        formatted_lines: List[str] = [summary]
+        for item in matrix:
+            product_name = item["product_name"]
+            role_bits: List[str] = []
+            for position in item.get("positions", []):
+                experts = position.get("experts", [])
+                if not experts:
+                    continue
+                role_bits.append(f"{position.get('position_name') or 'Tenaga Ahli'} - {', '.join(experts)}")
+            if role_bits:
+                line = f"{product_name}: " + "; ".join(role_bits)
+                guidance_lines.append(line)
+                formatted_lines.append(f"- {line}.")
+            examples = item.get("project_examples", [])
+            if examples:
+                formatted_lines.append(f"  Contoh riwayat: {', '.join(examples[:2])}.")
+
+        return {
+            "available": True,
+            "summary": summary,
+            "formatted_summary": "\n".join(formatted_lines),
+            "expert_guidance": "; ".join(guidance_lines),
+            "product_expert_matrix": matrix,
+        }
+
     @staticmethod
     def _account_reference_relationship_summary(payload: Dict[str, Any]) -> str:
         company_name = FirmAPIClient._naturalize_internal_text(payload.get("company_name"))
@@ -546,11 +643,11 @@ class FirmAPIClient:
         classification = " / ".join(part for part in (segment, sub_segment) if part)
         details = []
         if location:
-            details.append(f"berbasis di {location}")
+            details.append(f"berlokasi di {location}")
         if classification:
-            details.append(f"klasifikasi {classification.lower()}")
+            details.append(f"segmen {classification.lower()}")
         suffix = f" dengan {'; '.join(details)}" if details else ""
-        return f"{company_name} teridentifikasi sebagai klien{suffix}."
+        return f"Konteks akun internal menempatkan {company_name}{suffix}. Gunakan informasi ini sebagai latar segmentasi dan lokasi, bukan sebagai rumusan tujuan proyek."
 
     @staticmethod
     def _normalized_relationship_mode(raw_mode: str, summary: str) -> str:
@@ -617,31 +714,17 @@ class FirmAPIClient:
             keys=("project_name", "product_name", "expert_name", "position_name"),
             limit=8,
         )
-        expert_bits = []
-        for item in use_cases[:4]:
-            expert = str(item.get("expert_name") or "").strip()
-            role = str(item.get("position_name") or "").strip()
-            product = str(item.get("product_name") or "").strip()
-            if expert:
-                expert_bits.append(
-                    f"{expert}{f' sebagai {role}' if role else ''}{f' untuk konteks {product}' if product else ''}"
-                )
+        history_format = self._format_project_expert_history(use_cases, limit_products=4)
         account_summary = self._account_reference_relationship_summary(matched_account if isinstance(matched_account, dict) else {})
-        use_case_summary = ""
-        if use_cases:
-            products = self._dedupe_phrases([str(item.get("product_name") or "") for item in use_cases], limit=4)
-            focus = f" dengan fokus {', '.join(products)}" if products else ""
-            use_case_summary = (
-                f"Riwayat internal mencatat {len(use_cases)} konteks proyek relevan"
-                f"{focus}."
-            )
         return {
             "available": bool(account_summary or use_cases),
             "client_name": account_name,
             "account_summary": account_summary,
-            "use_case_summary": use_case_summary,
+            "use_case_summary": history_format.get("summary", ""),
             "use_cases": use_cases,
-            "expert_guidance": "; ".join(expert_bits),
+            "expert_guidance": history_format.get("expert_guidance", ""),
+            "expert_history_summary": history_format.get("formatted_summary", ""),
+            "product_expert_matrix": history_format.get("product_expert_matrix", []),
         }
 
     @staticmethod
@@ -702,24 +785,56 @@ class FirmAPIClient:
         )
         if not matches:
             return {"available": False, "summary": "", "matches": [], "expert_guidance": ""}
-        products = self._dedupe_phrases([str(item.get("product_name") or "") for item in matches], limit=4)
-        experts = []
-        for item in matches[:4]:
-            expert = str(item.get("expert_name") or "").strip()
-            role = str(item.get("position_name") or "").strip()
-            product = str(item.get("product_name") or "").strip()
-            if expert:
-                experts.append(f"{expert}{f' sebagai {role}' if role else ''}{f' pada {product}' if product else ''}")
-        summary = (
-            "Riwayat proyek internal menunjukkan pengalaman yang relevan pada "
-            + ", ".join(products)
-            + "."
-        )
+        history_format = self._format_project_expert_history(matches, limit_products=max(1, int(limit or 5)))
         return {
             "available": True,
-            "summary": summary,
+            "summary": history_format.get("summary", ""),
             "matches": matches,
-            "expert_guidance": "; ".join(experts),
+            "expert_guidance": history_format.get("expert_guidance", ""),
+            "expert_history_summary": history_format.get("formatted_summary", ""),
+            "product_expert_matrix": history_format.get("product_expert_matrix", []),
+        }
+
+    def get_expert_bench_context(self, limit_products: int = 8) -> Dict[str, Any]:
+        records = self.get_project_records()
+        mapped: List[Dict[str, Any]] = []
+        for record in records:
+            mapped.append(
+                {
+                    "project_name": str(record.get("project_name") or record.get("entity") or "").strip(),
+                    "product_name": str(record.get("product_name") or record.get("topic") or "").strip(),
+                    "expert_name": str(record.get("expert_name") or "").strip(),
+                    "position_name": str(record.get("position_name") or "").strip(),
+                }
+            )
+        product_counts = Counter(str(record.get("product_name") or "").strip() for record in mapped)
+        formatted = self._format_project_expert_history(
+            self._dedupe_records(
+                sorted(
+                    mapped,
+                    key=lambda item: (
+                        -product_counts[str(item.get("product_name") or "").strip()],
+                        str(item.get("product_name") or "").lower(),
+                        str(item.get("project_name") or "").lower(),
+                    ),
+                ),
+                keys=("project_name", "product_name", "expert_name", "position_name"),
+                limit=max(1, len(mapped)),
+            ),
+            limit_products=limit_products,
+            limit_positions=5,
+            limit_experts=5,
+            limit_projects=2,
+        )
+        if not formatted.get("available"):
+            return {"available": False, "record_count": len(records), "summary": "", "product_expert_matrix": []}
+        return {
+            "available": True,
+            "record_count": len(records),
+            "summary": formatted.get("summary", ""),
+            "expert_guidance": formatted.get("expert_guidance", ""),
+            "expert_history_summary": formatted.get("formatted_summary", ""),
+            "product_expert_matrix": formatted.get("product_expert_matrix", []),
         }
 
     def get_project_standards(self, project_type: str) -> Dict[str, str]:
@@ -1111,6 +1226,9 @@ class DemoDataProvider:
     ) -> Dict[str, Any]:
         return {"available": False, "summary": "", "matches": [], "expert_guidance": ""}
 
+    def get_expert_bench_context(self, limit_products: int = 8) -> Dict[str, Any]:
+        return {"available": False, "record_count": 0, "summary": "", "product_expert_matrix": []}
+
 
 class InternalDataClient:
     def __init__(self, force_source: str = "") -> None:
@@ -1199,6 +1317,15 @@ class InternalDataClient:
         if self._use_demo_fallback() and not context.get("available"):
             logger.warning("Internal data fallback triggered for capability_context(%s)", project_type)
             return self.demo_provider.get_capability_context(project_type, service_type, focus_terms, limit)
+        return context
+
+    def get_expert_bench_context(self, limit_products: int = 8) -> Dict[str, Any]:
+        if self.internal_data_source == "demo":
+            return self.demo_provider.get_expert_bench_context(limit_products)
+        context = self.api_provider.get_expert_bench_context(limit_products)
+        if self._use_demo_fallback() and not context.get("available"):
+            logger.warning("Internal data fallback triggered for expert_bench_context")
+            return self.demo_provider.get_expert_bench_context(limit_products)
         return context
 
     def doctor_snapshot(self, project_type: str = "Implementation", client_name: str = "PT Contoh Klien") -> Dict[str, Any]:

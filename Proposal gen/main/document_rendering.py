@@ -6,6 +6,11 @@ from .research import Researcher
 from .text_hygiene import clean_markup_artifacts
 
 class LogoManager:
+    BLOCKED_LOGO_HOSTS = {
+        "wikipedia.org", "wikimedia.org", "facebook.com", "instagram.com", "linkedin.com",
+        "youtube.com", "companieshouse.id", "ipaddress.com", "reddit.com",
+    }
+
     @staticmethod
     def _create_fallback_logo(client_name: str) -> io.BytesIO:
         initials = "".join([w[0] for w in re.findall(r"[A-Za-z0-9]+", client_name)[:3]]).upper() or "CL"
@@ -187,7 +192,117 @@ class LogoManager:
         return score
 
     @staticmethod
+    def _host_allowed_for_logo(host: str) -> bool:
+        normalized = (host or "").lower().replace("www.", "").strip()
+        return bool(normalized and not any(blocked in normalized for blocked in LogoManager.BLOCKED_LOGO_HOSTS))
+
+    @staticmethod
+    def _official_domain_candidates(client_name: str) -> List[str]:
+        candidates: List[str] = []
+        seen = set()
+
+        def add(host: str) -> None:
+            clean = re.sub(r"^www\.", "", (host or "").lower().strip())
+            if not LogoManager._host_allowed_for_logo(clean) or clean in seen:
+                return
+            seen.add(clean)
+            candidates.append(clean)
+
+        if Researcher._has_serper_key():
+            try:
+                payload = json.dumps({"q": f"{client_name} official website", "num": 8})
+                headers = {'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'}
+                res = requests.post("https://google.serper.dev/search", headers=headers, data=payload, timeout=8).json()
+                for item in res.get("organic", []) or []:
+                    link = str(item.get("link") or "")
+                    title = str(item.get("title") or "")
+                    snippet = str(item.get("snippet") or "")
+                    host = urlparse(link).netloc
+                    haystack = f"{title} {snippet} {host}".lower()
+                    if "official" in haystack or any(term in haystack for term in LogoManager._logo_identity_terms(client_name)):
+                        add(host)
+            except Exception as exc:
+                logger.debug("Official logo domain discovery failed: %s", exc)
+        return candidates[:4]
+
+    @staticmethod
+    def _image_stream_from_url(image_url: str, client_name: str, identity_boost: float = 1.0) -> Optional[Tuple[float, io.BytesIO, Tuple[int, int, int]]]:
+        try:
+            img_resp = requests.get(image_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=6)
+            if img_resp.status_code != 200 or not img_resp.content:
+                return None
+            stream = io.BytesIO(img_resp.content)
+            img = Image.open(stream)
+            img, dom_color = LogoManager._normalize_logo_image(img)
+            if img.width < 24 or img.height < 24:
+                return None
+            img.thumbnail((640, 260))
+            border_ratio = LogoManager._border_opacity_ratio(img)
+            if border_ratio > 0.28:
+                return None
+            luminance = 0.299 * dom_color[0] + 0.587 * dom_color[1] + 0.114 * dom_color[2]
+            if luminance > 120:
+                factor = 120 / luminance
+                dom_color = tuple(max(0, min(255, int(c * factor))) for c in dom_color)
+            png_stream = io.BytesIO()
+            img.save(png_stream, format='PNG')
+            png_stream.seek(0)
+            aspect_penalty = 0.01 * abs((img.width / max(1, img.height)) - 3.0)
+            size_bonus = min(0.18, (img.width * img.height) / 800000.0)
+            score = border_ratio + aspect_penalty - (0.16 * identity_boost) - size_bonus
+            return score, png_stream, tuple(dom_color)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _fetch_logo_from_domain(domain: str, client_name: str) -> Optional[Tuple[float, io.BytesIO, Tuple[int, int, int]]]:
+        urls: List[str] = []
+        for base in [f"https://{domain}", f"https://www.{domain}"]:
+            try:
+                resp = requests.get(base, headers={'User-Agent': 'Mozilla/5.0'}, timeout=6)
+                if resp.status_code >= 400 or not resp.text:
+                    continue
+                soup = BeautifulSoup(resp.text, "html.parser")
+                for img in soup.find_all("img"):
+                    metadata = " ".join(str(img.get(attr) or "") for attr in ("src", "alt", "class", "id", "title")).lower()
+                    if "logo" in metadata or any(term in metadata for term in LogoManager._logo_identity_terms(client_name)):
+                        src = str(img.get("src") or "").strip()
+                        if src:
+                            urls.append(urljoin(base, src))
+                for tag in soup.find_all("link"):
+                    rel = " ".join(tag.get("rel") or []).lower()
+                    href = str(tag.get("href") or "").strip()
+                    if href and any(token in rel for token in ("icon", "apple-touch-icon")):
+                        urls.append(urljoin(base, href))
+                for tag in soup.find_all("meta"):
+                    prop = str(tag.get("property") or tag.get("name") or "").lower()
+                    content = str(tag.get("content") or "").strip()
+                    if content and prop in {"og:image", "twitter:image"}:
+                        urls.append(urljoin(base, content))
+                break
+            except Exception:
+                continue
+        urls.extend([
+            f"https://logo.clearbit.com/{domain}",
+            f"https://www.google.com/s2/favicons?sz=256&domain={domain}",
+        ])
+        best: Optional[Tuple[float, io.BytesIO, Tuple[int, int, int]]] = None
+        seen = set()
+        for image_url in urls:
+            if image_url in seen:
+                continue
+            seen.add(image_url)
+            candidate = LogoManager._image_stream_from_url(image_url, client_name, identity_boost=1.4)
+            if candidate and (best is None or candidate[0] < best[0]):
+                best = candidate
+        return best
+
+    @staticmethod
     def get_logo_and_color(client_name: str) -> Tuple[Optional[io.BytesIO], Tuple[int, int, int]]:
+        for domain in LogoManager._official_domain_candidates(client_name):
+            candidate = LogoManager._fetch_logo_from_domain(domain, client_name)
+            if candidate is not None:
+                return candidate[1], candidate[2]
         if not Researcher._has_serper_key():
             return LogoManager._create_fallback_logo(client_name), DEFAULT_COLOR
         try:
@@ -724,6 +839,8 @@ class DocumentBuilder:
             return [1.55, 4.70]
         if len(headers) == 3:
             return [1.35, 2.45, 2.45]
+        if headers[:4] == ["peran tenaga ahli", "fokus tanggung jawab", "kompetensi / pengalaman kunci", "keterlibatan"]:
+            return [1.55, 1.65, 2.15, 1.45]
         if len(headers) == 4:
             return [1.35, 1.70, 1.70, 1.50]
         return None
@@ -882,6 +999,63 @@ class DocumentBuilder:
         DocumentBuilder._set_run_format(run, size=14, bold=True)
 
     @staticmethod
+    def _compact_words(value: Any, max_words: int = 44) -> str:
+        text = clean_markup_artifacts(value)
+        text = re.sub(r"(?<=\d)\.\s+(?=\d)", ".", text)
+        text = re.sub(r"\s+", " ", text).strip(" .;:")
+        if not text:
+            return ""
+        words = text.split()
+        if len(words) <= max_words:
+            return text
+        return " ".join(words[:max_words]).rstrip(" ,;:") + "."
+
+    @staticmethod
+    def _certification_summary(value: Any, fallback: Any = "") -> str:
+        primary = clean_markup_artifacts(value)
+        primary = re.sub(r"(?i)\blihat\s+website\s+resmi\s+untuk\s+daftar\s+lengkap\b", "", primary)
+        fallback_text = clean_markup_artifacts(fallback)
+        text = " ".join(part for part in [primary, fallback_text] if part).strip()
+        text = re.sub(r"(?i)\blihat\s+website\s+resmi\s+untuk\s+daftar\s+lengkap\b", "", text)
+        known_patterns = [
+            r"Lead\s+Auditor\s+ISO\s*27001", r"ISO/IEC\s*27001", r"ISO\s*27001",
+            r"ISO\s*20000", r"TOGAF(?:\s*9\s*Foundations)?", r"COBIT\s*5?",
+            r"ITIL(?:\s*(?:Foundation|Service Strategy|V3|Certificate))*", r"CAPM",
+            r"CompTIA\s*Project\+", r"Project\+", r"CEH", r"CHFI", r"CISA",
+            r"CCNA(?:\s*Routing\s*and\s*Switching)?", r"ECIH", r"EDRP",
+        ]
+        found: List[str] = []
+        seen = set()
+        for pattern in known_patterns:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                item = re.sub(r"\s+", " ", match.group(0)).strip(" ,.;:")
+                key = item.lower()
+                if item and key not in seen:
+                    seen.add(key)
+                    found.append(item)
+        if found:
+            return "Kredensial yang dapat ditonjolkan mencakup " + ", ".join(found[:10]) + "."
+        return DocumentBuilder._compact_words(text, max_words=34)
+
+    @staticmethod
+    def _capability_without_names(value: Any) -> str:
+        text = clean_markup_artifacts(value)
+        lowered = text.lower()
+        domains: List[str] = []
+        for label, tokens in [
+            ("manajemen proyek", ["capm", "project+", "project manager", "pmo"]),
+            ("arsitektur enterprise dan tata kelola TI", ["togaf", "cobit", "arsitektur"]),
+            ("IT service management", ["itil", "iso 20000", "service management"]),
+            ("keamanan informasi dan audit", ["iso 27001", "ceh", "chfi", "cisa", "lead auditor", "ccna"]),
+            ("pemulihan dan risiko operasional", ["edrp", "disaster recovery", "risk"]),
+        ]:
+            if any(token in lowered for token in tokens) and label not in domains:
+                domains.append(label)
+        if domains:
+            return "Kapabilitas internal mencakup " + ", ".join(domains[:5]) + ", dengan peran delivery yang dipetakan sesuai kebutuhan proyek."
+        return DocumentBuilder._compact_words(text, max_words=32)
+
+    @staticmethod
     def add_writer_firm_profile_section(
         doc: Document,
         firm_profile: Optional[Dict[str, Any]],
@@ -909,13 +1083,13 @@ class DocumentBuilder:
         detail_rows = [
             ("Entitas hukum", legal_name),
             ("Fokus layanan", "Pelatihan IT, sertifikasi, dan konsultasi IT."),
-            ("Portofolio", portfolio),
-            ("Kapabilitas", credentials),
-            ("Pendekatan berbasis sumber publik", values_approach),
-            ("Keahlian tim berbasis sumber publik", team_expertise),
-            ("Skala dan bukti portofolio", portfolio_scale),
-            ("Sertifikasi dan kredensial eksternal", certifications),
-            ("Pengakuan eksternal", accolades),
+            ("Portofolio", DocumentBuilder._compact_words(portfolio, max_words=38)),
+            ("Kapabilitas", DocumentBuilder._capability_without_names(credentials or team_expertise)),
+            ("Pendekatan berbasis sumber publik", DocumentBuilder._compact_words(values_approach, max_words=42)),
+            ("Keahlian tim berbasis sumber publik", DocumentBuilder._compact_words(team_expertise, max_words=34)),
+            ("Skala dan bukti portofolio", DocumentBuilder._compact_words(portfolio_scale, max_words=34)),
+            ("Sertifikasi dan kredensial eksternal", DocumentBuilder._certification_summary(certifications, fallback=credentials)),
+            ("Pengakuan eksternal", DocumentBuilder._compact_words(accolades, max_words=28)),
         ]
         visible_detail_rows = [(label, str(value or "").strip()) for label, value in detail_rows if str(value or "").strip()]
         visible_contact_rows = [(label, str(value or "").strip()) for label, value in contact_rows if str(value or "").strip()]
@@ -1366,6 +1540,8 @@ class DocumentBuilder:
                 in_table = True
                 clean_lines.append(stripped_line)
             else:
+                if in_table and stripped_line and clean_lines and clean_lines[-1] != "":
+                    clean_lines.append("")
                 in_table = False
                 clean_lines.append(line)
             

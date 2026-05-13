@@ -313,7 +313,8 @@ class ApidogActualDatasetTest(unittest.TestCase):
         self.assertTrue(context["available"])
         self.assertIn("BPRS Dinar Ashri NTB", context["client_name"])
         self.assertIn("Mataram", context["account_summary"])
-        self.assertIn("klien", context["account_summary"])
+        self.assertIn("Konteks akun internal", context["account_summary"])
+        self.assertIn("bukan sebagai rumusan tujuan proyek", context["account_summary"])
         self.assertNotIn("ReferenceAccount", context["account_summary"])
         self.assertNotIn("Data internal", context["account_summary"])
         self.assertEqual(len(context["use_cases"]), 1)
@@ -376,6 +377,85 @@ class ApidogActualDatasetTest(unittest.TestCase):
         self.assertIn("ISO 27001", context["summary"])
         self.assertIn("Julizar Handi Wijaya", context["expert_guidance"])
         self.assertIn("Citra Arfanudin", context["expert_guidance"])
+
+    def test_consultant_history_formats_product_expert_position_matrix(self) -> None:
+        from main.runtime_components import FirmAPIClient
+
+        formatted = FirmAPIClient._format_project_expert_history(
+            [
+                {
+                    "project_name": "PI06 - Kajian Arsitektur SPBE Domain Infrastruktur",
+                    "product_name": "Arsitektur SPBE",
+                    "expert_name": "Julizar Handi Wijaya",
+                    "position_name": "Project Manager",
+                },
+                {
+                    "project_name": "Penyusunan dokumen arsitektur SPBE Kab Gunung Kidul",
+                    "product_name": "Arsitektur SPBE",
+                    "expert_name": "Mustofa",
+                    "position_name": "Tenaga Ahli",
+                },
+                {
+                    "project_name": "PI05 - Pendampingan ISO/IEC 27001:2022 Kota Semarang",
+                    "product_name": "Pendampingan ISO 27001",
+                    "expert_name": "Citra Arfanudin",
+                    "position_name": "Project Manager",
+                },
+            ]
+        )
+
+        self.assertTrue(formatted["available"])
+        self.assertIn("Arsitektur SPBE", formatted["summary"])
+        self.assertIn("Pendampingan ISO 27001", formatted["summary"])
+        self.assertIn("Arsitektur SPBE: Project Manager - Julizar Handi Wijaya", formatted["expert_guidance"])
+        self.assertIn("Tenaga Ahli - Mustofa", formatted["expert_guidance"])
+        self.assertEqual(formatted["product_expert_matrix"][0]["product_name"], "Arsitektur SPBE")
+        self.assertEqual(formatted["product_expert_matrix"][0]["positions"][0]["position_name"], "Project Manager")
+        self.assertIn("Julizar Handi Wijaya", formatted["product_expert_matrix"][0]["positions"][0]["experts"])
+        self.assertNotIn("ConsultantProjectExpertHistory", formatted["formatted_summary"])
+        self.assertNotIn("PI06 -", formatted["formatted_summary"])
+
+    def test_expert_bench_context_uses_full_consultant_history(self) -> None:
+        from main.runtime_components import FirmAPIClient
+
+        client = FirmAPIClient.__new__(FirmAPIClient)
+        client._dedupe_records = FirmAPIClient._dedupe_records
+        client._format_project_expert_history = FirmAPIClient._format_project_expert_history
+        client.get_project_records = lambda: [
+            {
+                "entity": "Pendampingan ISO Kota",
+                "topic": "Pendampingan ISO 27001",
+                "expert_name": "Citra Arfanudin",
+                "position_name": "Project Manager",
+            },
+            {
+                "entity": "PI06 - Kajian Arsitektur SPBE Domain Infrastruktur",
+                "topic": "Arsitektur SPBE",
+                "expert_name": "Julizar Handi Wijaya",
+                "position_name": "Project Manager",
+            },
+            {
+                "entity": "Peta Rencana SPBE Kabupaten",
+                "topic": "Peta Rencana SPBE",
+                "expert_name": "Mustofa",
+                "position_name": "Tenaga Ahli",
+            },
+            {
+                "entity": "Peta Rencana SPBE Kota",
+                "topic": "Peta Rencana SPBE",
+                "expert_name": "Umar Affandhi",
+                "position_name": "Project Manager",
+            },
+        ]
+
+        context = client.get_expert_bench_context(limit_products=5)
+
+        self.assertTrue(context["available"])
+        self.assertEqual(context["record_count"], 4)
+        self.assertEqual(context["product_expert_matrix"][0]["product_name"], "Peta Rencana SPBE")
+        self.assertIn("Arsitektur SPBE", context["summary"])
+        self.assertIn("Peta Rencana SPBE", context["summary"])
+        self.assertIn("Pendampingan ISO 27001", context["summary"])
 
 
 if __name__ == "__main__":
