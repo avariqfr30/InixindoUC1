@@ -4,6 +4,7 @@ from __future__ import annotations
 from .proposal_shared import *
 from .research import Researcher
 from .text_hygiene import clean_markup_artifacts
+from .reader_facing_hygiene import sanitize_reader_facing_sources
 
 class LogoManager:
     BLOCKED_LOGO_HOSTS = {
@@ -889,6 +890,32 @@ class DocumentBuilder:
         )
 
     @staticmethod
+    def _append_field(paragraph, instruction: str) -> None:
+        run = paragraph.add_run()
+        field_begin = OxmlElement("w:fldChar")
+        field_begin.set(qn("w:fldCharType"), "begin")
+        field_instruction = OxmlElement("w:instrText")
+        field_instruction.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        field_instruction.text = instruction
+        field_separator = OxmlElement("w:fldChar")
+        field_separator.set(qn("w:fldCharType"), "separate")
+        field_end = OxmlElement("w:fldChar")
+        field_end.set(qn("w:fldCharType"), "end")
+        run._r.extend([field_begin, field_instruction, field_separator, field_end])
+
+    @staticmethod
+    def add_table_of_contents(doc: Document, items: Optional[List[str]] = None) -> None:
+        heading = doc.add_paragraph(style="Heading 1")
+        heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        heading.add_run("DAFTAR ISI").bold = True
+        for item in items or []:
+            paragraph = doc.add_paragraph(str(item), style="List Bullet")
+            paragraph.paragraph_format.space_after = Pt(2)
+        toc_paragraph = doc.add_paragraph()
+        DocumentBuilder._append_field(toc_paragraph, 'TOC \\o "1-3" \\h \\z \\u')
+        doc.add_page_break()
+
+    @staticmethod
     def add_reference_cover_page(
         doc: Document,
         client: str,
@@ -1502,7 +1529,8 @@ class DocumentBuilder:
     def process_content(doc: Document, raw_text: str, theme_color: Tuple[int, int, int], chapter_title: str) -> None:
         clean_lines = []
         in_table = False
-        normalized_text = DocumentBuilder._normalize_markdown_blocks(clean_markup_artifacts(raw_text))
+        normalized_text = sanitize_reader_facing_sources(raw_text)
+        normalized_text = DocumentBuilder._normalize_markdown_blocks(clean_markup_artifacts(normalized_text))
         normalized_text = DocumentBuilder._demote_invalid_markdown_tables(normalized_text)
         for raw_line in normalized_text.split('\n'):
             line = raw_line.rstrip()

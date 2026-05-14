@@ -52,7 +52,7 @@ class SignupAccessTest(unittest.TestCase):
         signup_response = client.post(
             "/signup",
             data={
-                "username": "pending.user@inixindojogja.co.id",
+                "username": "pending.user.contract@inixindojogja.co.id",
                 "password": "secret123",
                 "confirm_password": "secret123",
             },
@@ -62,13 +62,13 @@ class SignupAccessTest(unittest.TestCase):
         self.assertEqual(signup_response.status_code, 302)
         signup_query = parse_qs(urlparse(signup_response.headers["Location"]).query)
         self.assertIn("silakan login", signup_query.get("signup_success", [""])[0].lower())
-        user = self.store.get_user("pending.user@inixindojogja.co.id")
+        user = self.store.get_user("pending.user.contract@inixindojogja.co.id")
         self.assertIsNotNone(user)
         self.assertEqual(user["status"], "approved")
 
         allowed_login = client.post(
             "/login",
-            data={"username": "pending.user@inixindojogja.co.id", "password": "secret123"},
+            data={"username": "pending.user.contract@inixindojogja.co.id", "password": "secret123"},
             follow_redirects=False,
         )
 

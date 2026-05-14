@@ -2,6 +2,7 @@
 
 from .proposal_shared import *
 from .document_rendering import DocumentBuilder, LogoManager, StyleEngine
+from .executive_summary import ExecutiveSummaryBuilder
 from .research import Researcher
 from .proposal_support import ProposalSupportMixin
 from .text_hygiene import naturalize_generation_text
@@ -827,6 +828,22 @@ class ProposalEngineMixin:
             firm_profile=firm_profile,
             theme_color=theme_color,
             logo_stream=logo_stream,
+        )
+        executive_summary = ExecutiveSummaryBuilder.build(
+            client=client,
+            project=project,
+            project_goal=project_goal,
+            timeline=timeline,
+            budget=budget,
+            value_map=value_map,
+            personalization_pack=personalization_pack,
+            selected_chapters=selected_chapters,
+        )
+        DocumentBuilder.process_content(doc, executive_summary, theme_color, "Executive Summary")
+        doc.add_page_break()
+        DocumentBuilder.add_table_of_contents(
+            doc,
+            ["Executive Summary"] + [chapter["title"] for chapter in selected_chapters],
         )
 
         rendered_any = False

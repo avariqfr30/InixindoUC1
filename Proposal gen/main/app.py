@@ -48,18 +48,12 @@ from .config import (
 )
 from .auth_flow import AuthFlow
 from .core import ProposalGenerator
-from .data_sources import FirmAPIClient, InternalDataClient
 from .finance import FinancialAnalyzer
-from .internal_api_setup import build_internal_api_config, write_json_config
-from .internal_api_runtime import (
-    internal_api_activation_payload,
-    internal_api_has_runtime_resources,
-    internal_api_refresh_payload,
-    internal_api_setup_status_payload,
-)
 from .job_queue import GenerationQueue
 from .knowledge_store import KnowledgeBase
+from .proposal_request_service import BUDGET_REQUIRED_FIELDS, ProposalRequestService
 from .readiness import build_readiness_payload
+from .runtime_services import ClientContextService, InternalApiRuntimeService, normalize_client_name
 from .state_store import AppStateStore
 from .text_hygiene import normalize_payload
 
@@ -109,6 +103,23 @@ generation_queue = GenerationQueue(
     max_backlog=MAX_GENERATION_BACKLOG,
     retention_seconds=JOB_RETENTION_SECONDS,
 )
+client_context_service = ClientContextService(
+    proposal_generator=proposal_generator,
+    knowledge_base=knowledge_base,
+    prefetch_research=lambda data: proposal_request_service.warm_request_context(data),
+)
+proposal_request_service = ProposalRequestService(
+    proposal_generator=proposal_generator,
+    app_state_store=app_state_store,
+    client_context_service=client_context_service,
+    generation_queue=generation_queue,
+)
+internal_api_service = InternalApiRuntimeService(
+    knowledge_base=knowledge_base,
+    proposal_generator=proposal_generator,
+    generation_queue=generation_queue,
+    managed_config_path=MANAGED_INTERNAL_API_CONFIG_PATH,
+)
 
 PUBLIC_ENDPOINTS = {
     "auth_page",
@@ -146,42 +157,11 @@ def _apply_auth_cache_headers(response):
 
 
 def _normalize_client_name(raw_name: str) -> str:
-    return re.sub(r'\b(Cabang|Branch|Tbk)\b.*$|^(PT\.|CV\.)', '', raw_name or '', flags=re.IGNORECASE).strip()
+    return normalize_client_name(raw_name)
 
 
 def _warm_request_context(data: Dict[str, Any]) -> str:
-    data = normalize_payload(data)
-    client_name = _normalize_client_name(str(data.get("nama_perusahaan", "")).strip())
-    regulations = str(data.get("potensi_framework", "")).strip()
-    ai_context = " ".join([
-        str(data.get("konteks_organisasi", "")).strip(),
-        str(data.get("permasalahan", "")).strip(),
-        str(data.get("klasifikasi_kebutuhan", "")).strip(),
-        str(data.get("jenis_proyek", "")).strip(),
-        str(data.get("jenis_proposal", "")).strip(),
-        str(data.get("mode_proposal", "")).strip(),
-    ]).strip()
-    if not client_name:
-        return "skipped"
-    return proposal_generator.prefetch_research_bundle(
-        base_client=client_name,
-        regulations=regulations,
-        include_collaboration=proposal_generator.firm_api.uses_demo_logic(),
-        ai_context=ai_context,
-    )
-
-
-def _internal_api_config_target() -> Path:
-    configured = str(FirmAPIClient._resolve_config_file() or "").strip()
-    if configured:
-        return Path(configured).expanduser()
-    return MANAGED_INTERNAL_API_CONFIG_PATH
-
-
-def _write_internal_api_config(config_payload: Dict[str, Any]) -> Path:
-    target = _internal_api_config_target()
-    write_json_config(target, config_payload)
-    return target
+    return proposal_request_service.warm_request_context(data)
 
 
 def _normalize_signup_email(raw_value: str) -> str:
@@ -231,7 +211,7 @@ def login():
     remote_ip = auth_flow.request_ip()
     if not username or not password:
         return redirect(url_for("auth_page", login_error="Username dan password wajib diisi.", next=next_target))
-    blocked_seconds = app_state_store.get_login_block_seconds(username=username, remote_ip=remote_ip)
+    blocked_seconds = app_state_store.auth.get_login_block_seconds(username=username, remote_ip=remote_ip)
     if blocked_seconds > 0:
         return redirect(
             url_for(
@@ -241,10 +221,10 @@ def login():
             )
         )
 
-    user = app_state_store.get_user(username)
+    user = app_state_store.auth.get_user(username)
     password_hash = str((user or {}).get("password_hash") or "")
     if not user or not password_hash or not check_password_hash(password_hash, password):
-        blocked_after_fail = app_state_store.register_login_failure(
+        blocked_after_fail = app_state_store.auth.register_login_failure(
             username=username,
             remote_ip=remote_ip,
             window_seconds=LOGIN_RATE_LIMIT_WINDOW_SECONDS,
@@ -262,7 +242,7 @@ def login():
         return redirect(url_for("auth_page", login_error="Username atau password tidak cocok.", next=next_target))
 
     if str(user.get("status") or "approved") != "approved":
-        app_state_store.clear_login_failures(username=username, remote_ip=remote_ip)
+        app_state_store.auth.clear_login_failures(username=username, remote_ip=remote_ip)
         return redirect(
             url_for(
                 "auth_page",
@@ -271,7 +251,7 @@ def login():
             )
         )
 
-    app_state_store.clear_login_failures(username=username, remote_ip=remote_ip)
+    app_state_store.auth.clear_login_failures(username=username, remote_ip=remote_ip)
     try:
         auth_flow.set_authenticated_user(str(user.get("username") or username))
     except Exception:
@@ -313,7 +293,7 @@ def signup():
     if password != confirm_password:
         return redirect(url_for("auth_page", signup_error="Konfirmasi password tidak cocok.", next=next_target))
 
-    created = app_state_store.create_user(
+    created = app_state_store.auth.create_user(
         username=username,
         password_hash=generate_password_hash(password, method="pbkdf2:sha256"),
         status="pending" if AUTH_REQUIRE_SIGNUP_APPROVAL else "approved",
@@ -339,7 +319,7 @@ def logout():
 @login_required
 def auth_session_status():
     username = auth_flow.current_username()
-    snapshot = app_state_store.active_session_snapshot(username=username)
+    snapshot = app_state_store.auth.active_session_snapshot(username=username)
     return jsonify({
         "username": username,
         "session": {
@@ -393,214 +373,53 @@ def get_base_config():
 @app.route('/api/internal-api/setup', methods=['GET', 'POST'])
 def internal_api_setup():
     if request.method == 'GET':
-        api_client = FirmAPIClient(force_source="api")
-        return jsonify(internal_api_setup_status_payload(api_client, knowledge_base, MANAGED_INTERNAL_API_CONFIG_PATH))
+        return jsonify(internal_api_service.setup_status())
 
     data = request.json or {}
     try:
-        config_payload = build_internal_api_config(data)
-        target_path = _write_internal_api_config(config_payload)
-        api_client = FirmAPIClient(force_source="api")
-        validation = api_client.validate_config()
+        return jsonify(internal_api_service.activate_from_payload(data))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         logger.exception("Internal API setup failed")
         return jsonify({"error": str(exc)}), 500
 
-    activated = bool(data.get("activate_now", True))
-    refresh_started = False
-    if activated:
-        proposal_generator.firm_api = InternalDataClient(force_source="api")
-        knowledge_base.set_project_data_source("api")
-        if not generation_queue.has_live_jobs():
-            refresh_started = knowledge_base.refresh_data(background=True)
-
-    return jsonify(internal_api_activation_payload(
-        target_path,
-        activated,
-        refresh_started,
-        knowledge_base,
-        validation,
-    ))
-
 
 @app.route('/api/internal-api/refresh', methods=['POST'])
 def internal_api_refresh():
-    if generation_queue.has_live_jobs():
-        return jsonify({
-            "status": "error",
-            "error": "Dataset internal tidak bisa di-refresh saat masih ada generate job yang berjalan atau mengantre.",
-        }), 409
-
-    api_client = FirmAPIClient(force_source="api")
-    config_file = api_client.config_file or str(MANAGED_INTERNAL_API_CONFIG_PATH)
-    config_exists = bool(config_file and Path(config_file).exists())
-    if not config_exists and not internal_api_has_runtime_resources(api_client):
-        return jsonify({
-            "status": "error",
-            "error": "Config Internal API belum tersedia. Aktifkan endpoint Internal API terlebih dahulu.",
-            "config_file": config_file,
-        }), 400
-
-    proposal_generator.firm_api = InternalDataClient(force_source="api")
-    knowledge_base.set_project_data_source("api")
-    refresh_started = knowledge_base.refresh_data(force=True, background=True)
-    return jsonify(internal_api_refresh_payload(config_file, refresh_started, knowledge_base)), 202 if refresh_started else 200
+    payload, status_code = internal_api_service.refresh()
+    return jsonify(payload), status_code
 
 
 @app.route('/api/companies')
 def get_companies():
-    try:
-        api_companies = proposal_generator.firm_api.get_client_options()
-        if api_companies:
-            return jsonify(api_companies)
-    except Exception:
-        logger.exception("Internal client option lookup failed; falling back to knowledge-base entities")
-    if knowledge_base.df is None or knowledge_base.df.empty or 'entity' not in knowledge_base.df.columns:
-        return jsonify([])
-    companies = knowledge_base.df['entity'].dropna().astype(str).str.strip().unique().tolist()
-    companies = [c for c in companies if c.lower() != 'nan' and c]
-    return jsonify(sorted(companies))
+    return jsonify(client_context_service.company_candidates())
 
 
 def _company_candidates() -> list[str]:
-    try:
-        api_companies = proposal_generator.firm_api.get_client_options()
-        if api_companies:
-            return api_companies
-    except Exception:
-        logger.exception("Internal client candidate lookup failed; falling back to knowledge-base entities")
-    if knowledge_base.df is None or knowledge_base.df.empty or 'entity' not in knowledge_base.df.columns:
-        return []
-    companies = knowledge_base.df['entity'].dropna().astype(str).str.strip().unique().tolist()
-    return sorted([c for c in companies if c.lower() != 'nan' and c])
+    return client_context_service.company_candidates()
 
 
 @app.route('/api/client-context')
 def get_client_context():
     client_name = _normalize_client_name(str(request.args.get("client_name") or "").strip())
-    if not client_name:
-        return jsonify({
-            "available": False,
-            "client_name": "",
-            "account_summary": "",
-            "use_case_summary": "",
-            "use_cases": [],
-            "expert_guidance": "",
-        })
-    try:
-        context = proposal_generator.firm_api.get_client_context(client_name)
-        try:
-            context["osint_prefetch_status"] = proposal_generator.prefetch_research_bundle(
-                base_client=client_name,
-                regulations="",
-                include_collaboration=proposal_generator.firm_api.uses_demo_logic(),
-                ai_context=client_name,
-            )
-            context["osint_context_note"] = (
-                "OSINT client research is being prepared for generation: public profile, recent signals, "
-                "track record, and persuasive context will be used as proposal helpers."
-            )
-        except Exception:
-            logger.exception("OSINT prefetch failed for selected client %s", client_name)
-            context["osint_prefetch_status"] = "failed"
-        return jsonify(context)
-    except Exception as exc:
-        logger.exception("Internal client context lookup failed for %s", client_name)
-        return jsonify({"available": False, "client_name": client_name, "error": str(exc), "use_cases": []}), 502
+    payload = client_context_service.client_context_payload(client_name)
+    return jsonify(payload), 502 if payload.get("error") else 200
 
 
 def _request_payload_with_kak_defaults(data: Dict[str, Any]) -> Dict[str, Any]:
-    return app_state_store.resolve_kak_references_in_payload(
-        normalize_payload(data or {}),
-        company_candidates=_company_candidates(),
-    )
+    return proposal_request_service.payload_with_kak_defaults(data)
 
 
 def _client_internal_context_text(client_name: str, payload: Optional[Dict[str, Any]] = None) -> str:
-    payload = payload or {}
-    try:
-        context = proposal_generator.firm_api.get_client_context(client_name)
-    except Exception:
-        logger.exception("Internal client context enrichment failed for %s", client_name)
-        context = {}
-    lines = []
-    if context.get("available"):
-        lines.extend([
-            str(context.get("account_summary") or "").strip(),
-            str(context.get("use_case_summary") or "").strip(),
-            str(context.get("expert_history_summary") or context.get("expert_guidance") or "").strip(),
-        ])
-        for item in (context.get("use_cases") or [])[:4]:
-            if not isinstance(item, dict):
-                continue
-            project_name = str(item.get("project_name") or "").strip()
-            product_name = str(item.get("product_name") or "").strip()
-            expert_name = str(item.get("expert_name") or "").strip()
-            position_name = str(item.get("position_name") or "").strip()
-            line = " | ".join(part for part in [
-                f"Riwayat proyek: {project_name}" if project_name else "",
-                f"Konteks/produk: {product_name}" if product_name else "",
-                f"Tenaga ahli: {expert_name}{f' sebagai {position_name}' if position_name else ''}" if expert_name else "",
-            ] if part)
-            if line:
-                lines.append(line)
-    focus_terms = [
-        str(payload.get("konteks_organisasi") or ""),
-        str(payload.get("permasalahan") or ""),
-        str(payload.get("klasifikasi_kebutuhan") or ""),
-        str(payload.get("potensi_framework") or ""),
-    ]
-    try:
-        capability = proposal_generator.firm_api.get_capability_context(
-            project_type=str(payload.get("jenis_proyek") or ""),
-            service_type=str(payload.get("jenis_proposal") or ""),
-            focus_terms=focus_terms,
-            limit=5,
-        )
-    except Exception:
-        logger.exception("Internal capability context enrichment failed for %s", client_name)
-        capability = {}
-    if capability.get("available"):
-        lines.append(str(capability.get("summary") or "").strip())
-        expert_guidance = str(capability.get("expert_guidance") or "").strip()
-        if expert_guidance:
-            lines.append(f"Tenaga ahli relevan dari riwayat proyek internal: {expert_guidance}.")
-        for item in (capability.get("matches") or [])[:4]:
-            if not isinstance(item, dict):
-                continue
-            product_name = str(item.get("product_name") or "").strip()
-            project_name = str(item.get("project_name") or "").strip()
-            expert_name = str(item.get("expert_name") or "").strip()
-            position_name = str(item.get("position_name") or "").strip()
-            if product_name or expert_name:
-                lines.append(
-                    " | ".join(part for part in [
-                        f"Kapabilitas relevan: {product_name}" if product_name else "",
-                        f"Contoh riwayat: {project_name}" if project_name else "",
-                        f"Tenaga ahli: {expert_name}{f' sebagai {position_name}' if position_name else ''}" if expert_name else "",
-                    ] if part)
-                )
-    return "\n".join(line for line in lines if line).strip()
+    return client_context_service.internal_context_text(client_name, payload)
 
 
 @app.route('/api/suggest-budget', methods=['POST'])
 def suggest_budget():
     """Estimate pricing tiers from public financial signals."""
     data = _request_payload_with_kak_defaults(request.json or {})
-    required_fields = [
-        'nama_perusahaan',
-        'mode_proposal',
-        'jenis_proposal',
-        'jenis_proyek',
-        'konteks_organisasi',
-        'permasalahan',
-        'klasifikasi_kebutuhan',
-        'estimasi_waktu',
-        'potensi_framework',
-    ]
-    missing = [field for field in required_fields if not str(data.get(field, '')).strip()]
+    missing = proposal_request_service.missing_required_fields(data, BUDGET_REQUIRED_FIELDS)
     if missing:
         return jsonify({"error": f"Lengkapi field berikut sebelum analisis finansial: {', '.join(missing)}"}), 400
 
@@ -631,70 +450,40 @@ def suggest_budget():
 
 @app.route('/api/preview-outline', methods=['POST'])
 def preview_outline():
-    data = _request_payload_with_kak_defaults(request.json or {})
-    _warm_request_context(data)
-    outline = proposal_generator.build_preview_outline(data)
-    return jsonify({"outline": outline})
+    return jsonify(proposal_request_service.preview_outline(request.json or {}))
 
 
 @app.route('/api/prefetch-context', methods=['POST'])
 def prefetch_context():
-    data = _request_payload_with_kak_defaults(request.json or {})
-    status = _warm_request_context(data)
-    return jsonify({"status": status})
+    return jsonify(proposal_request_service.prefetch_context(request.json or {}))
 
 
 @app.route('/api/kak-context')
 def get_kak_context():
-    return jsonify(app_state_store.get_latest_kak_context(company_candidates=_company_candidates()))
+    return jsonify(app_state_store.settings.get_latest_kak_context(company_candidates=_company_candidates()))
 
 
 @app.route('/api/kak-context/active', methods=['POST'])
 def set_active_kak_context():
     data = request.json or {}
     try:
-        settings = app_state_store.set_active_kak_document(str(data.get("document_id") or ""))
+        settings = app_state_store.settings.set_active_kak_document(str(data.get("document_id") or ""))
     except KeyError as exc:
         return jsonify({"error": str(exc)}), 404
     return jsonify({
         "status": "ok",
         "settings": settings,
-        "kak_context": app_state_store.get_latest_kak_context(company_candidates=_company_candidates()),
+        "kak_context": app_state_store.settings.get_latest_kak_context(company_candidates=_company_candidates()),
     })
 
 
 @app.route('/generate', methods=['POST'])
 def generate_proposal():
-    data = _request_payload_with_kak_defaults(request.json or {})
-    required_fields = [
-        'nama_perusahaan',
-        'konteks_organisasi',
-        'estimasi_biaya',
-        'mode_proposal',
-        'jenis_proposal',
-        'klasifikasi_kebutuhan',
-        'jenis_proyek',
-        'estimasi_waktu',
-        'permasalahan',
-        'potensi_framework',
-    ]
-    missing = [field for field in required_fields if not str(data.get(field, '')).strip()]
-    if missing:
-        return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
-
     try:
-        supporting_context = app_state_store.build_generation_context(company_candidates=_company_candidates())
-        client_internal_context = _client_internal_context_text(data.get("nama_perusahaan", ""), data)
-        if client_internal_context:
-            supporting_context["client_internal_context"] = client_internal_context
-        try:
-            expert_bench_context = proposal_generator.firm_api.get_expert_bench_context(limit_products=8)
-            if expert_bench_context.get("available"):
-                supporting_context["expert_bench_context"] = expert_bench_context
-        except Exception:
-            logger.exception("Internal expert bench context enrichment failed")
-        data["_supporting_context"] = supporting_context
-        ticket = generation_queue.submit(data)
+        ticket = proposal_request_service.submit_generation(request.json or {})
+        if ticket.get("status_code"):
+            status_code = int(ticket.pop("status_code"))
+            return jsonify(ticket), status_code
     except OverflowError as exc:
         return jsonify({"error": str(exc)}), 429
 
@@ -731,12 +520,12 @@ def download_job(job_id: str):
 
 @app.route('/api/history')
 def list_history():
-    return jsonify({"items": app_state_store.list_history(limit=30)})
+    return jsonify({"items": app_state_store.history.list_history(limit=30)})
 
 
 @app.route('/api/history/<entry_id>')
 def get_history_entry(entry_id: str):
-    entry = app_state_store.get_history_entry(entry_id)
+    entry = app_state_store.history.get_history_entry(entry_id)
     if not entry:
         return jsonify({"error": "Riwayat proposal tidak ditemukan."}), 404
     return jsonify(entry)
@@ -744,7 +533,7 @@ def get_history_entry(entry_id: str):
 
 @app.route('/api/history/<entry_id>/reuse')
 def reuse_history(entry_id: str):
-    entry = app_state_store.get_history_entry(entry_id)
+    entry = app_state_store.history.get_history_entry(entry_id)
     if not entry:
         return jsonify({"error": "Riwayat proposal tidak ditemukan."}), 404
     if not entry.get("can_reuse"):
@@ -754,7 +543,7 @@ def reuse_history(entry_id: str):
 
 @app.route('/api/history/<entry_id>/download')
 def download_history(entry_id: str):
-    entry = app_state_store.get_history_entry(entry_id)
+    entry = app_state_store.history.get_history_entry(entry_id)
     if not entry:
         return jsonify({"error": "Riwayat proposal tidak ditemukan."}), 404
     filepath = Path(str(entry.get("filepath") or ""))
@@ -771,10 +560,10 @@ def download_history(entry_id: str):
 @app.route('/api/settings', methods=['GET', 'POST'])
 def proposal_settings():
     if request.method == 'GET':
-        return jsonify(app_state_store.get_settings())
+        return jsonify(app_state_store.settings.get_settings())
 
     data = normalize_payload(request.json or {})
-    settings = app_state_store.save_settings(
+    settings = app_state_store.settings.save_settings(
         internal_portfolio=str(data.get("internal_portfolio") or ""),
         internal_credentials=str(data.get("internal_credentials") or ""),
     )
@@ -784,14 +573,14 @@ def proposal_settings():
 @app.route('/api/settings/template', methods=['POST', 'DELETE'])
 def proposal_template_settings():
     if request.method == 'DELETE':
-        return jsonify(app_state_store.clear_template())
+        return jsonify(app_state_store.settings.clear_template())
 
     uploaded = request.files.get('template')
     if not uploaded or not uploaded.filename:
         return jsonify({"error": "File template .docx belum dipilih."}), 400
     if not uploaded.filename.lower().endswith('.docx'):
         return jsonify({"error": "Template harus berformat .docx."}), 400
-    settings = app_state_store.save_template(uploaded.filename, uploaded.read())
+    settings = app_state_store.settings.save_template(uploaded.filename, uploaded.read())
     return jsonify(settings)
 
 
@@ -807,7 +596,7 @@ def proposal_supporting_documents():
     if not uploads:
         return jsonify({"error": "Pilih minimal satu file pendukung untuk diunggah."}), 400
     try:
-        settings = app_state_store.save_supporting_documents(document_type, uploads)
+        settings = app_state_store.settings.save_supporting_documents(document_type, uploads)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify(settings)
@@ -816,7 +605,7 @@ def proposal_supporting_documents():
 @app.route('/api/settings/documents/<document_id>', methods=['DELETE'])
 def delete_proposal_supporting_document(document_id: str):
     try:
-        settings = app_state_store.delete_supporting_document(document_id)
+        settings = app_state_store.settings.delete_supporting_document(document_id)
     except KeyError as exc:
         return jsonify({"error": str(exc)}), 404
     return jsonify(settings)

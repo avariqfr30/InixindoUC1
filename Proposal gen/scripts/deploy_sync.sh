@@ -103,6 +103,10 @@ declare -a RSYNC_ARGS=(
   --exclude '.research_bundle_cache/'
   --exclude '.chroma/'
   --exclude '.kb_vector_state.json'
+  --exclude 'tests/'
+  --exclude 'test/'
+  --exclude '*_test.py'
+  --exclude 'test_*.py'
   -e "ssh -i ${SSH_KEY}"
 )
 
@@ -113,11 +117,7 @@ if [[ "${MODE}" == "production" ]]; then
     --exclude 'fix.py'
     --exclude 'fix_file.py'
     --exclude 'replace.py'
-    --exclude 'tests/'
-    --exclude 'test/'
     --exclude 'examples/'
-    --exclude '*_test.py'
-    --exclude 'test_*.py'
     --exclude '*.example.*'
   )
 fi
@@ -145,6 +145,14 @@ if [[ "${RESTART_SERVICE}" == "no" ]]; then
   fi
   exit 0
 fi
+
+ssh -i "${SSH_KEY}" "${REMOTE_HOST}" "bash -s" <<EOF
+set -euo pipefail
+cd "${REMOTE_DIR}"
+rm -rf tests test
+find . -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
+find main scripts templates -type f \\( -name 'test_*.py' -o -name '*_test.py' \\) -delete 2>/dev/null || true
+EOF
 
 if [[ "${MODE}" == "production" ]]; then
   REMOTE_APP_PROFILE="$(ssh -i "${SSH_KEY}" "${REMOTE_HOST}" "bash -lc \"if [[ -f '${REMOTE_DIR}/.env' ]]; then awk -F= '/^APP_PROFILE=/{print \\\\\\$2}' '${REMOTE_DIR}/.env' | tail -n1 | tr -d '\\\\r' | xargs; fi\"")"

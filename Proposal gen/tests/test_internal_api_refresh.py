@@ -52,15 +52,18 @@ class InternalApiRefreshTest(unittest.TestCase):
         fake_kb.last_refresh_error = ""
         fake_queue = Mock()
         fake_queue.has_live_jobs.return_value = False
+        fake_generator = Mock()
         config_path = Path(self.tmp.name) / "internal_api_config.json"
         config_path.write_text("{}", encoding="utf-8")
+        from main.runtime_services import InternalApiRuntimeService
+
+        service = InternalApiRuntimeService(fake_kb, fake_generator, fake_queue)
 
         with patch.object(self.app_module.auth_flow, "is_authenticated", return_value=True), \
              patch.object(self.app_module.auth_flow, "touch_active_auth_session", return_value=True), \
-             patch.object(self.app_module, "knowledge_base", fake_kb), \
-             patch.object(self.app_module, "generation_queue", fake_queue), \
-             patch.object(self.app_module, "FirmAPIClient") as firm_client, \
-             patch.object(self.app_module, "InternalDataClient") as internal_client:
+             patch.object(self.app_module, "internal_api_service", service), \
+             patch("main.runtime_services.FirmAPIClient") as firm_client, \
+             patch("main.runtime_services.InternalDataClient") as internal_client:
             firm_client.return_value.config_file = str(config_path)
             internal_client.return_value.describe_runtime.return_value = {"provider": "api"}
             response = client.post("/api/internal-api/refresh")
@@ -94,11 +97,14 @@ class InternalApiRefreshTest(unittest.TestCase):
         fake_kb.project_data_source = "api"
         fake_kb.sync_in_progress = False
         fake_kb.last_refresh_error = ""
+        from main.runtime_services import InternalApiRuntimeService
+
+        service = InternalApiRuntimeService(fake_kb, Mock(), Mock())
 
         with patch.object(self.app_module.auth_flow, "is_authenticated", return_value=True), \
              patch.object(self.app_module.auth_flow, "touch_active_auth_session", return_value=True), \
-             patch.object(self.app_module, "knowledge_base", fake_kb), \
-             patch.object(self.app_module, "FirmAPIClient") as firm_client:
+             patch.object(self.app_module, "internal_api_service", service), \
+             patch("main.runtime_services.FirmAPIClient") as firm_client:
             firm_client.return_value.config_file = ""
             firm_client.return_value.resource_config = {"project_records": {"request": {}}}
             firm_client.return_value.describe_runtime.return_value = {"provider": "api"}

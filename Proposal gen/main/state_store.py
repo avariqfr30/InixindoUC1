@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .proposal_shared import *
 from .schema_mapping import SchemaMapper
+from .state_facades import AuthStateFacade, HistoryStateFacade, SettingsStateFacade
 from .text_hygiene import (
     compact_context_lines,
     formalize_caps_text,
@@ -28,6 +29,9 @@ class AppStateStore:
         self.credentials_docs_dir.mkdir(parents=True, exist_ok=True)
         self.kak_docs_dir.mkdir(parents=True, exist_ok=True)
         self.generated_dir.mkdir(parents=True, exist_ok=True)
+        self.auth = AuthStateFacade(self)
+        self.settings = SettingsStateFacade(self)
+        self.history = HistoryStateFacade(self)
         self._init_db()
         self._bootstrap_generated_history()
 

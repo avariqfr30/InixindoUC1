@@ -1,0 +1,96 @@
+"""Regression coverage for cohesive service/facade boundaries."""
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import Mock
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+
+class ArchitectureBoundariesTest(unittest.TestCase):
+    def test_state_facades_delegate_to_existing_store_contracts(self) -> None:
+        from main.state_facades import AuthStateFacade, HistoryStateFacade, SettingsStateFacade
+
+        store = Mock()
+        store.get_user.return_value = {"username": "user@example.com"}
+        store.get_settings.return_value = {"internal_portfolio": "Portfolio"}
+        store.list_history.return_value = [{"id": "h1"}]
+
+        auth = AuthStateFacade(store)
+        settings = SettingsStateFacade(store)
+        history = HistoryStateFacade(store)
+
+        self.assertEqual(auth.get_user("user@example.com")["username"], "user@example.com")
+        self.assertEqual(settings.get_settings()["internal_portfolio"], "Portfolio")
+        self.assertEqual(history.list_history(limit=1), [{"id": "h1"}])
+        store.list_history.assert_called_once_with(limit=1)
+
+    def test_client_context_service_falls_back_to_knowledge_base_entities(self) -> None:
+        from main.runtime_services import ClientContextService
+
+        class FakeSeries:
+            def __init__(self) -> None:
+                self._values = ["Beta", "nan", "Alpha"]
+
+            def dropna(self):
+                return self
+
+            def astype(self, _type):
+                return self
+
+            def str(self):
+                return self
+
+            def strip(self):
+                return self
+
+            def unique(self):
+                return self
+
+            def tolist(self):
+                return list(self._values)
+
+            @property
+            def str(self):
+                return self
+
+        class FakeDataFrame:
+            empty = False
+            columns = ["entity", "topic"]
+
+            def __getitem__(self, key):
+                if key != "entity":
+                    raise KeyError(key)
+                return FakeSeries()
+
+        generator = Mock()
+        generator.firm_api.get_client_options.side_effect = RuntimeError("api unavailable")
+        knowledge_base = Mock()
+        knowledge_base.df = FakeDataFrame()
+
+        service = ClientContextService(generator, knowledge_base, prefetch_research=lambda data: "ok")
+
+        self.assertEqual(service.company_candidates(), ["Alpha", "Beta"])
+
+    def test_generation_request_service_keeps_required_field_validation_out_of_route(self) -> None:
+        from main.proposal_request_service import GENERATION_REQUIRED_FIELDS, ProposalRequestService
+
+        service = ProposalRequestService(
+            proposal_generator=Mock(),
+            app_state_store=Mock(),
+            client_context_service=Mock(),
+            generation_queue=Mock(),
+        )
+
+        self.assertIn(
+            "nama_perusahaan",
+            service.missing_required_fields({}, GENERATION_REQUIRED_FIELDS),
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
