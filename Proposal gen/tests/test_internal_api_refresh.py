@@ -110,6 +110,45 @@ class InternalApiRefreshTest(unittest.TestCase):
         self.assertTrue(payload["api_connection_active"])
         self.assertTrue(payload["can_refresh_dataset"])
 
+    def test_internal_api_activation_payload_shape_is_stable(self) -> None:
+        from main.internal_api_runtime import internal_api_activation_payload
+
+        fake_kb = Mock()
+        fake_kb.project_data_source = "api"
+        fake_kb.sync_in_progress = True
+        fake_kb.last_refresh_error = ""
+
+        payload = internal_api_activation_payload(
+            Path("/tmp/internal_api_config.json"),
+            activated=True,
+            refresh_started=True,
+            knowledge_base=fake_kb,
+            validation={"ok": True},
+        )
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["config_file"], "/tmp/internal_api_config.json")
+        self.assertTrue(payload["api_connection_active"])
+        self.assertTrue(payload["can_refresh_dataset"])
+        self.assertEqual(payload["connection_label"], "Aktif memakai Internal API/APIDog")
+        self.assertEqual(payload["validation"], {"ok": True})
+
+    def test_internal_api_refresh_payload_shape_is_stable(self) -> None:
+        from main.internal_api_runtime import internal_api_refresh_payload
+
+        fake_kb = Mock()
+        fake_kb.project_data_source = "api"
+        fake_kb.sync_in_progress = False
+        fake_kb.last_refresh_error = ""
+
+        payload = internal_api_refresh_payload("/tmp/internal_api_config.json", False, fake_kb)
+
+        self.assertEqual(payload["status"], "current")
+        self.assertFalse(payload["refresh_started"])
+        self.assertTrue(payload["api_connection_active"])
+        self.assertTrue(payload["can_refresh_dataset"])
+        self.assertEqual(payload["config_file"], "/tmp/internal_api_config.json")
+
 
 if __name__ == "__main__":
     unittest.main()

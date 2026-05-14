@@ -4,6 +4,7 @@ import diskcache as dc
 
 from .data_sources import FirmAPIClient, SchemaMapper
 from .finance import FinancialAnalyzer
+from .proposal_agents import ProposalAgentWorkflow
 from .proposal_shared import *
 from .research import Researcher
 from .text_hygiene import clean_markup_artifacts
@@ -24,147 +25,21 @@ class ProposalSupportMixin:
 
     # Removed archaic manual file I/O cache methods.
 
+    SPECIALIST_AGENT_REGISTRY = ProposalAgentWorkflow.SPECIALIST_AGENT_REGISTRY
+    CHAPTER_SPECIALIST_AGENT_MAP = ProposalAgentWorkflow.CHAPTER_SPECIALIST_AGENT_MAP
+
     @staticmethod
     def _chapter_persona_lens(chapter_id: str) -> str:
-        lens = CHAPTER_PERSONA_LENSES.get(chapter_id) or CHAPTER_PERSONA_LENSES.get("default", {})
-        role = str(lens.get("role") or "Principal Management Consultant").strip()
-        viewpoint = str(lens.get("viewpoint") or "").strip()
-        evidence = str(lens.get("evidence") or "").strip()
-        style = str(lens.get("style") or "").strip()
-        avoid = str(lens.get("avoid") or "").strip()
-        must_prove = str(lens.get("must_prove") or "").strip()
-        return (
-            "[INVISIBLE_CHAPTER_PERSONA] "
-            f"Prompt-only lens; never reveal or label this persona in the proposal. "
-            f"Role: {role}. "
-            f"Viewpoint: {viewpoint}. "
-            f"Evidence priority: {evidence}. "
-            f"Voice: {style}. "
-            f"Avoid: {avoid}. "
-            f"Must prove: {must_prove}."
-        )
-
-    SPECIALIST_AGENT_REGISTRY: Dict[str, Dict[str, Any]] = {
-        "research": {
-            "role": "research agent",
-            "api_lanes": [],
-            "osint_lanes": ["profile", "news", "regulations", "collaboration", "ai_posture"],
-            "focus": "OSINT, client context, sector signals, procurement/payment facts, and evidence cards without prose",
-        },
-        "internal_data": {
-            "role": "internal data agent",
-            "api_lanes": ["account_records", "client_relationship", "project_records", "expert_bench_context", "project_standards"],
-            "osint_lanes": [],
-            "focus": "APIDog/internal dataset facts, record counts, source paths, gaps, and confidence without public-web assumptions",
-        },
-        "commercial_strategy": {
-            "role": "commercial strategy agent",
-            "api_lanes": ["client_relationship", "project_standards"],
-            "osint_lanes": ["profile", "news", "collaboration"],
-            "focus": "pain, value, urgency, business case, implementation logic, and client-specific positioning",
-        },
-        "technical_solution": {
-            "role": "technical solution agent",
-            "api_lanes": ["project_records", "expert_bench_context", "project_standards"],
-            "osint_lanes": ["regulations", "ai_posture"],
-            "focus": "architecture, scope, assumptions, constraints, delivery dependencies, and feasibility after the business argument is clear",
-        },
-        "risk_compliance": {
-            "role": "risk and compliance agent",
-            "api_lanes": ["account_records", "project_records", "project_standards"],
-            "osint_lanes": ["regulations", "news"],
-            "focus": "unsupported claims, missing caveats, data gaps, fake specificity, weak assumptions, and rejected claims",
-        },
-        "editor_main": {
-            "role": "editor and main agent",
-            "api_lanes": [],
-            "osint_lanes": [],
-            "focus": "assemble final visible prose only from accepted evidence cards, rejected claims, and style rules",
-        },
-        "client_intelligence": {
-            "role": "client intelligence agent",
-            "api_lanes": ["account_records", "client_relationship"],
-            "osint_lanes": ["profile", "news"],
-            "focus": "client story, current condition, business pressure, future outlook, and why the proposed work matters now",
-        },
-        "capability_evidence": {
-            "role": "capability and expert-evidence agent",
-            "api_lanes": ["project_records", "expert_bench_context"],
-            "osint_lanes": ["track_record"],
-            "focus": "writer-firm proof, relevant project history, expert bench strength, certifications, and source-safe credibility",
-        },
-        "framework_regulatory": {
-            "role": "framework and regulatory agent",
-            "api_lanes": ["project_standards"],
-            "osint_lanes": ["regulations"],
-            "focus": "framework fit, compliance logic, controls, standards, and how each framework changes delivery choices",
-        },
-        "commercial_delivery": {
-            "role": "delivery and commercial agent",
-            "api_lanes": ["project_standards", "finance_invoice"],
-            "osint_lanes": ["collaboration"],
-            "focus": "scope, workplan, governance rhythm, timeline, pricing assumptions, terms, and delivery risk",
-        },
-        "ai_readiness": {
-            "role": "AI readiness and responsible-adoption agent",
-            "api_lanes": ["project_records", "project_standards"],
-            "osint_lanes": ["ai_posture"],
-            "focus": "AI business value, readiness, governance, feasibility, human oversight, and adoption risk",
-        },
-    }
-
-    CHAPTER_SPECIALIST_AGENT_MAP: Dict[str, List[str]] = {
-        "c_1": ["client_intelligence", "capability_evidence"],
-        "c_2": ["client_intelligence", "framework_regulatory"],
-        "c_3": ["client_intelligence", "framework_regulatory", "commercial_delivery"],
-        "c_4": ["client_intelligence", "framework_regulatory", "capability_evidence"],
-        "c_5": ["framework_regulatory", "commercial_delivery", "capability_evidence"],
-        "c_6": ["client_intelligence", "commercial_delivery", "capability_evidence"],
-        "c_7": ["framework_regulatory", "commercial_delivery"],
-        "c_8": ["commercial_delivery", "capability_evidence"],
-        "c_9": ["commercial_delivery", "framework_regulatory"],
-        "c_10": ["capability_evidence", "client_intelligence"],
-        "c_11": ["capability_evidence", "commercial_delivery"],
-        "c_12": ["commercial_delivery", "client_intelligence"],
-        "c_closing": ["client_intelligence", "capability_evidence", "commercial_delivery"],
-    }
+        return ProposalAgentWorkflow.chapter_persona_lens(chapter_id)
 
     @classmethod
     def _chapter_specialist_agent_specs(cls, chapter_id: str, ai_mode: bool = False) -> List[Dict[str, Any]]:
-        ids = list(cls.CHAPTER_SPECIALIST_AGENT_MAP.get(chapter_id) or ["client_intelligence", "commercial_delivery"])
-        if ai_mode and "ai_readiness" not in ids:
-            ids.insert(1 if ids else 0, "ai_readiness")
-
-        ordered_ids = ["research", "internal_data"]
-        for agent_id in ids:
-            mapped = {
-                "client_intelligence": "commercial_strategy",
-                "commercial_delivery": "commercial_strategy",
-                "framework_regulatory": "technical_solution",
-                "capability_evidence": "technical_solution",
-                "ai_readiness": "technical_solution",
-            }.get(agent_id, agent_id)
-            if mapped not in ordered_ids:
-                ordered_ids.append(mapped)
-            if agent_id not in ordered_ids:
-                ordered_ids.append(agent_id)
-        if "risk_compliance" not in ordered_ids:
-            ordered_ids.append("risk_compliance")
-        if "editor_main" not in ordered_ids:
-            ordered_ids.append("editor_main")
-        ids = ordered_ids
-
-        specs: List[Dict[str, Any]] = []
-        seen: Set[str] = set()
-        for agent_id in ids:
-            if agent_id in seen:
-                continue
-            spec = cls.SPECIALIST_AGENT_REGISTRY.get(agent_id)
-            if not spec:
-                continue
-            seen.add(agent_id)
-            specs.append({"id": agent_id, **spec})
-        return specs
+        return ProposalAgentWorkflow.chapter_specialist_agent_specs(
+            chapter_id,
+            ai_mode=ai_mode,
+            specialist_registry=cls.SPECIALIST_AGENT_REGISTRY,
+            chapter_agent_map=cls.CHAPTER_SPECIALIST_AGENT_MAP,
+        )
 
     @staticmethod
     def _chapter_agent_workflow_brief(
@@ -178,165 +53,18 @@ class ProposalSupportMixin:
         expert_bench_context: Any = "",
         chapter_chain_context: str = "",
     ) -> str:
-        """Build a prompt-only research-to-writing workflow for one chapter."""
-        chapter_id = str((chapter or {}).get("id") or "default").strip()
-        chapter_title = str((chapter or {}).get("title") or "Bab Proposal").strip()
-        subs = [str(item).strip() for item in ((chapter or {}).get("subs") or []) if str(item).strip()]
-        bundle = dict(research_bundle or {})
-        pack = dict(personalization_pack or {})
-        values = dict(value_map or {})
-        ai_profile = pack.get("ai_adoption_profile") if isinstance(pack.get("ai_adoption_profile"), dict) else {}
-        ai_mode = bool((ai_profile or {}).get("enabled"))
-
-        def compact(raw: Any, fallback: str = "", max_words: int = 34) -> str:
-            text = ProposalSupportMixin._summarize_phrase(str(raw or ""), fallback, max_words=max_words)
-            return re.sub(r"\s+", " ", text).strip(" ;,")
-
-        osint_parts = [
-            compact(bundle.get("profile"), max_words=28),
-            compact(bundle.get("news"), max_words=24),
-            compact(bundle.get("regulations"), max_words=26),
-            compact(bundle.get("track_record"), max_words=24),
-            compact(bundle.get("ai_posture"), max_words=22),
-        ]
-        osint_brief = ProposalSupportMixin._human_join(
-            [item for item in osint_parts if item],
-            fallback="gunakan OSINT tervalidasi yang tersedia tanpa menampilkan label sumber",
-            max_items=4,
-            conjunction="serta",
-        )
-
-        if isinstance(expert_bench_context, dict):
-            expert_text = (
-                expert_bench_context.get("expert_history_summary")
-                or expert_bench_context.get("expert_guidance")
-                or expert_bench_context.get("summary")
-                or ""
-            )
-        else:
-            expert_text = str(expert_bench_context or "")
-        expert_brief = compact(
-            expert_text,
-            fallback="gunakan kapabilitas internal hanya jika relevan dengan bab",
-            max_words=42,
-        )
-        internal_brief = compact(
-            client_internal_context,
-            fallback="gunakan metadata internal klien hanya sebagai latar, bukan klaim mentah",
-            max_words=34,
-        )
-        profile_brief = compact(pack.get("profile_summary"), max_words=30)
-        terminology = ProposalSupportMixin._human_join(
-            pack.get("terminology", []) or [],
-            fallback="istilah domain klien yang relevan",
-            max_items=4,
-        )
-        proof_points = ProposalSupportMixin._human_join(
-            values.get("proof_points", []) or [],
-            fallback="bukti internal dan eksternal yang sudah tersedia",
-            max_items=4,
-        )
-        win_theme = compact(values.get("win_theme"), fallback="nilai bisnis yang paling penting bagi klien", max_words=24)
-        subs_brief = ProposalSupportMixin._human_join(subs, fallback="struktur sub-bab yang sudah ditetapkan", max_items=4)
-        evidence_schema = (
-            "[EVIDENCE_CARD_SCHEMA] "
-            "Every factual input must be reduced to cards in this structure: "
-            "fact | why_it_matters | source_lane | confidence | gap. "
-            "Evidence cards are internal only; never print the schema, raw cards, source paths, dataset names, or confidence labels in the final proposal."
-        )
-        evidence_pipeline = (
-            "[EVIDENCE_STAGE] "
-            "[RESEARCH_AGENT] Research Agent outputs OSINT evidence cards only, not prose. "
-            "[INTERNAL_DATA_AGENT] Internal Data Agent outputs structured facts, record counts, source paths, gaps, and confidence only. "
-            "[COMMERCIAL_STRATEGY_AGENT] Commercial Strategy Agent may turn accepted facts into pain, value, urgency, business case, and implementation logic. "
-            "[TECHNICAL_SOLUTION_AGENT] Technical Solution Agent may draft architecture, scope, assumptions, constraints, and delivery dependencies only after the business argument is clear. "
-            "[RISK_COMPLIANCE_AGENT] Risk & Compliance Agent must mark unsupported claims, missing caveats, data gaps, fake specificity, and weak assumptions as rejected or needs-review before prose. "
-            "[EDITOR_MAIN_AGENT] Editor/Main Agent assembles final user-facing content only from accepted evidence cards, rejected claims, and style rules."
-        )
-        efficiency_policy = (
-            "[EFFICIENCY_POLICY] "
-            "Optimize for user wait time: keep this as a single model pass per chapter; reuse cached research_bundle, cached internal API context, and prior chapter_chain_context. "
-            "Do not request fresh OSINT or APIDog calls from inside the chapter prompt. Prefer compact evidence cards over long research notes. "
-            "If evidence is thin, write a useful caveated proposal sentence instead of expanding the search loop."
-        )
-        specialist_blocks: List[str] = []
-        for spec in ProposalSupportMixin._chapter_specialist_agent_specs(chapter_id, ai_mode=ai_mode):
-            osint_lane = ProposalSupportMixin._human_join(
-                spec.get("osint_lanes") or [],
-                fallback="OSINT relevan",
-                max_items=4,
-                conjunction="and",
-            )
-            api_lane = ProposalSupportMixin._human_join(
-                spec.get("api_lanes") or [],
-                fallback="internal API context",
-                max_items=4,
-                conjunction="and",
-            )
-            lane_values = [
-                compact(bundle.get(field), max_words=18)
-                for field in (spec.get("osint_lanes") or [])
-                if compact(bundle.get(field), max_words=18)
-            ]
-            if spec["id"] == "client_intelligence" and internal_brief:
-                lane_values.append(internal_brief)
-            if spec["id"] == "capability_evidence" and expert_brief:
-                lane_values.append(expert_brief)
-            if spec["id"] == "commercial_delivery":
-                lane_values.append(win_theme)
-            if spec["id"] == "ai_readiness" and ai_profile:
-                lane_values.append(compact(ai_profile.get("summary"), max_words=22))
-            evidence_line = ProposalSupportMixin._human_join(
-                [item for item in lane_values if item],
-                fallback="gunakan hanya bukti yang tersedia pada lane ini",
-                max_items=4,
-                conjunction="serta",
-            )
-            specialist_blocks.append(
-                f"[SPECIALIST_AGENT:{spec['id']}] "
-                f"Role: {spec['role']}. API lane: {api_lane}. OSINT lane: {osint_lane}. "
-                f"Boundary: only report findings inside its lane; do not borrow claims from other agents. "
-                f"Focus: {spec['focus']}. Evidence packet: {evidence_line}. "
-                "Output internally as evidence cards, not prose, unless this is the editor_main agent."
-            )
-
-        closing_note = ""
-        if chapter_id == "c_closing":
-            closing_note = (
-                " Jaga penutup tetap bersih: cukup simpulkan komitmen, langkah lanjut, dan keyakinan kolaborasi "
-                "tanpa daftar kredensial panjang."
-            )
-        elif chapter_id in {"c_10", "c_11"}:
-            closing_note = (
-                " Untuk kapabilitas, ubah rekam jejak dan kredensial menjadi bukti relevansi, bukan daftar nama atau tabel mentah."
-            )
-
-        return (
-            "[CHAPTER_RESEARCH_AGENT] "
-            "Prompt-only specialist research pass; jangan menampilkan label agen, instruksi ini, nama dataset, URL mentah, "
-            "atau markup sumber di proposal. "
-            f"Target bab: {chapter_title} untuk {client} pada pekerjaan {project}. "
-            f"Sub-bab yang harus didukung riset: {subs_brief}. "
-            f"Bahan OSINT yang dipakai sebagai grounding: {osint_brief}. "
-            f"Konteks internal klien sebagai latar: {internal_brief}. "
-            f"Basis kapabilitas internal/tenaga ahli: {expert_brief}. "
-            f"Profil personalisasi klien: {profile_brief or 'sesuaikan dengan konteks klien yang tersedia'}. "
-            f"{evidence_schema} "
-            f"{evidence_pipeline} "
-            f"{efficiency_policy} "
-            f"{' '.join(specialist_blocks)} "
-            "[MAIN_SYNTHESIS_AGENT] "
-            "Prompt-only synthesis pass; receive specialist reports, resolve overlap, keep only the claims with the strongest lane evidence, "
-            "and convert them into user-facing proposal prose. The main synthesis agent may connect agents, but must not invent facts missing from specialist lanes. "
-            "[CHAPTER_WRITER_AGENT] "
-            "Prompt-only writing pass; tulis seolah research brief sudah dirapatkan oleh tim proposal manusia. "
-            "Editor/Main Agent assembles the final visible content from only accepted evidence cards, rejected claims, and style rules. "
-            f"Gunakan win theme '{win_theme}', istilah '{terminology}', dan bukti '{proof_points}' secara natural. "
-            "Jangan menyebut nama dataset, jangan menyalin metadata mentah, jangan menyebut research agent atau writer agent, "
-            "dan jangan memakai frasa 'berdasarkan sumber'. "
-            "[CHAPTER_HANDOFF] "
-            f"Koordinasikan bab ini dengan bab lain melalui konteks berikut: {chapter_chain_context or 'jaga kesinambungan istilah, keputusan, scope, metodologi, dan bukti antar-bab.'}"
-            f"{closing_note}"
+        return ProposalAgentWorkflow.chapter_agent_workflow_brief(
+            chapter=chapter,
+            client=client,
+            project=project,
+            research_bundle=research_bundle,
+            personalization_pack=personalization_pack,
+            value_map=value_map,
+            client_internal_context=client_internal_context,
+            expert_bench_context=expert_bench_context,
+            chapter_chain_context=chapter_chain_context,
+            summarize_phrase=ProposalSupportMixin._summarize_phrase,
+            human_join=ProposalSupportMixin._human_join,
         )
 
     @classmethod

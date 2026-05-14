@@ -9,7 +9,6 @@ from typing import Any, Dict, Optional
 
 from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 from flask_cors import CORS
-import requests
 from werkzeug.security import check_password_hash, generate_password_hash
 
 try:
@@ -52,8 +51,15 @@ from .core import ProposalGenerator
 from .data_sources import FirmAPIClient, InternalDataClient
 from .finance import FinancialAnalyzer
 from .internal_api_setup import build_internal_api_config, write_json_config
+from .internal_api_runtime import (
+    internal_api_activation_payload,
+    internal_api_has_runtime_resources,
+    internal_api_refresh_payload,
+    internal_api_setup_status_payload,
+)
 from .job_queue import GenerationQueue
 from .knowledge_store import KnowledgeBase
+from .readiness import build_readiness_payload
 from .state_store import AppStateStore
 from .text_hygiene import normalize_payload
 
@@ -359,73 +365,14 @@ def health():
 
 @app.route('/ready')
 def ready():
-    checks: Dict[str, Dict[str, Any]] = {}
-
-    checks["project_db"] = {
-        "ok": PROJECT_DB_PATH.exists(),
-        "path": str(PROJECT_DB_PATH),
-    }
-    checks["project_csv"] = {
-        "ok": PROJECT_CSV_PATH.exists(),
-        "path": str(PROJECT_CSV_PATH),
-    }
-    checks["knowledge_base"] = {
-        "ok": bool(
-            knowledge_base.df is not None
-            and not knowledge_base.df.empty
-            and "entity" in knowledge_base.df.columns
-            and "topic" in knowledge_base.df.columns
-            and getattr(knowledge_base, "vector_ready", False)
-            and not getattr(knowledge_base, "last_refresh_error", "")
-        ),
-        "error": getattr(knowledge_base, "last_refresh_error", ""),
-        "sync_in_progress": getattr(knowledge_base, "sync_in_progress", False),
-        "vector_store_dir": str(getattr(knowledge_base, "vector_store_dir", "")),
-    }
-
-    app_state_ok = False
-    app_state_error = ""
-    try:
-        app_state_store.get_settings()
-        app_state_ok = (
-            app_state_store.db_path.exists()
-            and app_state_store.generated_dir.exists()
-            and app_state_store.templates_dir.exists()
-            and app_state_store.supporting_docs_dir.exists()
-        )
-    except Exception as exc:
-        app_state_error = str(exc)
-    checks["app_state"] = {
-        "ok": app_state_ok,
-        "db_path": str(app_state_store.db_path),
-        "generated_dir": str(app_state_store.generated_dir),
-        "templates_dir": str(app_state_store.templates_dir),
-        "supporting_docs_dir": str(app_state_store.supporting_docs_dir),
-        "error": app_state_error,
-    }
-
-    ollama_ok = False
-    ollama_error = ""
-    try:
-        resp = requests.get(f"{OLLAMA_HOST.rstrip('/')}/api/version", timeout=4)
-        ollama_ok = resp.ok
-        if not resp.ok:
-            ollama_error = f"HTTP {resp.status_code}"
-    except Exception as exc:
-        ollama_error = str(exc)
-    checks["ollama"] = {
-        "ok": ollama_ok,
-        "host": OLLAMA_HOST,
-        "error": ollama_error,
-    }
-
-    ready_ok = all(item.get("ok") for item in checks.values())
-    status_code = 200 if ready_ok else 503
-    return jsonify({
-        "status": "ready" if ready_ok else "degraded",
-        "checks": checks,
-        "timestamp": time.time(),
-    }), status_code
+    payload, status_code = build_readiness_payload(
+        project_db_path=PROJECT_DB_PATH,
+        project_csv_path=PROJECT_CSV_PATH,
+        knowledge_base=knowledge_base,
+        app_state_store=app_state_store,
+        ollama_host=OLLAMA_HOST,
+    )
+    return jsonify(payload), status_code
 
 
 @app.route('/api/config')
@@ -443,37 +390,11 @@ def get_base_config():
     })
 
 
-def _internal_api_has_runtime_resources(api_client: FirmAPIClient) -> bool:
-    resources = getattr(api_client, "resource_config", {}) or {}
-    return bool(resources.get("project_records") or resources.get("account_records"))
-
-
 @app.route('/api/internal-api/setup', methods=['GET', 'POST'])
 def internal_api_setup():
     if request.method == 'GET':
         api_client = FirmAPIClient(force_source="api")
-        config_file = api_client.config_file or str(MANAGED_INTERNAL_API_CONFIG_PATH)
-        project_data_source = getattr(knowledge_base, "project_data_source", "local")
-        config_exists = bool(config_file and Path(config_file).exists())
-        api_connection_active = project_data_source == "api" and (
-            config_exists or _internal_api_has_runtime_resources(api_client)
-        )
-        return jsonify({
-            "config_file": config_file,
-            "config_exists": config_exists,
-            "project_data_source": project_data_source,
-            "api_connection_active": api_connection_active,
-            "can_refresh_dataset": api_connection_active,
-            "sync_in_progress": getattr(knowledge_base, "sync_in_progress", False),
-            "last_refresh_error": getattr(knowledge_base, "last_refresh_error", ""),
-            "connection_label": (
-                "Aktif memakai Internal API/APIDog"
-                if api_connection_active
-                else "Belum aktif untuk sesi berjalan"
-            ),
-            "runtime": api_client.describe_runtime(),
-            "validation": api_client.validate_config(),
-        })
+        return jsonify(internal_api_setup_status_payload(api_client, knowledge_base, MANAGED_INTERNAL_API_CONFIG_PATH))
 
     data = request.json or {}
     try:
@@ -495,23 +416,13 @@ def internal_api_setup():
         if not generation_queue.has_live_jobs():
             refresh_started = knowledge_base.refresh_data(background=True)
 
-    return jsonify({
-        "status": "ok",
-        "config_file": str(target_path),
-        "activated": activated,
-        "refresh_started": refresh_started,
-        "project_data_source": getattr(knowledge_base, "project_data_source", "local"),
-        "api_connection_active": getattr(knowledge_base, "project_data_source", "local") == "api",
-        "can_refresh_dataset": getattr(knowledge_base, "project_data_source", "local") == "api",
-        "sync_in_progress": getattr(knowledge_base, "sync_in_progress", False),
-        "last_refresh_error": getattr(knowledge_base, "last_refresh_error", ""),
-        "connection_label": "Aktif memakai Internal API/APIDog" if activated else "Belum aktif untuk sesi berjalan",
-        "validation": validation,
-        "notes": [
-            "Kredensial tetap dibaca dari environment variable agar password tidak disimpan di UI.",
-            "Agar aktif permanen setelah restart, set PROJECT_DATA_SOURCE=api dan FIRM_API_CONFIG_FILE ke path config ini.",
-        ],
-    })
+    return jsonify(internal_api_activation_payload(
+        target_path,
+        activated,
+        refresh_started,
+        knowledge_base,
+        validation,
+    ))
 
 
 @app.route('/api/internal-api/refresh', methods=['POST'])
@@ -525,7 +436,7 @@ def internal_api_refresh():
     api_client = FirmAPIClient(force_source="api")
     config_file = api_client.config_file or str(MANAGED_INTERNAL_API_CONFIG_PATH)
     config_exists = bool(config_file and Path(config_file).exists())
-    if not config_exists and not _internal_api_has_runtime_resources(api_client):
+    if not config_exists and not internal_api_has_runtime_resources(api_client):
         return jsonify({
             "status": "error",
             "error": "Config Internal API belum tersedia. Aktifkan endpoint Internal API terlebih dahulu.",
@@ -535,18 +446,7 @@ def internal_api_refresh():
     proposal_generator.firm_api = InternalDataClient(force_source="api")
     knowledge_base.set_project_data_source("api")
     refresh_started = knowledge_base.refresh_data(force=True, background=True)
-    return jsonify({
-        "status": "refreshing" if refresh_started else "current",
-        "refresh_started": refresh_started,
-        "project_data_source": getattr(knowledge_base, "project_data_source", "api"),
-        "api_connection_active": True,
-        "can_refresh_dataset": True,
-        "config_file": config_file,
-        "sync_in_progress": getattr(knowledge_base, "sync_in_progress", False),
-        "last_refresh_error": getattr(knowledge_base, "last_refresh_error", ""),
-        "connection_label": "Aktif memakai Internal API/APIDog",
-        "message": "Dataset internal sedang diambil ulang dari endpoint API.",
-    }), 202 if refresh_started else 200
+    return jsonify(internal_api_refresh_payload(config_file, refresh_started, knowledge_base)), 202 if refresh_started else 200
 
 
 @app.route('/api/companies')
