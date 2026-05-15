@@ -131,7 +131,7 @@
                 <p class="small-note">Unggah KAK/TOR untuk membantu sistem membaca inisiatif, jenis proposal, durasi, biaya, dan framework. Hasil pembacaan ini dipakai sebagai titik awal pengisian form, sementara struktur proposal tetap mengikuti standar perusahaan.</p>
                 <div class="upload-row">
                     <input type="file" id="input-kak-files" accept=".docx,.pdf,.txt,.md" multiple />
-                    <button type="button" id="btn-upload-kak-files" class="secondary">Upload KAK / TOR</button>
+                    <button type="button" id="btn-upload-kak-files" class="secondary">Unggah KAK / TOR</button>
                 </div>
                 <div id="kak-summary" class="kak-summary-box">Belum ada dokumen KAK/TOR yang dibaca.</div>
                 <div class="modal-actions" style="margin-bottom: 10px;">
@@ -171,16 +171,16 @@
                 </div>
 
                 <label for="input-konteks">Konteks Klien</label>
-                <textarea id="input-konteks" class="rich-editor-source" placeholder="Ringkas kondisi klien saat ini, outlook ke depan, manfaat inisiatif yang diusulkan, dan best practice yang relevan."></textarea>
+                <textarea id="input-konteks" class="rich-editor-source" placeholder="Ringkas kondisi klien saat ini, arah ke depan, manfaat inisiatif yang diusulkan, dan praktik baik yang relevan."></textarea>
 
-                <label for="input-permasalahan">Permasalahan Utama (Pain Points)</label>
-                <textarea id="input-permasalahan" class="rich-editor-source" placeholder="Sebutkan root cause..."></textarea>
+                <label for="input-permasalahan">Permasalahan Utama (Titik Masalah)</label>
+                <textarea id="input-permasalahan" class="rich-editor-source" placeholder="Sebutkan akar masalah..."></textarea>
 
                 <label>Pendekatan / Kebutuhan (Bisa pilih lebih dari satu)</label>
                 <div class="checkbox-group" id="group-kebutuhan">
-                    <label><input type="checkbox" value="Problem"> Problem</label>
-                    <label><input type="checkbox" value="Opportunity"> Opportunity</label>
-                    <label><input type="checkbox" value="Directive"> Directive</label>
+                    <label><input type="checkbox" value="Problem"> Masalah</label>
+                    <label><input type="checkbox" value="Opportunity"> Peluang</label>
+                    <label><input type="checkbox" value="Directive"> Arahan</label>
                 </div>
 
                 <div class="grid-2">
@@ -195,14 +195,14 @@
                 </div>
 
                 <div class="finance-panel">
-                    <button type="button" id="btn-analyze" class="secondary" style="font-size: 0.85rem;" disabled>📊 Auto-Analisis Finansial &amp; Opsi Harga</button>
+                    <button type="button" id="btn-analyze" class="secondary" style="font-size: 0.85rem;" disabled>📊 Analisis Finansial Otomatis &amp; Opsi Harga</button>
                     <div id="finance-result" class="hidden" style="margin-top: 10px; font-size: 0.85rem;">
                         <p id="finance-summary" style="margin: 0 0 10px 0; font-style: italic; color: #475569;"></p>
                         <div id="finance-options"></div>
                     </div>
                 </div>
 
-                <label>Potensi Framework (Bisa pilih lebih dari satu)</label>
+                <label>Potensi Kerangka Kerja (Bisa pilih lebih dari satu)</label>
                 <div class="checkbox-group" id="group-framework">
                     <label><input type="checkbox" value="Itil"> Itil</label>
                     <label><input type="checkbox" value="Togaf"> Togaf</label>
@@ -210,19 +210,19 @@
                     <label><input type="checkbox" value="ISO"> ISO</label>
                     <label><input type="checkbox" value="Teori"> Teori</label>
                     <label><input type="checkbox" value="Regulasi"> Regulasi</label>
-                    <label><input type="checkbox" value="Best Practise"> Best Practise</label>
+                    <label><input type="checkbox" value="Best Practise"> Praktik Baik</label>
                     <label><input type="checkbox" id="cb-lainnya" value="Lainnya"> Lainnya..</label>
                 </div>
-                <input type="text" id="input-framework-lainnya" class="hidden" placeholder="Ketik framework manual..." />
+                <input type="text" id="input-framework-lainnya" class="hidden" placeholder="Ketik kerangka kerja manual..." />
             </div>
 
-            <button type="button" id="btn-preview" class="secondary">👁️ Preview Struktur Proposal</button>
+            <button type="button" id="btn-preview" class="secondary">👁️ Pratinjau Struktur Proposal</button>
             <div id="preview-panel" class="preview-panel hidden">
                 <p class="sub" style="margin-bottom:10px;">Pratinjau struktur konten berdasarkan input saat ini.</p>
                 <div id="preview-content"></div>
             </div>
             
-            <button type="button" id="btn-generate" disabled><span id="btn-generate-label">Generate Proposal Singkat & Padat</span> <span id="spinner" class="spinner"></span></button>
+            <button type="button" id="btn-generate" disabled><span id="btn-generate-label">Susun Proposal Singkat & Padat</span> <span id="spinner" class="spinner"></span></button>
         </div>
 
         <div id="step-success" class="hidden" style="text-align:center; padding: 20px;">
@@ -291,7 +291,7 @@
             <div class="settings-section">
                 <h3>Internal API / APIDog</h3>
                 <p class="small-note">Masukkan endpoint dataset internal. Sistem akan membuat mapping dasar, menyimpan config, mengaktifkan sumber data API untuk sesi berjalan, lalu refresh knowledge base di background.</p>
-                <label for="settings-api-url">Endpoint API Dataset</label>
+                <label for="settings-api-url">Titik Akses API Data</label>
                 <input type="url" id="settings-api-url" placeholder="https://xxx.com/api/Resource/dataset" />
                 <div class="grid-2">
                     <div>
@@ -313,7 +313,7 @@
                 <div id="internal-api-status" class="status-box">Status Internal API belum dimuat.</div>
                 <div class="upload-row">
                     <button type="button" id="btn-save-internal-api" class="secondary">Simpan & Aktifkan Internal API</button>
-                    <button type="button" id="btn-refresh-internal-api" class="secondary" disabled>Refresh Dataset Sekarang</button>
+                    <button type="button" id="btn-refresh-internal-api" class="secondary" disabled>Muat Ulang Data Sekarang</button>
                 </div>
             </div>
         </div>
@@ -1062,7 +1062,7 @@
             ui.internalApiStatus.innerHTML = `
                 <div>Config: <strong>${data.config_exists ? 'tersedia' : 'belum ada'}</strong></div>
                 <div>Connection: <strong class="${connectionClass}">${escapeHtml(connectionLabel)}</strong></div>
-                <div>Project data source: <strong>${escapeHtml(data.project_data_source || 'local')}</strong></div>
+                <div>Sumber data proyek: <strong>${escapeHtml(data.project_data_source || 'lokal')}</strong></div>
                 <div>Dataset refresh: <strong>${escapeHtml(refreshState)}</strong></div>
                 ${data.last_refresh_error ? `<div>Catatan refresh: ${escapeHtml(data.last_refresh_error)}</div>` : ''}
                 <div>File: ${escapeHtml(data.config_file || '-')}</div>
@@ -1078,12 +1078,12 @@
                 ui.btnSaveInternalApi.disabled = active;
                 ui.btnSaveInternalApi.textContent = active ? 'Internal API Sudah Aktif' : 'Simpan & Aktifkan Internal API';
                 ui.btnSaveInternalApi.title = active
-                    ? 'Internal API sudah aktif. Gunakan Refresh Dataset Sekarang untuk mengambil perubahan dataset terbaru.'
+                    ? 'API internal sudah aktif. Gunakan Muat Ulang Data Sekarang untuk mengambil perubahan data terbaru.'
                     : 'Simpan endpoint dan aktifkan Internal API.';
             }
             if (ui.btnRefreshInternalApi) {
                 ui.btnRefreshInternalApi.disabled = !active || syncing;
-                ui.btnRefreshInternalApi.textContent = syncing ? 'Refresh Sedang Berjalan...' : 'Refresh Dataset Sekarang';
+                ui.btnRefreshInternalApi.textContent = syncing ? 'Pemuatan Ulang Sedang Berjalan...' : 'Muat Ulang Data Sekarang';
                 ui.btnRefreshInternalApi.title = active
                     ? 'Ambil ulang dataset dari endpoint Internal API dan rebuild knowledge base.'
                     : 'Aktifkan Internal API sebelum refresh dataset.';
@@ -1342,8 +1342,8 @@
                 });
                 await loadCompanies();
                 alert(data.refresh_started
-                    ? 'Internal API tersimpan. Knowledge base sedang di-refresh di background.'
-                    : 'Internal API tersimpan. Knowledge base belum di-refresh karena ada job berjalan atau sumber belum siap.');
+                    ? 'API internal tersimpan. Basis pengetahuan sedang dimuat ulang di latar belakang.'
+                    : 'API internal tersimpan. Basis pengetahuan belum dimuat ulang karena ada proses berjalan atau sumber belum siap.');
             } catch (err) {
                 alert(err.message || 'Internal API belum berhasil disimpan.');
             } finally {
@@ -1521,7 +1521,7 @@
                     return data;
                 }
 
-                throw new Error(data.error || data.message || "Generate proposal gagal.");
+                throw new Error(data.error || data.message || "Penyusunan proposal gagal.");
             }
         }
 
@@ -1531,7 +1531,7 @@
                 return alert('Lengkapi minimal nama klien, tujuan proyek, dan permasalahan sebelum preview.');
             }
             ui.btnPreview.disabled = true;
-            ui.btnPreview.innerText = 'Menyusun Preview...';
+            ui.btnPreview.innerText = 'Menyusun Pratinjau...';
             try {
                 const res = await fetch('/api/preview-outline', {
                     method: 'POST',
@@ -1552,7 +1552,7 @@
                 alert('Gagal memuat preview struktur proposal.');
             } finally {
                 ui.btnPreview.disabled = false;
-                ui.btnPreview.innerText = '👁️ Preview Struktur Proposal';
+                ui.btnPreview.innerText = '👁️ Pratinjau Struktur Proposal';
             }
         });
 
@@ -1591,7 +1591,7 @@
             } finally {
                 proposalJobInFlight = false;
                 ui.spinner.classList.remove('active');
-                setGenerateLabel('Generate Proposal Singkat & Padat');
+                setGenerateLabel('Susun Proposal Singkat & Padat');
                 updateActionState();
             }
         });

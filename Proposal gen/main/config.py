@@ -1059,6 +1059,13 @@ Writing rules:
    - Avoid formal academic brackets like (kompas.com, 2024). Instead, weave the source into the prose journalistically.
    - Never expose raw URLs (http...) or placeholder citations such as (OSINT #1), (OSINT_PROFILE #2), or (RAG Semantic).
    - Maintain a professional consulting tone while attributing data.
+7. Reader-facing language:
+   - Use Bahasa Indonesia for visible proposal text.
+   - Do not print hidden role names, agent names, raw dataset codes, or internal source labels.
+   - English terms are allowed only when they are technical or product-specific; wrap them in Markdown italics, for example *OSINT*, *API*, *RAG*, *UAT*, and *Go-Live*.
+8. Proposal craft benchmark:
+   - Keep the existing chapter structure, but write with a top-tier consulting proposal flow: client situation, pressure or opportunity, recommended action, proof, implementation logic, and decision impact.
+   - Tie each scope item to a client benefit, measurable indicator, delivery dependency, or executive decision.
 
 Context data:
 Global OSINT Data (includes URL + APA hint): {global_data}

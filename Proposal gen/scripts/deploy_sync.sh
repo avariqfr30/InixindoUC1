@@ -155,7 +155,7 @@ find main scripts templates -type f \\( -name 'test_*.py' -o -name '*_test.py' \
 EOF
 
 if [[ "${MODE}" == "production" ]]; then
-  REMOTE_APP_PROFILE="$(ssh -i "${SSH_KEY}" "${REMOTE_HOST}" "bash -lc \"if [[ -f '${REMOTE_DIR}/.env' ]]; then awk -F= '/^APP_PROFILE=/{print \\\\\\$2}' '${REMOTE_DIR}/.env' | tail -n1 | tr -d '\\\\r' | xargs; fi\"")"
+  REMOTE_APP_PROFILE="$(ssh -i "${SSH_KEY}" "${REMOTE_HOST}" "bash -lc \"if [[ -f '${REMOTE_DIR}/.env' ]]; then grep -E '^APP_PROFILE=' '${REMOTE_DIR}/.env' | tail -n1 | cut -d= -f2- | tr -d '\\\\r' | xargs; fi\"")"
   REMOTE_APP_PROFILE="$(echo "${REMOTE_APP_PROFILE}" | tail -n1 | xargs)"
   if [[ -z "${REMOTE_APP_PROFILE}" ]]; then
     REMOTE_APP_PROFILE="unknown"

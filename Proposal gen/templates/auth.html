@@ -301,12 +301,12 @@
         <section class="auth-hero">
             <div>
                 <div class="hero-badge">Akses Internal</div>
-                <h1>Inixindo Proposal Intelligence</h1>
+                <h1>Intelijen Proposal Inixindo</h1>
             </div>
 
             <div class="hero-copy">
-                <p>Gunakan akun internal sederhana untuk membuka dashboard proposal, meninjau riwayat pekerjaan, dan menjalankan flow generasi dokumen.</p>
-                <p>Lapisan akses ini sengaja dibuat ringan untuk pengamanan dasar. Password tetap disimpan sebagai hash, bukan teks biasa.</p>
+                <p>Gunakan akun internal sederhana untuk membuka dasbor proposal, meninjau riwayat pekerjaan, dan menjalankan alur penyusunan dokumen.</p>
+                <p>Lapisan akses ini sengaja dibuat ringan untuk pengamanan dasar. Kata sandi tetap disimpan sebagai hash, bukan teks biasa.</p>
             </div>
         </section>
 
@@ -321,7 +321,7 @@
             <form method="POST" action="/login" id="login-form" class="auth-form" role="tabpanel" aria-labelledby="tab-login">
                 <input type="hidden" name="next" value="{{ next_target }}">
                 <h2 class="panel-title">Masuk</h2>
-                <p class="panel-subtitle">Masukkan email internal dan password yang sudah terdaftar untuk melanjutkan ke aplikasi.</p>
+                <p class="panel-subtitle">Masukkan email internal dan kata sandi yang sudah terdaftar untuk melanjutkan ke aplikasi.</p>
 
                 {% if login_error %}
                 <div class="notice error">{{ login_error }}</div>
@@ -330,10 +330,10 @@
                 <div class="notice success">{{ signup_success }}</div>
                 {% endif %}
 
-                <label for="login-username">Username</label>
+                <label for="login-username">Email</label>
                 <input id="login-username" name="username" type="text" autocomplete="username" required>
 
-                <label for="login-password">Password</label>
+                <label for="login-password">Kata Sandi</label>
                 <input id="login-password" name="password" type="password" autocomplete="current-password" required>
 
                 <button type="submit" class="submit-button">Masuk ke Sistem</button>
@@ -352,7 +352,7 @@
             <form method="POST" action="/signup" id="signup-form" class="auth-form" role="tabpanel" aria-labelledby="tab-signup">
                 <input type="hidden" name="next" value="{{ next_target }}">
                 <h2 class="panel-title">Buat Akun</h2>
-                <p class="panel-subtitle">Daftar menggunakan email internal Inixindo Jogja dan password untuk mengakses aplikasi.</p>
+                <p class="panel-subtitle">Daftar menggunakan email internal Inixindo Jogja dan kata sandi untuk mengakses aplikasi.</p>
 
                 {% if signup_error %}
                 <div class="notice error">{{ signup_error }}</div>

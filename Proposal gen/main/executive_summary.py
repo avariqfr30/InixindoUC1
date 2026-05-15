@@ -13,10 +13,10 @@ class ExecutiveSummaryBuilder:
         value_map = value_map or {}
         outcome = cls._value(value_map.get("primary_outcome") or value_map.get("business_outcome"), project_goal or "hasil kerja yang terukur")
         summary = "\n\n".join([
-            "# Executive Summary",
+            "# Ringkasan Eksekutif",
             "## Keputusan Utama\n" + f"{client} perlu menentukan apakah {project} layak dijalankan sekarang untuk mencapai {outcome} dengan tata kelola, ruang lingkup, dan komitmen eksekusi yang jelas.",
-            "## Mengapa Ini Penting Sekarang\n" + f"Inisiatif ini berhubungan langsung dengan prioritas bisnis: memperjelas masalah, mengurangi risiko eksekusi, dan memastikan investasi menghasilkan manfaat yang dapat dilacak.",
-            "## Prioritas Eksekusi\n- Sepakati ruang lingkup dan indikator keberhasilan sejak awal.\n- Tetapkan owner keputusan, owner teknis, dan ritme evaluasi.\n- Pastikan deliverable fokus pada outcome, bukan hanya aktivitas.",
+            "## Mengapa Ini Penting Sekarang\n" + f"Inisiatif ini harus dibaca dari sudut pandang keputusan bisnis: kondisi {client}, tekanan yang ingin diselesaikan, nilai yang ingin dibuka, dan risiko yang muncul jika eksekusi tidak segera diberi arah.",
+            "## Prioritas Eksekusi\n- Sepakati ruang lingkup dan indikator keberhasilan sejak awal.\n- Tetapkan penanggung jawab keputusan, penanggung jawab teknis, dan ritme evaluasi.\n- Pastikan keluaran kerja fokus pada hasil, bukan hanya aktivitas.",
             "## Risiko Jika Ditunda\n" + "Penundaan berisiko membuat kebutuhan bisnis semakin melebar, biaya koordinasi meningkat, dan momentum sponsor melemah sebelum fondasi implementasi siap.",
             "## Rekomendasi Langkah Berikutnya\n" + f"Mulai dengan alignment meeting, validasi scope, lalu finalisasi rencana kerja {timeline or 'sesuai jadwal yang disepakati'} dan anggaran {budget or 'sesuai kesepakatan komersial'}.",
         ])

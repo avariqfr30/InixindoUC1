@@ -6,6 +6,7 @@ from .data_sources import FirmAPIClient, SchemaMapper
 from .finance import FinancialAnalyzer
 from .proposal_agents import ProposalAgentWorkflow
 from .proposal_shared import *
+from .reader_facing_hygiene import sanitize_reader_facing_sources
 from .research import Researcher
 from .text_hygiene import clean_markup_artifacts
 
@@ -1590,6 +1591,7 @@ class ProposalSupportMixin:
         text = re.sub(r";\s*\.", ".", text)
         text = re.sub(r":\s*\.", ".", text)
         text = self._restore_branded_terms(text, client, proper_terms=proper_terms)
+        text = sanitize_reader_facing_sources(text)
         return re.sub(r"\n{3,}", "\n\n", text).strip()
 
     @classmethod

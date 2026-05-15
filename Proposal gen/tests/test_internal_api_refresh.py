@@ -86,7 +86,7 @@ class InternalApiRefreshTest(unittest.TestCase):
         self.assertIsNotNone(save_button)
         self.assertEqual(save_button.text.strip(), "Simpan & Aktifkan Internal API")
         self.assertIsNotNone(refresh_button)
-        self.assertIn("Refresh Dataset Sekarang", refresh_button.text)
+        self.assertIn("Muat Ulang Data Sekarang", refresh_button.text)
         self.assertIn("setInternalApiConnectionState", script)
         self.assertIn("api_connection_active", script)
         self.assertIn("/api/internal-api/refresh", script)

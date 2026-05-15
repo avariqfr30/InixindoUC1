@@ -839,11 +839,11 @@ class ProposalEngineMixin:
             personalization_pack=personalization_pack,
             selected_chapters=selected_chapters,
         )
-        DocumentBuilder.process_content(doc, executive_summary, theme_color, "Executive Summary")
+        DocumentBuilder.process_content(doc, executive_summary, theme_color, "Ringkasan Eksekutif")
         doc.add_page_break()
         DocumentBuilder.add_table_of_contents(
             doc,
-            ["Executive Summary"] + [chapter["title"] for chapter in selected_chapters],
+            ["Ringkasan Eksekutif"] + [chapter["title"] for chapter in selected_chapters],
         )
 
         rendered_any = False

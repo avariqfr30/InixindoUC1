@@ -23,10 +23,10 @@ class ReaderFacingDocumentContractTests(unittest.TestCase):
 
     def test_toc_static_fallback_is_visible(self):
         doc = Document()
-        DocumentBuilder.add_table_of_contents(doc, ["Executive Summary", "BAB I - Pendekatan", "BAB II - Rencana Kerja"])
+        DocumentBuilder.add_table_of_contents(doc, ["Ringkasan Eksekutif", "BAB I - Pendekatan", "BAB II - Rencana Kerja"])
         text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
         self.assertIn("DAFTAR ISI", text)
-        self.assertIn("Executive Summary", text)
+        self.assertIn("Ringkasan Eksekutif", text)
         self.assertIn("BAB I - Pendekatan", text)
         self.assertNotIn("Update Field", text)
 
@@ -39,7 +39,7 @@ class ReaderFacingDocumentContractTests(unittest.TestCase):
             budget="Rp500 juta",
             value_map={"primary_outcome": "adopsi berjalan terukur"},
         )
-        self.assertIn("# Executive Summary", summary)
+        self.assertIn("# Ringkasan Eksekutif", summary)
         self.assertIn("## Keputusan Utama", summary)
         self.assertIn("## Prioritas Eksekusi", summary)
         for token in ["APIDog", "Internal API", "Data Internal", "dataset"]:
