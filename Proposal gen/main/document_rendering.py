@@ -194,8 +194,32 @@ class LogoManager:
 
     @staticmethod
     def _host_allowed_for_logo(host: str) -> bool:
-        normalized = (host or "").lower().replace("www.", "").strip()
-        return bool(normalized and not any(blocked in normalized for blocked in LogoManager.BLOCKED_LOGO_HOSTS))
+        raw_host = (host or "").lower().strip()
+        if "://" in raw_host:
+            raw_host = urlparse(raw_host).netloc
+        normalized = raw_host.split("@")[-1].split(":")[0].strip(".")
+        if normalized.startswith("www."):
+            normalized = normalized[4:]
+        if not normalized:
+            return False
+        return not any(
+            normalized == blocked or normalized.endswith(f".{blocked}")
+            for blocked in LogoManager.BLOCKED_LOGO_HOSTS
+        )
+
+    @staticmethod
+    def _logo_search_item_allowed(item: Dict[str, Any]) -> bool:
+        for key in ("link", "imageUrl"):
+            value = str(item.get(key) or "").strip()
+            if not value:
+                continue
+            host = urlparse(value).netloc
+            if host and not LogoManager._host_allowed_for_logo(host):
+                return False
+        source = str(item.get("source") or "").strip()
+        if "." in source and not LogoManager._host_allowed_for_logo(source):
+            return False
+        return True
 
     @staticmethod
     def _official_domain_candidates(client_name: str) -> List[str]:
@@ -300,8 +324,17 @@ class LogoManager:
 
     @staticmethod
     def get_logo_and_color(client_name: str) -> Tuple[Optional[io.BytesIO], Tuple[int, int, int]]:
-        for domain in LogoManager._official_domain_candidates(client_name):
-            candidate = LogoManager._fetch_logo_from_domain(domain, client_name)
+        try:
+            official_domains = LogoManager._official_domain_candidates(client_name)
+        except Exception as exc:
+            logger.debug("Official logo domain discovery failed: %s", exc)
+            official_domains = []
+        for domain in official_domains:
+            try:
+                candidate = LogoManager._fetch_logo_from_domain(domain, client_name)
+            except Exception as exc:
+                logger.debug("Official logo fetch failed for %s: %s", domain, exc)
+                continue
             if candidate is not None:
                 return candidate[1], candidate[2]
         if not Researcher._has_serper_key():
@@ -316,6 +349,8 @@ class LogoManager:
                 best_candidate: Optional[Tuple[float, io.BytesIO, Tuple[int, int, int]]] = None
                 for item in res['images']:
                     try:
+                        if not LogoManager._logo_search_item_allowed(item):
+                            continue
                         identity_score = LogoManager._logo_identity_score(item, client_name)
                         if identity_score <= 0:
                             continue
@@ -904,15 +939,22 @@ class DocumentBuilder:
         run._r.extend([field_begin, field_instruction, field_separator, field_end])
 
     @staticmethod
+    def _enable_update_fields_on_open(doc: Document) -> None:
+        settings = doc.settings._element
+        update_fields = settings.find(qn("w:updateFields"))
+        if update_fields is None:
+            update_fields = OxmlElement("w:updateFields")
+            settings.append(update_fields)
+        update_fields.set(qn("w:val"), "true")
+
+    @staticmethod
     def add_table_of_contents(doc: Document, items: Optional[List[str]] = None) -> None:
         heading = doc.add_paragraph(style="Heading 1")
         heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
         heading.add_run("DAFTAR ISI").bold = True
-        for item in items or []:
-            paragraph = doc.add_paragraph(str(item), style="List Bullet")
-            paragraph.paragraph_format.space_after = Pt(2)
         toc_paragraph = doc.add_paragraph()
         DocumentBuilder._append_field(toc_paragraph, 'TOC \\o "1-3" \\h \\z \\u')
+        DocumentBuilder._enable_update_fields_on_open(doc)
         doc.add_page_break()
 
     @staticmethod

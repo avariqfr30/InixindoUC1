@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -37,10 +38,14 @@ class SignupAccessTest(unittest.TestCase):
             }
         )
         os.environ.pop("AUTH_REQUIRE_SIGNUP_APPROVAL", None)
-        from main.app import app, app_state_store
+        from main import app as app_module
 
-        cls.app = app
-        cls.store = app_state_store
+        app_module.AUTH_ALLOW_SIGNUP = True
+        app_module.AUTH_SIGNUP_EMAIL_DOMAIN = "inixindojogja.co.id"
+        app_module.AUTH_REQUIRE_SIGNUP_APPROVAL = False
+
+        cls.app = app_module.app
+        cls.store = app_module.app_state_store
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -48,11 +53,12 @@ class SignupAccessTest(unittest.TestCase):
 
     def test_internal_email_signup_can_login_immediately(self) -> None:
         client = self.app.test_client()
+        username = f"pending.user.{uuid.uuid4().hex}@inixindojogja.co.id"
 
         signup_response = client.post(
             "/signup",
             data={
-                "username": "pending.user.contract@inixindojogja.co.id",
+                "username": username,
                 "password": "secret123",
                 "confirm_password": "secret123",
             },
@@ -62,13 +68,13 @@ class SignupAccessTest(unittest.TestCase):
         self.assertEqual(signup_response.status_code, 302)
         signup_query = parse_qs(urlparse(signup_response.headers["Location"]).query)
         self.assertIn("silakan login", signup_query.get("signup_success", [""])[0].lower())
-        user = self.store.get_user("pending.user.contract@inixindojogja.co.id")
+        user = self.store.get_user(username)
         self.assertIsNotNone(user)
         self.assertEqual(user["status"], "approved")
 
         allowed_login = client.post(
             "/login",
-            data={"username": "pending.user.contract@inixindojogja.co.id", "password": "secret123"},
+            data={"username": username, "password": "secret123"},
             follow_redirects=False,
         )
 
