@@ -90,9 +90,9 @@ class FinancialAnalyzer:
         }
 
     @classmethod
-    def _ai_pricing_profile(cls, project_goal: str, objective: str, notes: str, frameworks: str) -> Dict[str, Any]:
-        combined = " ".join([project_goal or "", objective or "", notes or "", frameworks or ""]).lower()
-        ai_scope = cls._ai_scope_summary(project_goal, objective, notes, frameworks)
+    def _ai_pricing_profile(cls, project_goal: str, objective: str, notes: str, frameworks: str, scope_context: str = "") -> Dict[str, Any]:
+        combined = " ".join([project_goal or "", objective or "", notes or "", frameworks or "", scope_context or ""]).lower()
+        ai_scope = cls._ai_scope_summary(project_goal, objective, notes, frameworks, scope_context)
         if not ai_scope["enabled"]:
             return {"enabled": False, "level": "terkendali", "multiplier": 1.0, "drivers": [], "driver_labels": []}
 
@@ -178,8 +178,8 @@ class FinancialAnalyzer:
         return cls._duration_to_months(timeline) or cls.DEFAULT_DURATION_MONTHS.get((project_type or "").strip().lower(), 4.0)
 
     @classmethod
-    def _complexity_profile(cls, project_goal: str, objective: str, notes: str, frameworks: str) -> Dict[str, Any]:
-        combined = " ".join([project_goal or "", objective or "", notes or "", frameworks or ""]).lower()
+    def _complexity_profile(cls, project_goal: str, objective: str, notes: str, frameworks: str, scope_context: str = "") -> Dict[str, Any]:
+        combined = " ".join([project_goal or "", objective or "", notes or "", frameworks or "", scope_context or ""]).lower()
         if not combined.strip(): return {"level": "moderat", "multiplier": 1.0, "signal_count": 0}
 
         high_complexity = {"integrasi": 0.10, "core banking": 0.14, "migrasi": 0.10, "nasional": 0.06, "enterprise": 0.06, "regulasi": 0.08, "security": 0.06}
@@ -195,7 +195,11 @@ class FinancialAnalyzer:
         framework_tokens = [p.strip() for p in re.split(r"[,;/]| dan ", frameworks or "") if p.strip()]
         if framework_tokens: multiplier += min(0.12, max(0, len(framework_tokens) - 1) * 0.03)
 
-        ai_profile = cls._ai_pricing_profile(project_goal, objective, notes, frameworks)
+        scope_multiplier = cls._scope_pricing_multiplier(scope_context, combined)
+        multiplier *= scope_multiplier["multiplier"]
+        signal_count += scope_multiplier["signal_count"]
+
+        ai_profile = cls._ai_pricing_profile(project_goal, objective, notes, frameworks, scope_context)
         if ai_profile["enabled"]:
             multiplier *= ai_profile["multiplier"]
             signal_count += len(ai_profile["drivers"])
@@ -205,14 +209,50 @@ class FinancialAnalyzer:
         return {"level": level, "multiplier": multiplier, "signal_count": signal_count}
 
     @classmethod
-    def _project_effort_baseline(cls, timeline: str, project_type: str, service_type: str, project_goal: str, objective: str, notes: str, frameworks: str) -> Dict[str, Any]:
+    def _scope_pricing_multiplier(cls, scope_context: str, combined_text: str = "") -> Dict[str, Any]:
+        text = " ".join([scope_context or "", combined_text or ""]).lower()
+        if not text.strip():
+            return {"multiplier": 1.0, "signal_count": 0, "profile": "tidak disebutkan"}
+
+        broad_terms = [
+            "implementasi", "integrasi", "migrasi", "go-live", "golive", "deployment",
+            "pengadaan", "lisensi", "pelatihan", "rollout", "change management",
+        ]
+        boundary_terms = [
+            "out-of-scope", "di luar cakupan", "di luar lingkup", "tidak termasuk",
+            "exclude", "batasan", "asesmen", "workshop", "roadmap", "rekomendasi",
+        ]
+        broad_hits = sum(1 for token in broad_terms if token in text)
+        boundary_hits = sum(1 for token in boundary_terms if token in text)
+        if broad_hits >= 3:
+            return {"multiplier": 1.0 + min(0.30, broad_hits * 0.05), "signal_count": broad_hits, "profile": "luas"}
+        if boundary_hits >= 2 and broad_hits <= 1:
+            return {"multiplier": 0.88, "signal_count": boundary_hits, "profile": "terbatas"}
+        return {"multiplier": 1.0, "signal_count": broad_hits + boundary_hits, "profile": "moderat"}
+
+    @classmethod
+    def build_silent_scope_context(cls, timeline: str = "", project_type: str = "", service_type: str = "", project_goal: str = "", objective: str = "", notes: str = "", frameworks: str = "", commercial_context: str = "") -> str:
+        parts = [
+            f"Durasi: {timeline}" if str(timeline or "").strip() else "",
+            f"Jenis proyek: {project_type}" if str(project_type or "").strip() else "",
+            f"Jenis layanan: {service_type}" if str(service_type or "").strip() else "",
+            f"Klasifikasi kebutuhan: {project_goal}" if str(project_goal or "").strip() else "",
+            f"Konteks pekerjaan: {objective}" if str(objective or "").strip() else "",
+            f"Permasalahan dan kebutuhan: {notes}" if str(notes or "").strip() else "",
+            f"Kerangka kerja: {frameworks}" if str(frameworks or "").strip() else "",
+            f"Standar komersial internal: {commercial_context}" if str(commercial_context or "").strip() else "",
+        ]
+        return " | ".join(part for part in parts if part)
+
+    @classmethod
+    def _project_effort_baseline(cls, timeline: str, project_type: str, service_type: str, project_goal: str, objective: str, notes: str, frameworks: str, scope_context: str = "") -> Dict[str, Any]:
         months = cls._duration_months_or_default(timeline, project_type)
         monthly_rate = cls.BASE_MONTHLY_DELIVERY_RATE.get((project_type or "").strip().lower(), 70_000_000)
         service_multiplier = {"training": 0.80, "konsultan": 1.00, "training dan konsultan": 1.12}.get((service_type or "").strip().lower(), 1.0)
-        complexity = cls._complexity_profile(project_goal, objective, notes, frameworks)
-        ai_pricing = cls._ai_pricing_profile(project_goal, objective, notes, frameworks)
+        complexity = cls._complexity_profile(project_goal, objective, notes, frameworks, scope_context)
+        ai_pricing = cls._ai_pricing_profile(project_goal, objective, notes, frameworks, scope_context)
 
-        active_dims = sum(1 for item in [objective, notes, project_goal, frameworks] if str(item or "").strip())
+        active_dims = sum(1 for item in [objective, notes, project_goal, frameworks, scope_context] if str(item or "").strip())
         breadth_mult = 1.0 + min(0.18, max(0, active_dims - 2) * 0.04)
 
         effort_base = monthly_rate * months * service_multiplier * complexity["multiplier"] * breadth_mult
@@ -227,13 +267,15 @@ class FinancialAnalyzer:
         return max(int(anchor * lower_ratio), min(int(anchor * upper_ratio), max(value, anchor)))
 
     @classmethod
-    def _dynamic_budget_from_osint(cls, client_name: str, finance_snippets: List[Dict[str, Any]], benchmark_snippets: List[Dict[str, Any]], timeline: str = "", project_type: str = "", service_type: str = "", project_goal: str = "", objective: str = "", notes: str = "", frameworks: str = "", llm_financial_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _dynamic_budget_from_osint(cls, client_name: str, finance_snippets: List[Dict[str, Any]], benchmark_snippets: List[Dict[str, Any]], timeline: str = "", project_type: str = "", service_type: str = "", project_goal: str = "", objective: str = "", notes: str = "", frameworks: str = "", llm_financial_data: Optional[Dict[str, Any]] = None, scope_context: str = "") -> Dict[str, Any]:
         finance_text = " ".join([str(i.get("title", "")) + " " + str(i.get("snippet", "")) for i in (finance_snippets or [])])
         benchmark_text = " ".join([str(i.get("title", "")) + " " + str(i.get("snippet", "")) for i in (benchmark_snippets or [])])
 
         finance_values = sorted(cls._extract_financial_values(finance_text))
         benchmark_values = sorted(cls._extract_financial_values(benchmark_text))
-        effort_profile = cls._project_effort_baseline(timeline, project_type, service_type, project_goal, objective, notes, frameworks)
+        if not scope_context:
+            scope_context = cls.build_silent_scope_context(timeline, project_type, service_type, project_goal, objective, notes, frameworks)
+        effort_profile = cls._project_effort_baseline(timeline, project_type, service_type, project_goal, objective, notes, frameworks, scope_context)
         effort_base = effort_profile["effort_base"]
 
         llm_rev = (llm_financial_data or {}).get("revenue_idr")
@@ -259,7 +301,7 @@ class FinancialAnalyzer:
 
         basic = int(adjusted_base * 0.72)
         return {
-            "analysis": f"Estimasi untuk {client_name} dihitung berdasarkan durasi {effort_profile['months']} bulan dengan tingkat kompleksitas {effort_profile['complexity']['level']}.",
+            "analysis": f"Estimasi untuk {client_name} dihitung berdasarkan durasi {effort_profile['months']} bulan, ruang lingkup tersirat dari konteks kerja, dan tingkat kompleksitas {effort_profile['complexity']['level']}.",
             "options": [
                 {"tier": "Basic", "price": cls._format_idr(basic)},
                 {"tier": "Standard", "price": cls._format_idr(max(basic + 40_000_000, adjusted_base))},
@@ -267,7 +309,7 @@ class FinancialAnalyzer:
             ],
         }
 
-    def suggest_budget(self, client_name: str, timeline: str = "", project_type: str = "", service_type: str = "", project_goal: str = "", objective: str = "", notes: str = "", frameworks: str = "", commercial_context: str = "", pricing_mode: str = "demo") -> Dict[str, Any]:
+    def suggest_budget(self, client_name: str, timeline: str = "", project_type: str = "", service_type: str = "", project_goal: str = "", objective: str = "", notes: str = "", frameworks: str = "", commercial_context: str = "", pricing_mode: str = "demo", scope_context: str = "") -> Dict[str, Any]:
         year = datetime.now().year
         
         # Parallel OSINT Fetching
@@ -284,4 +326,6 @@ class FinancialAnalyzer:
             markdown = Researcher.fetch_full_markdown(finance_snippets[0]["link"])
             if markdown: llm_financial_data = self._extract_financials_with_llm(client_name, markdown)
         
-        return self._dynamic_budget_from_osint(client_name, finance_snippets, benchmark_snippets, timeline, project_type, service_type, project_goal, objective, notes, frameworks, llm_financial_data)
+        if not scope_context:
+            scope_context = self.build_silent_scope_context(timeline, project_type, service_type, project_goal, objective, notes, frameworks, commercial_context)
+        return self._dynamic_budget_from_osint(client_name, finance_snippets, benchmark_snippets, timeline, project_type, service_type, project_goal, objective, notes, frameworks, llm_financial_data, scope_context)

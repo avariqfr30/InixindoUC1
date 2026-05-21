@@ -1,0 +1,16 @@
+{
+  "client": "PT Contoh",
+  "project": "Transformasi Layanan Digital",
+  "budget": "Rp500 juta",
+  "service_type": "Konsultan",
+  "project_goal": "Problem",
+  "project_type": "Strategic",
+  "timeline": "12 minggu",
+  "notes": "Membutuhkan asesmen, roadmap, dan tata kelola layanan digital.",
+  "frameworks": "ISO, Regulasi",
+  "expected": {
+    "required_scope_terms": ["asesmen", "roadmap", "tata kelola"],
+    "forbidden_reader_terms": ["ReferenceAccount", "APIDog", "source=", "dataset_code"],
+    "executive_summary_max_words": 520
+  }
+}

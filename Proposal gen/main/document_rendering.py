@@ -1175,7 +1175,7 @@ class DocumentBuilder:
         heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
         heading.paragraph_format.space_before = Pt(8)
         heading.paragraph_format.space_after = Pt(8)
-        heading_run = heading.add_run("Profil Penulis Proposal")
+        heading_run = heading.add_run("Kapabilitas Konsultan dan Kredensial Pendukung")
         DocumentBuilder._set_run_format(heading_run, size=12, bold=True)
 
         if summary:

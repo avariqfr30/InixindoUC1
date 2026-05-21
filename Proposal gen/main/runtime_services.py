@@ -13,6 +13,7 @@ from .internal_api_runtime import (
     internal_api_setup_status_payload,
 )
 from .internal_api_setup import build_internal_api_config, write_json_config
+from .framework_catalog import FrameworkCatalogService
 from .proposal_shared import MANAGED_INTERNAL_API_CONFIG_PATH, logger
 
 
@@ -179,14 +180,13 @@ class ClientContextService:
                 continue
             product_name = str(item.get("product_name") or "").strip()
             project_name = str(item.get("project_name") or "").strip()
-            expert_name = str(item.get("expert_name") or "").strip()
             position_name = str(item.get("position_name") or "").strip()
-            if product_name or project_name or expert_name:
+            if product_name or project_name or position_name:
                 lines.append(
                     " | ".join(part for part in [
                         f"Use case internal: {product_name}" if product_name else "",
                         f"Contoh riwayat: {project_name}" if project_name else "",
-                        f"Tenaga ahli: {expert_name}{f' sebagai {position_name}' if position_name else ''}" if expert_name else "",
+                        f"Peran tenaga ahli: {position_name}" if position_name else "",
                     ] if part)
                 )
 
@@ -208,7 +208,15 @@ class ClientContextService:
             logger.exception("Internal capability context enrichment failed for %s", client_name)
             capability = {}
         if capability.get("available"):
+            aggregate_summary = str(capability.get("aggregate_summary") or "").strip()
+            if aggregate_summary:
+                lines.append(aggregate_summary)
             lines.append(str(capability.get("summary") or "").strip())
+            evidence_cards = [item for item in (capability.get("evidence_cards") or []) if isinstance(item, dict)]
+            for card in evidence_cards[:3]:
+                safe_sentence = str(card.get("safe_sentence") or "").strip()
+                if safe_sentence:
+                    lines.append(f"Bukti agregat kapabilitas: {safe_sentence}")
             capability_guidance = str(capability.get("expert_guidance") or "").strip()
             if capability_guidance:
                 lines.append(f"Tenaga ahli relevan dari riwayat proyek internal: {capability_guidance}.")
@@ -217,14 +225,36 @@ class ClientContextService:
                     continue
                 product_name = str(item.get("product_name") or "").strip()
                 project_name = str(item.get("project_name") or "").strip()
-                expert_name = str(item.get("expert_name") or "").strip()
                 position_name = str(item.get("position_name") or "").strip()
-                if product_name or expert_name:
+                if product_name or position_name:
                     lines.append(
                         " | ".join(part for part in [
                             f"Kapabilitas relevan: {product_name}" if product_name else "",
                             f"Contoh riwayat: {project_name}" if project_name else "",
-                            f"Tenaga ahli: {expert_name}{f' sebagai {position_name}' if position_name else ''}" if expert_name else "",
+                            f"Peran tenaga ahli: {position_name}" if position_name else "",
                         ] if part)
                     )
         return "\n".join(line for line in lines if line).strip()
+
+
+class FrameworkOptionService:
+    """Framework option and resolver boundary for UI and request normalization."""
+
+    def __init__(self, provider_factory: Callable[[], Any]) -> None:
+        self.provider_factory = provider_factory
+
+    def _catalog(self) -> FrameworkCatalogService:
+        try:
+            provider = self.provider_factory()
+        except Exception:
+            provider = None
+        return FrameworkCatalogService(provider)
+
+    def options_payload(self) -> Dict[str, Any]:
+        return self._catalog().options()
+
+    def resolve_selection(self, raw_value: str, context: Optional[Dict[str, Any]] = None) -> str:
+        return self._catalog().resolve(raw_value, context=context)
+
+    def confirmation_payload(self, raw_value: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return self._catalog().confirmation_payload(raw_value, context=context)

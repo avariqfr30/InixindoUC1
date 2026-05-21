@@ -53,7 +53,7 @@ from .job_queue import GenerationQueue
 from .knowledge_store import KnowledgeBase
 from .proposal_request_service import BUDGET_REQUIRED_FIELDS, ProposalRequestService
 from .readiness import build_readiness_payload
-from .runtime_services import ClientContextService, InternalApiRuntimeService, normalize_client_name
+from .runtime_services import ClientContextService, FrameworkOptionService, InternalApiRuntimeService, normalize_client_name
 from .state_store import AppStateStore
 from .text_hygiene import normalize_payload
 
@@ -108,11 +108,13 @@ client_context_service = ClientContextService(
     knowledge_base=knowledge_base,
     prefetch_research=lambda data: proposal_request_service.warm_request_context(data),
 )
+framework_option_service = FrameworkOptionService(lambda: proposal_generator.firm_api)
 proposal_request_service = ProposalRequestService(
     proposal_generator=proposal_generator,
     app_state_store=app_state_store,
     client_context_service=client_context_service,
     generation_queue=generation_queue,
+    framework_option_service=framework_option_service,
 )
 internal_api_service = InternalApiRuntimeService(
     knowledge_base=knowledge_base,
@@ -367,6 +369,7 @@ def get_base_config():
         "max_active_generations": MAX_ACTIVE_GENERATIONS,
         "max_generation_backlog": MAX_GENERATION_BACKLOG,
         "proposal_modes": PROPOSAL_MODES,
+        "framework_options": framework_option_service.options_payload(),
     })
 
 
@@ -433,6 +436,16 @@ def suggest_budget():
         commercial_context = proposal_generator.firm_api.get_project_standards(project_type).get('commercial', '')
 
     analyzer = FinancialAnalyzer(proposal_generator.ollama)
+    scope_context = FinancialAnalyzer.build_silent_scope_context(
+        timeline=data.get('estimasi_waktu', ''),
+        project_type=project_type,
+        service_type=data.get('jenis_proposal', ''),
+        project_goal=data.get('klasifikasi_kebutuhan', ''),
+        objective=data.get('konteks_organisasi', ''),
+        notes=data.get('permasalahan', ''),
+        frameworks=data.get('potensi_framework', ''),
+        commercial_context=commercial_context,
+    )
     result = analyzer.suggest_budget(
         client_name=client_name,
         timeline=data.get('estimasi_waktu', ''),
@@ -444,6 +457,7 @@ def suggest_budget():
         frameworks=data.get('potensi_framework', ''),
         commercial_context=commercial_context,
         pricing_mode=acquisition_mode,
+        scope_context=scope_context,
     )
     return jsonify(result)
 
@@ -451,6 +465,22 @@ def suggest_budget():
 @app.route('/api/preview-outline', methods=['POST'])
 def preview_outline():
     return jsonify(proposal_request_service.preview_outline(request.json or {}))
+
+
+@app.route('/api/generation-precheck', methods=['POST'])
+def generation_precheck():
+    return jsonify(proposal_request_service.generation_precheck(request.json or {}))
+
+
+@app.route('/api/framework-resolution', methods=['POST'])
+def framework_resolution():
+    data = _request_payload_with_kak_defaults(request.json or {})
+    return jsonify(
+        framework_option_service.confirmation_payload(
+            str(data.get("potensi_framework") or ""),
+            context=data,
+        )
+    )
 
 
 @app.route('/api/prefetch-context', methods=['POST'])
@@ -562,12 +592,7 @@ def proposal_settings():
     if request.method == 'GET':
         return jsonify(app_state_store.settings.get_settings())
 
-    data = normalize_payload(request.json or {})
-    settings = app_state_store.settings.save_settings(
-        internal_portfolio=str(data.get("internal_portfolio") or ""),
-        internal_credentials=str(data.get("internal_credentials") or ""),
-    )
-    return jsonify(settings)
+    return jsonify(app_state_store.settings.save_settings())
 
 
 @app.route('/api/settings/template', methods=['POST', 'DELETE'])

@@ -14,6 +14,8 @@ venv/
 app_assets/
 generated/
 app_state.db
+app_state.db-shm
+app_state.db-wal
 .chroma/
 .osint_cache/
 .research_bundle_cache/

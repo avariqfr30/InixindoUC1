@@ -34,6 +34,14 @@ RESOURCE_ALIASES: Dict[str, Dict[str, List[str]]] = {
         "topic": ["topic", "strategic_initiative", "initiative", "project", "project_name", "program", "inisiatif"],
         "budget": ["budget", "investment_estimation", "investment", "estimated_budget", "anggaran", "nilai_proyek"],
     },
+    "framework_catalog": {
+        "value": ["value", "id", "code", "framework_code", "standard_code"],
+        "label": ["label", "name", "framework_name", "standard_name", "nama_framework", "nama_standar"],
+        "description": ["description", "summary", "guidance", "proposal_use_guidance", "when_to_use"],
+        "resolved": ["resolved", "framework_version", "standard_version", "version", "versi"],
+        "aliases": ["aliases", "keywords", "synonyms"],
+        "available": ["available", "active", "capability_status", "status"],
+    },
     "account_records": {
         "company_name": ["company_name", "company", "client", "client_name", "nama_perusahaan", "nama_klien"],
         "company_region_name": ["company_region_name", "region", "city", "kota", "wilayah"],
@@ -50,6 +58,7 @@ DEFAULT_DATASETS = {
     "client_relationship": "ConsultantProjectExpertHistory",
     "project_records": "ConsultantProjectExpertHistory",
     "account_records": "ReferenceAccount",
+    "framework_catalog": "",
 }
 
 
@@ -59,6 +68,7 @@ DEFAULT_RESPONSE_PATHS = {
     "client_relationship": "data.dataset_result",
     "project_records": "data.dataset_result",
     "account_records": "data.dataset_result",
+    "framework_catalog": "data.dataset_result",
 }
 
 
@@ -97,6 +107,87 @@ def build_internal_api_config(data: Dict[str, Any]) -> Dict[str, Any]:
     datasets = normalized["datasets"]
     paths = normalized["response_paths"]
 
+    resources = {
+        "firm_profile": {
+            "request": {"body": {"dataset": str(datasets.get("firm_profile") or DEFAULT_DATASETS["firm_profile"])}},
+            "response_path": str(paths.get("firm_profile") or DEFAULT_RESPONSE_PATHS["firm_profile"]),
+            "field_mapping": {
+                "office_address": "company_address",
+                "email": "official_email",
+                "phone": "telephone",
+                "whatsapp": "whatsapp",
+                "website": "website_url",
+                "legal_name": "legal_name",
+                "operating_hours": "operating_hours",
+                "profile_summary": "profile_summary",
+                "credential_highlights": "credential_highlights",
+                "portfolio_highlights": "portfolio_highlights",
+            },
+        },
+        "project_standards": {
+            "request": {"body": {"dataset": str(datasets.get("project_standards") or DEFAULT_DATASETS["project_standards"])}},
+            "response_path": str(paths.get("project_standards") or DEFAULT_RESPONSE_PATHS["project_standards"]),
+            "record_filters": {"project_type": "{project_type}"},
+            "field_mapping": {
+                "methodology": "delivery_methodology",
+                "team": "team_composition",
+                "commercial": "commercial_terms",
+            },
+        },
+        "client_relationship": {
+            "request": {"body": {"dataset": str(datasets.get("client_relationship") or DEFAULT_DATASETS["client_relationship"])}},
+            "response_path": str(paths.get("client_relationship") or DEFAULT_RESPONSE_PATHS["client_relationship"]),
+            "record_filters": {"project_name__icontains": "{client_name}"},
+            "field_mapping": {
+                "summary": "project_name",
+                "project_name": "project_name",
+                "product_name": "product_name",
+                "expert_name": "expert_name",
+                "position_name": "position_name",
+            },
+        },
+        "project_records": {
+            "request": {"body": {"dataset": str(datasets.get("project_records") or DEFAULT_DATASETS["project_records"])}},
+            "response_path": str(paths.get("project_records") or DEFAULT_RESPONSE_PATHS["project_records"]),
+            "field_mapping": {
+                "entity": "project_name",
+                "topic": "product_name",
+                "project_name": "project_name",
+                "expert_name": "expert_name",
+                "position_name": "position_name",
+            },
+        },
+        "account_records": {
+            "request": {"body": {"dataset": str(datasets.get("account_records") or DEFAULT_DATASETS["account_records"])}},
+            "response_path": str(paths.get("account_records") or DEFAULT_RESPONSE_PATHS["account_records"]),
+            "record_filters": {"company_name__icontains": "{client_name}"},
+            "field_mapping": {
+                "company_name": "company_name",
+                "company_region_name": "company_region_name",
+                "company_province_name": "company_province_name",
+                "company_segment": "company_segment",
+                "company_sub_segment": "company_sub_segment",
+                "company_category_name": "company_category_name",
+                "company_category_desc": "company_category_desc",
+            },
+        },
+    }
+    framework_dataset = str(datasets.get("framework_catalog") or DEFAULT_DATASETS["framework_catalog"]).strip()
+    if framework_dataset:
+        resources["framework_catalog"] = {
+            "request": {"body": {"dataset": framework_dataset}},
+            "response_path": str(paths.get("framework_catalog") or DEFAULT_RESPONSE_PATHS["framework_catalog"]),
+            "field_mapping": {
+                "value": "framework_code",
+                "label": "framework_name",
+                "description": "proposal_use_guidance",
+                "resolved": "framework_version",
+                "aliases": "aliases",
+                "available": "capability_status",
+            },
+            "optional": True,
+        }
+
     return {
         "mode": "generic",
         "auth_mode": normalized["auth_mode"],
@@ -107,71 +198,7 @@ def build_internal_api_config(data: Dict[str, Any]) -> Dict[str, Any]:
             "params": {},
             "headers": {},
         },
-        "resources": {
-            "firm_profile": {
-                "request": {"body": {"dataset": str(datasets.get("firm_profile") or DEFAULT_DATASETS["firm_profile"])}},
-                "response_path": str(paths.get("firm_profile") or DEFAULT_RESPONSE_PATHS["firm_profile"]),
-                "field_mapping": {
-                    "office_address": "company_address",
-                    "email": "official_email",
-                    "phone": "telephone",
-                    "whatsapp": "whatsapp",
-                    "website": "website_url",
-                    "legal_name": "legal_name",
-                    "operating_hours": "operating_hours",
-                    "profile_summary": "profile_summary",
-                    "credential_highlights": "credential_highlights",
-                    "portfolio_highlights": "portfolio_highlights",
-                },
-            },
-            "project_standards": {
-                "request": {"body": {"dataset": str(datasets.get("project_standards") or DEFAULT_DATASETS["project_standards"])}},
-                "response_path": str(paths.get("project_standards") or DEFAULT_RESPONSE_PATHS["project_standards"]),
-                "record_filters": {"project_type": "{project_type}"},
-                "field_mapping": {
-                    "methodology": "delivery_methodology",
-                    "team": "team_composition",
-                    "commercial": "commercial_terms",
-                },
-            },
-            "client_relationship": {
-                "request": {"body": {"dataset": str(datasets.get("client_relationship") or DEFAULT_DATASETS["client_relationship"])}},
-                "response_path": str(paths.get("client_relationship") or DEFAULT_RESPONSE_PATHS["client_relationship"]),
-                "record_filters": {"project_name__icontains": "{client_name}"},
-                "field_mapping": {
-                    "summary": "project_name",
-                    "project_name": "project_name",
-                    "product_name": "product_name",
-                    "expert_name": "expert_name",
-                    "position_name": "position_name",
-                },
-            },
-            "project_records": {
-                "request": {"body": {"dataset": str(datasets.get("project_records") or DEFAULT_DATASETS["project_records"])}},
-                "response_path": str(paths.get("project_records") or DEFAULT_RESPONSE_PATHS["project_records"]),
-                "field_mapping": {
-                    "entity": "project_name",
-                    "topic": "product_name",
-                    "project_name": "project_name",
-                    "expert_name": "expert_name",
-                    "position_name": "position_name",
-                },
-            },
-            "account_records": {
-                "request": {"body": {"dataset": str(datasets.get("account_records") or DEFAULT_DATASETS["account_records"])}},
-                "response_path": str(paths.get("account_records") or DEFAULT_RESPONSE_PATHS["account_records"]),
-                "record_filters": {"company_name__icontains": "{client_name}"},
-                "field_mapping": {
-                    "company_name": "company_name",
-                    "company_region_name": "company_region_name",
-                    "company_province_name": "company_province_name",
-                    "company_segment": "company_segment",
-                    "company_sub_segment": "company_sub_segment",
-                    "company_category_name": "company_category_name",
-                    "company_category_desc": "company_category_desc",
-                },
-            },
-        },
+        "resources": resources,
     }
 
 

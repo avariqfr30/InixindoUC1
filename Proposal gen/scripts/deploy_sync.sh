@@ -97,6 +97,8 @@ declare -a RSYNC_ARGS=(
   --exclude 'generated/'
   --exclude 'app_assets/'
   --exclude 'app_state.db'
+  --exclude 'app_state.db-shm'
+  --exclude 'app_state.db-wal'
   --exclude 'projects.db'
   --exclude 'db.csv'
   --exclude '.osint_cache/'

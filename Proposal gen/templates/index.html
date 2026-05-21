@@ -71,6 +71,15 @@
         .history-meta { font-size: 0.84rem; color: #64748b; margin-bottom: 10px; line-height: 1.5; }
         .small-note { font-size: 0.82rem; color: #64748b; margin: 0 0 10px 0; }
         .template-status { background: #f8fafc; border: 1px dashed #cbd5e1; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 0.86rem; color: #475569; }
+        .source-policy-box { background: #f8fafc; border: 1px solid #dbe3ef; border-radius: 8px; padding: 12px; margin: 8px 0 14px; color: #334155; }
+        .source-policy-box strong { display: block; font-size: 0.94rem; margin-bottom: 4px; color: #1f2937; }
+        .source-policy-box .small-note { margin: 0; }
+        .source-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-top: 10px; }
+        .source-status-card { border: 1px solid #dbe3ef; border-radius: 8px; padding: 10px; background: #fff; }
+        .source-status-card strong { display: block; color: #1f2937; font-size: 0.9rem; }
+        .source-status-card span { display: block; color: #64748b; font-size: 0.8rem; margin-top: 3px; }
+        .source-status-ok { border-color: #86efac; background: #f0fdf4; }
+        .source-status-warn { border-color: #fde68a; background: #fffbeb; }
         .settings-section { border-top: 1px solid #e2e8f0; padding-top: 16px; margin-top: 16px; }
         .status-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; color: #475569; font-size: 0.84rem; line-height: 1.5; }
         .upload-row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
@@ -86,6 +95,13 @@
         .kak-warning-list { margin: 8px 0 0 18px; padding: 0; color: #9a3412; font-size: 0.82rem; }
         .client-context-box { background: #ecfdf5; border: 1px solid #86efac; color: #14532d; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 0.86rem; line-height: 1.5; }
         .client-context-box strong { color: #064e3b; }
+        .precheck-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin-bottom: 14px; }
+        .precheck-card { border: 1px solid #dbe3ef; border-radius: 8px; padding: 10px 12px; background: #f8fafc; }
+        .precheck-card strong { display: block; color: #0f172a; font-size: 0.88rem; margin-bottom: 3px; }
+        .precheck-card span { display: block; color: #475569; font-size: 0.84rem; line-height: 1.45; }
+        .precheck-section { border-top: 1px solid #e2e8f0; padding-top: 12px; margin-top: 12px; }
+        .precheck-list { margin: 8px 0 0 18px; padding: 0; color: #475569; font-size: 0.86rem; line-height: 1.5; }
+        .precheck-warning { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 0.86rem; }
         
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
@@ -204,13 +220,13 @@
 
                 <label>Potensi Kerangka Kerja (Bisa pilih lebih dari satu)</label>
                 <div class="checkbox-group" id="group-framework">
-                    <label><input type="checkbox" value="Itil"> Itil</label>
-                    <label><input type="checkbox" value="Togaf"> Togaf</label>
-                    <label><input type="checkbox" value="Cobit"> Cobit</label>
+                    <label><input type="checkbox" value="ITIL"> ITIL</label>
+                    <label><input type="checkbox" value="TOGAF"> TOGAF</label>
+                    <label><input type="checkbox" value="COBIT"> COBIT</label>
                     <label><input type="checkbox" value="ISO"> ISO</label>
                     <label><input type="checkbox" value="Teori"> Teori</label>
                     <label><input type="checkbox" value="Regulasi"> Regulasi</label>
-                    <label><input type="checkbox" value="Best Practise"> Praktik Baik</label>
+                    <label><input type="checkbox" value="Praktik Baik"> Praktik Baik</label>
                     <label><input type="checkbox" id="cb-lainnya" value="Lainnya"> Lainnya..</label>
                 </div>
                 <input type="text" id="input-framework-lainnya" class="hidden" placeholder="Ketik kerangka kerja manual..." />
@@ -251,13 +267,15 @@
             <div class="modal-header">
                 <div>
                     <h3>Pengaturan Proposal</h3>
-                    <p class="small-note">Simpan ringkasan internal, unggah file pendukung portofolio/sertifikasi, dan aktifkan blanko template agar proposal berikutnya terasa lebih konkret serta tetap mengikuti styling perusahaan.</p>
+                    <p class="small-note">Kelola sumber API internal, unggah file pendukung portofolio/sertifikasi, dan aktifkan blanko template agar proposal berikutnya memakai bukti yang dapat diaudit.</p>
                 </div>
                 <button type="button" id="btn-close-settings" class="secondary">Tutup</button>
             </div>
 
-            <label for="settings-portfolio">Portofolio Internal / Pengalaman Serupa</label>
-            <textarea id="settings-portfolio" class="rich-editor-source" placeholder="Gunakan satu baris per pengalaman. Format yang disarankan: Area | Relevansi | Bukti | Nilai tambah"></textarea>
+            <div class="source-policy-box">
+                <strong>Portofolio Internal / Pengalaman Serupa</strong>
+                <p class="small-note">Sumber portofolio tidak diisi manual. Aplikasi memakai profil/riwayat dari API internal dan file pendukung yang diunggah.</p>
+            </div>
             <label for="settings-portfolio-files">File Pendukung Portofolio</label>
             <div class="upload-row">
                 <input type="file" id="settings-portfolio-files" accept=".docx,.pdf,.txt,.md" multiple />
@@ -267,12 +285,14 @@
                 <div class="template-status">Belum ada file pendukung portofolio yang diunggah.</div>
             </div>
 
-            <label for="settings-credentials">Kapabilitas &amp; Sertifikasi Internal</label>
-            <textarea id="settings-credentials" class="rich-editor-source" placeholder="Contoh: ISO 27001 | COBIT | IT Governance | Change Management | Enterprise Architecture"></textarea>
+            <div class="source-policy-box">
+                <strong>Kapabilitas &amp; Sertifikasi Internal</strong>
+                <p class="small-note">Sumber kapabilitas, sertifikasi, dan tenaga ahli tidak diisi manual. Aplikasi memakai data yang terkonfirmasi dari API internal dan file pendukung yang diunggah.</p>
+            </div>
             <label for="settings-credential-files">File Pendukung Kapabilitas & Sertifikasi</label>
             <div class="upload-row">
                 <input type="file" id="settings-credential-files" accept=".docx,.pdf,.txt,.md" multiple />
-                <button type="button" id="btn-upload-credential-files" class="secondary">Upload File Kapabilitas</button>
+                <button type="button" id="btn-upload-credential-files" class="secondary">Unggah File Kapabilitas</button>
             </div>
             <div id="credential-doc-list" class="document-list">
                 <div class="template-status">Belum ada file pendukung kapabilitas yang diunggah.</div>
@@ -283,7 +303,6 @@
             <div id="template-status" class="template-status">Belum ada template blanko aktif.</div>
 
             <div class="modal-actions">
-                <button type="button" id="btn-save-settings">Simpan Pengaturan</button>
                 <button type="button" id="btn-upload-template" class="secondary">Upload Blanko</button>
                 <button type="button" id="btn-clear-template" class="secondary">Hapus Blanko</button>
             </div>
@@ -312,9 +331,26 @@
                 </div>
                 <div id="internal-api-status" class="status-box">Status Internal API belum dimuat.</div>
                 <div class="upload-row">
-                    <button type="button" id="btn-save-internal-api" class="secondary">Simpan & Aktifkan Internal API</button>
+                    <button type="button" id="btn-save-internal-api" class="secondary">Simpan & Aktifkan API Internal</button>
                     <button type="button" id="btn-refresh-internal-api" class="secondary" disabled>Muat Ulang Data Sekarang</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="precheck-modal" class="modal-backdrop">
+        <div class="modal">
+            <div class="modal-header">
+                <div>
+                    <h3>Cek Akhir Sebelum Generate</h3>
+                    <p class="small-note">Tinjau ekspektasi isi proposal, konteks pendukung, dan kerangka kerja yang akan dipakai sebelum dokumen disusun.</p>
+                </div>
+                <button type="button" id="btn-close-precheck" class="secondary">Tutup</button>
+            </div>
+            <div id="precheck-content" class="status-box">Cek akhir belum dimuat.</div>
+            <div class="modal-actions">
+                <button type="button" id="btn-confirm-generate">Lanjut Susun Dokumen</button>
+                <button type="button" id="btn-cancel-precheck" class="secondary">Kembali Sunting</button>
             </div>
         </div>
     </div>
@@ -357,20 +393,22 @@
             btnSettings: document.getElementById('btn-settings'),
             historyModal: document.getElementById('history-modal'),
             settingsModal: document.getElementById('settings-modal'),
+            precheckModal: document.getElementById('precheck-modal'),
             btnCloseHistory: document.getElementById('btn-close-history'),
             btnCloseSettings: document.getElementById('btn-close-settings'),
+            btnClosePrecheck: document.getElementById('btn-close-precheck'),
+            btnCancelPrecheck: document.getElementById('btn-cancel-precheck'),
+            btnConfirmGenerate: document.getElementById('btn-confirm-generate'),
+            precheckContent: document.getElementById('precheck-content'),
             historyList: document.getElementById('history-list'),
-            settingsPortfolio: document.getElementById('settings-portfolio'),
             settingsPortfolioFiles: document.getElementById('settings-portfolio-files'),
             btnUploadPortfolioFiles: document.getElementById('btn-upload-portfolio-files'),
             portfolioDocList: document.getElementById('portfolio-doc-list'),
-            settingsCredentials: document.getElementById('settings-credentials'),
             settingsCredentialFiles: document.getElementById('settings-credential-files'),
             btnUploadCredentialFiles: document.getElementById('btn-upload-credential-files'),
             credentialDocList: document.getElementById('credential-doc-list'),
             settingsTemplateFile: document.getElementById('settings-template-file'),
             templateStatus: document.getElementById('template-status'),
-            btnSaveSettings: document.getElementById('btn-save-settings'),
             btnUploadTemplate: document.getElementById('btn-upload-template'),
             btnClearTemplate: document.getElementById('btn-clear-template'),
             settingsApiUrl: document.getElementById('settings-api-url'),
@@ -392,6 +430,7 @@
         let lastPrefetchKey = '';
         let latestKakSuggestions = null;
         let latestClientContext = null;
+        let pendingGenerationPayload = null;
         const richEditors = new Map();
 
         function escapeHtml(value) {
@@ -604,17 +643,20 @@
             if (screen === 'success') ui.successStep.classList.remove('hidden');
         };
 
-        // Toggle manual framework input when "Lainnya" is checked.
-        ui.cbLainnya.addEventListener('change', (e) => {
-            if (e.target.checked) {
-                ui.inpFrameworkLainnya.classList.remove('hidden');
-                ui.inpFrameworkLainnya.focus();
-            } else {
-                ui.inpFrameworkLainnya.classList.add('hidden');
-                ui.inpFrameworkLainnya.value = ''; 
-            }
-            updateActionState();
-        });
+        function bindFrameworkOtherToggle() {
+            if (!ui.cbLainnya) return;
+            ui.cbLainnya.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    ui.inpFrameworkLainnya.classList.remove('hidden');
+                    ui.inpFrameworkLainnya.focus();
+                } else {
+                    ui.inpFrameworkLainnya.classList.add('hidden');
+                    ui.inpFrameworkLainnya.value = '';
+                }
+                updateActionState();
+            });
+        }
+        bindFrameworkOtherToggle();
 
         // Build final framework value including custom input.
         const getFinalFrameworks = () => {
@@ -693,7 +735,7 @@
                     const label = [
                         item.product_name || 'Konteks proyek',
                         item.project_name || '',
-                        item.expert_name ? `oleh ${item.expert_name}` : ''
+                        item.position_name ? `peran ${item.position_name}` : ''
                     ].filter(Boolean).join(' · ');
                     ui.selClientContext.add(new Option(label, String(index)));
                 });
@@ -747,7 +789,7 @@
                 latestClientContext.use_case_summary,
                 useCase && useCase.project_name ? `Konteks proyek internal terdekat: ${useCase.project_name}.` : '',
                 useCase && useCase.product_name ? `Fokus yang relevan: ${useCase.product_name}.` : '',
-                useCase && useCase.expert_name ? `Tenaga ahli yang dapat diposisikan: ${useCase.expert_name}${useCase.position_name ? ` sebagai ${useCase.position_name}` : ''}.` : '',
+                useCase && useCase.position_name ? `Peran tenaga ahli yang relevan: ${useCase.position_name}.` : '',
             ].filter(Boolean);
             appendEditorContext(ui.inpKonteks, contextLines.join('\n'));
             if (useCase && useCase.product_name && !ui.inpPermasalahan.value.trim()) {
@@ -775,6 +817,7 @@
                     proposalModes.forEach(item => {
                         ui.selModeProposal.add(new Option(item.label, item.value));
                     });
+                    renderFrameworkOptions(config);
                 }
                 showScreen('config');
                 updateActionState();
@@ -798,6 +841,26 @@
             container.querySelectorAll('input[type="checkbox"]').forEach(cb => {
                 cb.checked = selected.includes(String(cb.value || '').trim().toLowerCase());
             });
+        }
+
+        function renderFrameworkOptions(config) {
+            const payload = (config && config.framework_options) || {};
+            const options = Array.isArray(payload.options) ? payload.options : [];
+            if (!options.length) return;
+            const selected = getFinalFrameworks();
+            const rows = options
+                .filter(item => item && item.value && item.label && item.available !== false)
+                .map(item => `
+                    <label title="${escapeHtml(item.description || '')}">
+                        <input type="checkbox" value="${escapeHtml(item.value)}"> ${escapeHtml(item.label)}
+                    </label>
+                `)
+                .join('');
+            if (!rows) return;
+            ui.groupFramework.innerHTML = `${rows}<label><input type="checkbox" id="cb-lainnya" value="Lainnya"> Lainnya..</label>`;
+            ui.cbLainnya = document.getElementById('cb-lainnya');
+            bindFrameworkOtherToggle();
+            applyFrameworkValue(selected);
         }
 
         function applyFrameworkValue(rawValue) {
@@ -1013,8 +1076,6 @@
             try {
                 const res = await fetch('/api/settings');
                 const data = await res.json();
-                setRichEditorValue(ui.settingsPortfolio, data.internal_portfolio || '');
-                setRichEditorValue(ui.settingsCredentials, data.internal_credentials || '');
                 renderSupportingDocuments(
                     ui.portfolioDocList,
                     data.portfolio_documents || [],
@@ -1052,9 +1113,19 @@
             if (validation.auth_mode && ui.settingsApiAuthMode) {
                 ui.settingsApiAuthMode.value = validation.auth_mode;
             }
-            const resourceRows = Object.entries(resources).map(([name, payload]) => {
-                const missing = (payload.missing_required_mapping || []).join(', ');
-                return `<div>${escapeHtml(name)}: <strong>${payload.ok ? 'ok' : 'perlu mapping'}</strong>${missing ? ` (${escapeHtml(missing)})` : ''}</div>`;
+            const readiness = (data && data.readiness) || {};
+            const readinessResources = Array.isArray(readiness.resources) ? readiness.resources : [];
+            const resourceRows = readinessResources.map((payload) => {
+                const ok = Boolean(payload.ready);
+                const missingCount = Number(payload.missing_required_count || 0);
+                const statusLabel = payload.status_label || (ok ? 'Siap otomatis' : 'Perlu mapping');
+                return `
+                    <div class="source-status-card ${ok ? 'source-status-ok' : 'source-status-warn'}">
+                        <strong>${escapeHtml(payload.label || 'Sumber data internal')}</strong>
+                        <span>${escapeHtml(payload.description || 'Sumber data internal')}</span>
+                        <span>Status: ${escapeHtml(statusLabel)}${missingCount ? ` · ${missingCount} mapping perlu dicek` : ''}</span>
+                    </div>
+                `;
             }).join('');
             const connectionClass = data.api_connection_active ? 'status-active' : 'status-inactive';
             const connectionLabel = data.connection_label || (data.api_connection_active ? 'Aktif memakai Internal API/APIDog' : 'Belum aktif untuk sesi berjalan');
@@ -1062,11 +1133,9 @@
             ui.internalApiStatus.innerHTML = `
                 <div>Config: <strong>${data.config_exists ? 'tersedia' : 'belum ada'}</strong></div>
                 <div>Connection: <strong class="${connectionClass}">${escapeHtml(connectionLabel)}</strong></div>
-                <div>Sumber data proyek: <strong>${escapeHtml(data.project_data_source || 'lokal')}</strong></div>
                 <div>Dataset refresh: <strong>${escapeHtml(refreshState)}</strong></div>
                 ${data.last_refresh_error ? `<div>Catatan refresh: ${escapeHtml(data.last_refresh_error)}</div>` : ''}
-                <div>File: ${escapeHtml(data.config_file || '-')}</div>
-                ${resourceRows || '<div>Resource belum dikonfigurasi.</div>'}
+                <div class="source-status-grid">${resourceRows || '<div class="source-status-card source-status-warn"><strong>Sumber data</strong><span>Belum dikonfigurasi.</span></div>'}</div>
             `;
             setInternalApiConnectionState(data);
         }
@@ -1192,7 +1261,12 @@
                 if (!res.ok) throw new Error(data.error || 'KAK aktif belum berhasil diganti.');
                 await loadSettings();
                 await loadKakContext();
-                alert('KAK aktif berhasil diganti.');
+                if (latestKakSuggestions) {
+                    applyKakSuggestions(latestKakSuggestions, true);
+                    alert('KAK aktif berhasil diganti. Saran yang cocok sudah diterapkan ke field yang masih kosong.');
+                } else {
+                    alert('KAK aktif berhasil diganti.');
+                }
             } catch (err) {
                 alert(err.message || 'KAK aktif belum berhasil diganti.');
             }
@@ -1224,29 +1298,11 @@
 
         ui.btnCloseHistory.addEventListener('click', () => closeModal(ui.historyModal));
         ui.btnCloseSettings.addEventListener('click', () => closeModal(ui.settingsModal));
+        ui.btnClosePrecheck.addEventListener('click', () => closeModal(ui.precheckModal));
+        ui.btnCancelPrecheck.addEventListener('click', () => closeModal(ui.precheckModal));
         ui.historyModal.addEventListener('click', (e) => { if (e.target === ui.historyModal) closeModal(ui.historyModal); });
         ui.settingsModal.addEventListener('click', (e) => { if (e.target === ui.settingsModal) closeModal(ui.settingsModal); });
-
-        ui.btnSaveSettings.addEventListener('click', async () => {
-            try {
-                const res = await fetch('/api/settings', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        internal_portfolio: ui.settingsPortfolio.value,
-                        internal_credentials: ui.settingsCredentials.value
-                    })
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Pengaturan belum berhasil disimpan.');
-                ui.templateStatus.textContent = data.has_active_template
-                    ? `Template aktif: ${data.active_template_name || 'blanko proposal'}`
-                    : 'Belum ada template blanko aktif.';
-                alert('Pengaturan berhasil disimpan.');
-            } catch (err) {
-                alert(err.message || 'Pengaturan belum berhasil disimpan.');
-            }
-        });
+        ui.precheckModal.addEventListener('click', (e) => { if (e.target === ui.precheckModal) closeModal(ui.precheckModal); });
 
         ui.btnUploadPortfolioFiles.addEventListener('click', async () => {
             await uploadSupportingDocuments('portfolio', ui.settingsPortfolioFiles);
@@ -1330,10 +1386,9 @@
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'Internal API belum berhasil disimpan.');
                 renderInternalApiStatus({
-                    config_file: data.config_file,
                     config_exists: true,
-                    project_data_source: data.project_data_source,
                     validation: data.validation,
+                    readiness: data.readiness,
                     api_connection_active: data.api_connection_active,
                     can_refresh_dataset: data.can_refresh_dataset,
                     sync_in_progress: data.sync_in_progress,
@@ -1359,9 +1414,7 @@
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'Dataset internal belum berhasil di-refresh.');
                 renderInternalApiStatus({
-                    config_file: data.config_file,
                     config_exists: true,
-                    project_data_source: data.project_data_source,
                     api_connection_active: data.api_connection_active,
                     can_refresh_dataset: data.can_refresh_dataset,
                     sync_in_progress: data.sync_in_progress,
@@ -1525,6 +1578,90 @@
             }
         }
 
+        function renderGenerationPrecheck(data) {
+            const summary = (data && data.summary) || {};
+            const evidenceSources = Array.isArray(data.evidence_sources) ? data.evidence_sources : [];
+            const writingExpectation = Array.isArray(data.writing_expectation) ? data.writing_expectation : [];
+            const missingFields = Array.isArray(data.missing_fields) ? data.missing_fields : [];
+            const missingBlock = missingFields.length
+                ? `<div class="precheck-warning"><strong>Isian belum lengkap:</strong> ${missingFields.map(item => escapeHtml(item.label || item.field)).join(', ')}</div>`
+                : '';
+            const summaryCards = [
+                ['Klien', summary.client],
+                ['Jenis proposal', [summary.proposal_mode, summary.service_type, summary.project_type].filter(Boolean).join(' · ')],
+                ['Kebutuhan', summary.need_type],
+                ['Durasi & anggaran', [summary.timeline, summary.budget].filter(Boolean).join(' · ')],
+                ['Kerangka dipilih', summary.framework_original],
+                ['Kerangka final', summary.framework_resolved],
+            ].filter(([, value]) => String(value || '').trim());
+            const evidenceRows = evidenceSources.map(item => `
+                <div class="precheck-card">
+                    <strong>${escapeHtml(item.label || 'Sumber pendukung')}</strong>
+                    <span>${escapeHtml(item.status || 'Dicek')}</span>
+                    <span>${escapeHtml(item.detail || '')}</span>
+                </div>
+            `).join('');
+            ui.precheckContent.innerHTML = `
+                ${missingBlock}
+                <div class="precheck-grid">
+                    ${summaryCards.map(([label, value]) => `
+                        <div class="precheck-card">
+                            <strong>${escapeHtml(label)}</strong>
+                            <span>${escapeHtml(value)}</span>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="precheck-section">
+                    <strong>Ekspektasi isi proposal</strong>
+                    <ul class="precheck-list">${writingExpectation.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>
+                </div>
+                <div class="precheck-section">
+                    <strong>Sumber konteks yang akan dipakai</strong>
+                    <div class="precheck-grid" style="margin-top:8px;">${evidenceRows || '<div class="precheck-card"><strong>Sumber pendukung</strong><span>Belum ada sumber tambahan yang terbaca.</span></div>'}</div>
+                </div>
+            `;
+            ui.btnConfirmGenerate.disabled = !data.can_generate;
+        }
+
+        async function openGenerationPrecheck(payload) {
+            ui.precheckContent.textContent = 'Menyusun cek akhir...';
+            ui.btnConfirmGenerate.disabled = true;
+            openModal(ui.precheckModal);
+            const res = await fetch('/api/generation-precheck', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || 'Cek akhir belum bisa dimuat.');
+            }
+            renderGenerationPrecheck(data);
+            return data;
+        }
+
+        async function submitGenerationJob(payload) {
+            const res = await fetch('/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) {
+                let message = "Gagal generate dokumen.";
+                try {
+                    const errData = await res.json();
+                    if (errData && errData.error) message = errData.error;
+                } catch (_) {}
+                throw new Error(message);
+            }
+
+            const job = await res.json();
+            const finalStatus = await waitForGeneration(job.job_id, payload);
+
+            ui.successMessage.innerText = finalStatus.message || `Proposal untuk ${payload.nama_perusahaan} selesai dibuat dan siap diunduh.`;
+            showScreen('success');
+        }
+
         ui.btnPreview.addEventListener('click', async () => {
             const payload = getPayload();
             if (!payload.nama_perusahaan || !payload.konteks_organisasi || !payload.permasalahan) {
@@ -1558,37 +1695,36 @@
 
         ui.btnGenerate.addEventListener('click', async () => {
             if (proposalJobInFlight) return;
-            proposalJobInFlight = true;
-            ui.spinner.classList.add('active');
-            setGenerateLabel('Mengirim Permintaan...');
-            updateActionState();
-
             const payload = getPayload();
 
             try {
-                const res = await fetch('/generate', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(payload)
-                });
-                if (!res.ok) {
-                    let message = "Gagal generate dokumen.";
-                    try {
-                        const errData = await res.json();
-                        if (errData && errData.error) message = errData.error;
-                    } catch (_) {}
-                    throw new Error(message);
-                }
+                setGenerateLabel('Menyiapkan Cek Akhir...');
+                ui.btnGenerate.disabled = true;
+                const precheck = await openGenerationPrecheck(payload);
+                pendingGenerationPayload = precheck.can_generate ? payload : null;
+            } catch (e) {
+                alert(e.message || "Cek akhir belum bisa dimuat.");
+            } finally {
+                setGenerateLabel('Susun Proposal Singkat & Padat');
+                updateActionState();
+            }
+        });
 
-                const job = await res.json();
-                const finalStatus = await waitForGeneration(job.job_id, payload);
-
-                ui.successMessage.innerText = finalStatus.message || `Proposal untuk ${payload.nama_perusahaan} selesai dibuat dan siap diunduh.`;
-                showScreen('success');
+        ui.btnConfirmGenerate.addEventListener('click', async () => {
+            if (proposalJobInFlight || !pendingGenerationPayload) return;
+            proposalJobInFlight = true;
+            ui.spinner.classList.add('active');
+            ui.btnConfirmGenerate.disabled = true;
+            closeModal(ui.precheckModal);
+            setGenerateLabel('Mengirim Permintaan...');
+            updateActionState();
+            try {
+                await submitGenerationJob(pendingGenerationPayload);
             } catch (e) {
                 alert(e.message || "Gagal generate dokumen. Periksa console/log server.");
                 showScreen('config');
             } finally {
+                pendingGenerationPayload = null;
                 proposalJobInFlight = false;
                 ui.spinner.classList.remove('active');
                 setGenerateLabel('Susun Proposal Singkat & Padat');

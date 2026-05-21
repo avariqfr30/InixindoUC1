@@ -64,6 +64,50 @@ class ApidogActualDatasetTest(unittest.TestCase):
             {"project_name__icontains": "{client_name}"},
         )
         self.assertEqual(resources["account_records"]["request"]["body"]["dataset"], "ReferenceAccount")
+        self.assertNotIn("framework_catalog", resources)
+
+    def test_framework_catalog_dataset_is_optional_until_api_provides_it(self) -> None:
+        from main.internal_api_setup import build_internal_api_config
+
+        config = build_internal_api_config(
+            {
+                "url": "https://internal-api.example.com/api/Resource/dataset",
+                "method": "POST",
+                "body_encoding": "form",
+                "auth_mode": "basic",
+                "datasets": {"framework_catalog": "ReferenceFrameworkStandard"},
+            }
+        )
+
+        resource = config["resources"]["framework_catalog"]
+        self.assertTrue(resource["optional"])
+        self.assertEqual(resource["request"]["body"]["dataset"], "ReferenceFrameworkStandard")
+        self.assertEqual(resource["field_mapping"]["label"], "framework_name")
+
+    def test_validation_includes_client_account_records_for_settings_readiness(self) -> None:
+        from main.internal_api_setup import build_internal_api_config
+        from main.runtime_components import FirmAPIClient
+
+        config = build_internal_api_config(
+            {
+                "url": "https://internal-api.example.com/api/Resource/dataset",
+                "method": "POST",
+                "body_encoding": "form",
+                "auth_mode": "basic",
+            }
+        )
+        client = FirmAPIClient.__new__(FirmAPIClient)
+        client.integration_mode = "generic"
+        client.base_url = ""
+        client.auth_mode = "basic"
+        client.request_defaults = config["request_defaults"]
+        client.resource_config = config["resources"]
+
+        validation = client.validate_config()
+
+        self.assertIn("account_records", validation["resources"])
+        self.assertTrue(validation["resources"]["account_records"]["ok"])
+        self.assertIn("company_name", validation["resources"]["account_records"]["mapped_fields"])
 
     def test_resource_filters_support_case_insensitive_contains_for_real_project_names(self) -> None:
         from main.runtime_components import FirmAPIClient
@@ -319,8 +363,9 @@ class ApidogActualDatasetTest(unittest.TestCase):
         self.assertNotIn("Data internal", context["account_summary"])
         self.assertEqual(len(context["use_cases"]), 1)
         self.assertEqual(context["use_cases"][0]["product_name"], "Asesmen Jaringan")
-        self.assertEqual(context["use_cases"][0]["expert_name"], "Dickyfli Perdana Putra")
+        self.assertNotIn("expert_name", context["use_cases"][0])
         self.assertIn("Project Manager", context["expert_guidance"])
+        self.assertNotIn("Dickyfli Perdana Putra", context["expert_guidance"])
 
     def test_capability_context_uses_broader_consultant_history_without_client_match(self) -> None:
         from main.runtime_components import FirmAPIClient
@@ -375,8 +420,9 @@ class ApidogActualDatasetTest(unittest.TestCase):
         self.assertGreaterEqual(len(context["matches"]), 2)
         self.assertIn("SPBE", context["summary"])
         self.assertIn("ISO 27001", context["summary"])
-        self.assertIn("Julizar Handi Wijaya", context["expert_guidance"])
-        self.assertIn("Citra Arfanudin", context["expert_guidance"])
+        self.assertNotIn("Julizar Handi Wijaya", context["expert_guidance"])
+        self.assertNotIn("Citra Arfanudin", context["expert_guidance"])
+        self.assertIn("Project Manager", context["expert_guidance"])
 
     def test_consultant_history_formats_product_expert_position_matrix(self) -> None:
         from main.runtime_components import FirmAPIClient
@@ -407,11 +453,14 @@ class ApidogActualDatasetTest(unittest.TestCase):
         self.assertTrue(formatted["available"])
         self.assertIn("Arsitektur SPBE", formatted["summary"])
         self.assertIn("Pendampingan ISO 27001", formatted["summary"])
-        self.assertIn("Arsitektur SPBE: Project Manager - Julizar Handi Wijaya", formatted["expert_guidance"])
-        self.assertIn("Tenaga Ahli - Mustofa", formatted["expert_guidance"])
+        self.assertIn("Arsitektur SPBE: Project Manager", formatted["expert_guidance"])
+        self.assertIn("Tenaga Ahli", formatted["expert_guidance"])
+        self.assertNotIn("Julizar Handi Wijaya", formatted["expert_guidance"])
+        self.assertNotIn("Mustofa", formatted["expert_guidance"])
         self.assertEqual(formatted["product_expert_matrix"][0]["product_name"], "Arsitektur SPBE")
         self.assertEqual(formatted["product_expert_matrix"][0]["positions"][0]["position_name"], "Project Manager")
-        self.assertIn("Julizar Handi Wijaya", formatted["product_expert_matrix"][0]["positions"][0]["experts"])
+        self.assertEqual(formatted["product_expert_matrix"][0]["positions"][0]["experts"], [])
+        self.assertEqual(formatted["product_expert_matrix"][0]["positions"][0]["expert_count"], 1)
         self.assertNotIn("ConsultantProjectExpertHistory", formatted["formatted_summary"])
         self.assertNotIn("PI06 -", formatted["formatted_summary"])
 
@@ -456,6 +505,146 @@ class ApidogActualDatasetTest(unittest.TestCase):
         self.assertIn("Arsitektur SPBE", context["summary"])
         self.assertIn("Peta Rencana SPBE", context["summary"])
         self.assertIn("Pendampingan ISO 27001", context["summary"])
+        self.assertIn("aggregate_summary", context)
+        self.assertIn("evidence_cards", context)
+        self.assertEqual(context["total_record_count"], 4)
+        self.assertGreaterEqual(context["usable_record_count"], 4)
+        self.assertTrue(any(card["capability"] == "Peta Rencana SPBE" for card in context["evidence_cards"]))
+        self.assertIn("catatan", context["evidence_cards"][0]["safe_sentence"])
+        self.assertEqual(context["source"], "internal_api")
+        self.assertTrue(context["name_policy"]["allow_named_specialists"])
+        self.assertEqual(context["product_expert_matrix"][0]["positions"][0]["experts"][0], "Mustofa")
+        self.assertIn("Umar Affandhi", context["product_expert_matrix"][0]["positions"][1]["experts"])
+
+    def test_capability_intelligence_builds_dataset_wide_evidence_cards(self) -> None:
+        from main.capability_intelligence import build_capability_intelligence
+
+        result = build_capability_intelligence(
+            [
+                {
+                    "project_name": "Peta Rencana SPBE Kabupaten",
+                    "product_name": "Peta Rencana SPBE",
+                    "expert_name": "Mustofa",
+                    "position_name": "Tenaga Ahli",
+                },
+                {
+                    "project_name": "Peta Rencana SPBE Kota",
+                    "product_name": "Peta Rencana SPBE",
+                    "expert_name": "Umar Affandhi",
+                    "position_name": "Project Manager",
+                },
+                {
+                    "project_name": "Pendampingan ISO Kota",
+                    "product_name": "Pendampingan ISO 27001",
+                    "expert_name": "Citra Arfanudin",
+                    "position_name": "Project Manager",
+                },
+            ],
+            focus_terms=["SPBE"],
+            limit_cards=3,
+        )
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["total_record_count"], 3)
+        self.assertEqual(result["usable_record_count"], 3)
+        self.assertEqual(result["evidence_cards"][0]["capability"], "Peta Rencana SPBE")
+        self.assertEqual(result["evidence_cards"][0]["confidence"], "high")
+        self.assertIn("SPBE", result["evidence_cards"][0]["matched_terms"])
+        self.assertIn("cluster kapabilitas terkuat", result["aggregate_summary"])
+
+    def test_team_table_uses_api_confirmed_names_only_when_policy_allows(self) -> None:
+        from main.proposal_support import ProposalSupportMixin
+
+        bench_context = {
+            "source": "internal_api",
+            "name_policy": {
+                "allow_named_specialists": True,
+                "allowed_use": "team_chapter_only",
+                "source": "ConsultantProjectExpertHistory",
+            },
+            "product_expert_matrix": [
+                {
+                    "product_name": "Peta Rencana SPBE",
+                    "project_examples": ["Peta Rencana SPBE Kota"],
+                    "positions": [
+                        {
+                            "position_name": "Project Manager",
+                            "expert_count": 1,
+                            "experts": ["Umar Affandhi"],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        rows = ProposalSupportMixin._expert_rows_from_bench_context(
+            bench_context,
+            client="PT Contoh",
+            project_type="Strategic",
+            service_type="Konsultan",
+            regulations="SPBE",
+            team_points=[],
+        )
+
+        self.assertIn("Umar Affandhi", rows[0]["peran"])
+
+        blocked = dict(bench_context)
+        blocked["source"] = "osint"
+        blocked_rows = ProposalSupportMixin._expert_rows_from_bench_context(
+            blocked,
+            client="PT Contoh",
+            project_type="Strategic",
+            service_type="Konsultan",
+            regulations="SPBE",
+            team_points=[],
+        )
+        self.assertNotIn("Umar Affandhi", blocked_rows[0]["peran"])
+
+    def test_team_table_collapses_generic_roles_into_distinct_capability_assignments(self) -> None:
+        from main.proposal_support import ProposalSupportMixin
+
+        bench_context = {
+            "source": "internal_api",
+            "name_policy": {
+                "allow_named_specialists": True,
+                "allowed_use": "team_chapter_only",
+                "source": "ConsultantProjectExpertHistory",
+            },
+            "product_expert_matrix": [
+                {
+                    "product_name": "Arsitektur SPBE",
+                    "project_examples": ["Arsitektur Data SPBE Provinsi Lampung"],
+                    "positions": [
+                        {"position_name": "Project Manager", "expert_count": 3, "experts": ["Andi Yuniantoro"]},
+                        {"position_name": "Tenaga Ahli", "expert_count": 4, "experts": ["Citra Arfanudin"]},
+                    ],
+                },
+                {
+                    "product_name": "Peta Rencana SPBE",
+                    "project_examples": ["Belanja Jasa Konsultansi Perencanaan Masterplan"],
+                    "positions": [
+                        {"position_name": "Project Manager", "expert_count": 2, "experts": ["Mustofa"]},
+                        {"position_name": "Tenaga Ahli", "expert_count": 3, "experts": ["Umar Affandhi"]},
+                    ],
+                },
+            ],
+        }
+
+        rows = ProposalSupportMixin._expert_rows_from_bench_context(
+            bench_context,
+            client="PT Contoh",
+            project_type="Strategic",
+            service_type="Konsultan",
+            regulations="SPBE",
+            team_points=[],
+        )
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(len({row["peran"] for row in rows}), 2)
+        self.assertTrue(any("Arsitektur SPBE" in row["peran"] for row in rows))
+        self.assertTrue(any("Peta Rencana SPBE" in row["peran"] for row in rows))
+        self.assertFalse(any(row["peran"].startswith("Project Manager -") for row in rows))
+        self.assertFalse(any(row["peran"].startswith("Tenaga Ahli -") for row in rows))
 
 
 if __name__ == "__main__":

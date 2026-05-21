@@ -91,6 +91,85 @@ class ArchitectureBoundariesTest(unittest.TestCase):
             service.missing_required_fields({}, GENERATION_REQUIRED_FIELDS),
         )
 
+    def test_generation_request_service_delegates_framework_resolution(self) -> None:
+        from main.proposal_request_service import ProposalRequestService
+
+        store = Mock()
+        store.settings.resolve_kak_references_in_payload.return_value = {
+            "nama_perusahaan": "Klien",
+            "potensi_framework": "ISO, Regulasi",
+        }
+        framework_service = Mock()
+        framework_service.resolve_selection.return_value = "ISO/IEC 27001:2022, UU Perlindungan Data Pribadi"
+
+        service = ProposalRequestService(
+            proposal_generator=Mock(),
+            app_state_store=store,
+            client_context_service=Mock(company_candidates=Mock(return_value=[])),
+            generation_queue=Mock(),
+            framework_option_service=framework_service,
+        )
+
+        payload = service.payload_with_kak_defaults({"potensi_framework": "ISO, Regulasi"})
+
+        self.assertEqual(payload["potensi_framework"], "ISO/IEC 27001:2022, UU Perlindungan Data Pribadi")
+        self.assertEqual(payload["_framework_original_selection"], "ISO, Regulasi")
+        framework_service.resolve_selection.assert_called_once()
+
+    def test_generation_precheck_summarizes_resolved_inputs_and_evidence_sources(self) -> None:
+        from main.proposal_request_service import ProposalRequestService
+
+        store = Mock()
+        store.settings.resolve_kak_references_in_payload.return_value = {
+            "nama_perusahaan": "Ajinomoto Indonesia",
+            "mode_proposal": "canvassing",
+            "jenis_proposal": "Konsultan",
+            "jenis_proyek": "Strategic",
+            "konteks_organisasi": "Meningkatkan tata kelola layanan digital.",
+            "permasalahan": "Butuh standar operasional yang lebih konsisten.",
+            "klasifikasi_kebutuhan": "Problem, Opportunity",
+            "estimasi_waktu": "3 bulan",
+            "estimasi_biaya": "Rp 215.784.000",
+            "potensi_framework": "ISO, Regulasi",
+        }
+        store.settings.build_generation_context.return_value = {
+            "kak_available": True,
+            "kak_source_document": "TOR Ajinomoto.docx",
+            "portfolio_context": "Pengalaman proyek tata kelola layanan digital.",
+            "credential_context": "Sertifikasi ISO/IEC 27001 dan ITSM tersedia.",
+        }
+        client_context = Mock()
+        client_context.company_candidates.return_value = ["Ajinomoto Indonesia"]
+        client_context.internal_context_text.return_value = "Konteks akun dan riwayat tenaga ahli internal tersedia."
+        generator = Mock()
+        generator.build_preview_outline.return_value = [
+            {"title": "BAB I Pendahuluan", "preview": "Menjelaskan konteks klien.", "subsections": []}
+        ]
+        generator.firm_api.get_expert_bench_context.return_value = {"available": True, "products_count": 4}
+        framework_service = Mock()
+        framework_service.resolve_selection.return_value = "ISO/IEC 27001:2022, UU Perlindungan Data Pribadi"
+
+        service = ProposalRequestService(
+            proposal_generator=generator,
+            app_state_store=store,
+            client_context_service=client_context,
+            generation_queue=Mock(),
+            framework_option_service=framework_service,
+        )
+
+        result = service.generation_precheck({"potensi_framework": "ISO, Regulasi"})
+
+        self.assertTrue(result["can_generate"])
+        self.assertEqual(result["summary"]["client"], "Ajinomoto Indonesia")
+        self.assertEqual(result["summary"]["framework_original"], "ISO, Regulasi")
+        self.assertEqual(result["summary"]["framework_resolved"], "ISO/IEC 27001:2022, UU Perlindungan Data Pribadi")
+        self.assertIn("BAB I Pendahuluan", result["writing_expectation"][0])
+        labels = [item["label"] for item in result["evidence_sources"]]
+        self.assertIn("Data akun internal", labels)
+        self.assertIn("Riwayat tenaga ahli internal", labels)
+        self.assertIn("KAK/TOR aktif", labels)
+        self.assertIn("Dokumen kapabilitas", labels)
+
 
 if __name__ == "__main__":
     unittest.main()

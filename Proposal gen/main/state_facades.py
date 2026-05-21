@@ -55,11 +55,8 @@ class SettingsStateFacade(_StoreFacade):
     def get_settings(self) -> Dict[str, Any]:
         return self._store.get_settings()
 
-    def save_settings(self, internal_portfolio: str = "", internal_credentials: str = "") -> Dict[str, Any]:
-        return self._store.save_settings(
-            internal_portfolio=internal_portfolio,
-            internal_credentials=internal_credentials,
-        )
+    def save_settings(self) -> Dict[str, Any]:
+        return self._store.save_settings()
 
     def save_template(self, filename: str, raw_bytes: bytes) -> Dict[str, Any]:
         return self._store.save_template(filename, raw_bytes)

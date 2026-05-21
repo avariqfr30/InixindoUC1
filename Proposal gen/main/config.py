@@ -741,22 +741,22 @@ UNIVERSAL_STRUCTURE = [
         "length_intent": "Tangkap dengan jelas apa yang benar-benar dibutuhkan atau diinginkan klien, lalu turunkan pola definisi masalah standar perusahaan dari business context hingga need for solution. (Target: 750 words)."
     },
     {
-        "id": "c_3", "title": "BAB III – KLASIFIKASI KEBUTUHAN",
-        "subs": ["3.1 Penajaman Kebutuhan Utama yang Dipilih", "3.2 Tujuan Utama dan Jenis Proyek"],
-        "keywords": "needs classification problem opportunity directive project objective",
-        "length_intent": "Klasifikasikan kebutuhan klien ke dalam problem/opportunity/directive, kerucutkan kebutuhan utama yang benar-benar diselesaikan, lalu tetapkan tujuan proyek dan jenis proyek yang paling tepat. (Target: 700 words)."
+        "id": "c_7", "title": "BAB III – RUANG LINGKUP PEKERJAAN",
+        "subs": ["3.1 Lingkup Pekerjaan Utama", "3.2 Batasan Pekerjaan, Asumsi, dan Hal di Luar Cakupan"],
+        "keywords": "scope work deliverables boundaries assumptions exclusions off-scope",
+        "length_intent": "Membatasi pekerjaan proposal agar pelaksanaan lebih efisien, tidak melebar ke area off-scope, dan memiliki batasan pekerjaan, asumsi, keluaran, serta tanggung jawab yang jelas sejak awal. (Target: 650 words)."
     },
     {
-        "id": "c_7", "title": "BAB IV – RUANG LINGKUP PEKERJAAN",
-        "subs": ["4.1 Lingkup Pekerjaan Utama", "4.2 Batasan Pekerjaan dan Asumsi"],
-        "keywords": "scope work deliverables boundaries assumptions",
-        "length_intent": "Jelaskan ruang lingkup pekerjaan yang dikerjakan, bentuk keluaran tiap area kerja, serta batasan dan asumsi utama agar ekspektasi klien tetap jelas dan menjadi acuan bab pendekatan serta metodologi. (Target: 700 words)."
+        "id": "c_3", "title": "BAB IV – KLASIFIKASI KEBUTUHAN",
+        "subs": ["4.1 Penajaman Kebutuhan Utama yang Dipilih", "4.2 Tujuan Utama dan Jenis Proyek"],
+        "keywords": "needs classification problem opportunity directive project objective",
+        "length_intent": "Klasifikasikan kebutuhan klien ke dalam problem/opportunity/directive, kerucutkan kebutuhan utama yang benar-benar diselesaikan, lalu tetapkan tujuan proyek dan jenis proyek yang paling tepat. (Target: 700 words)."
     },
     {
         "id": "c_4", "title": "BAB V – PENDEKATAN",
         "subs": ["5.1 Acuan Prinsip/Kerangka/Teori/Regulasi", "5.2 Standar Penyelesaian Masalah"],
         "keywords": "approach framework principle theory regulation standard",
-        "length_intent": "Uraikan acuan dan prinsip yang digunakan (framework/teori/regulasi/standar) sebagai landasan menyelesaikan masalah klien, dengan tetap merujuk pada ruang lingkup yang sudah dipilih. (Target: 700 words)."
+        "length_intent": "Tentukan acuan dan prinsip yang digunakan (framework/teori/regulasi/standar) sebagai landasan menyelesaikan masalah klien, lalu jelaskan mengapa acuan tersebut tepat untuk kebutuhan yang sudah diklasifikasikan. (Target: 700 words)."
     },
     {
         "id": "c_5", "title": "BAB VI – METODOLOGI",
@@ -765,7 +765,7 @@ UNIVERSAL_STRUCTURE = [
             "6.2 Langkah Kerja dengan Kerangka Acuan Terpilih",
         ],
         "keywords": "methodology rationale implementation steps framework",
-        "length_intent": "Jelaskan mengapa metodologi tersebut dipilih dan bagaimana langkah kerja detail menggunakan framework tersebut berdasarkan ruang lingkup dan pendekatan yang sudah ditegaskan sebelumnya, tanpa menambah sub-bab di luar struktur standar perusahaan. (Target: 850 words).",
+        "length_intent": "Jelaskan mengapa metodologi tersebut dipilih dan bagaimana langkah kerja menggunakan framework tersebut agar pendekatan dapat berubah menjadi proses kerja yang dapat dijalankan. (Target: 850 words).",
         "visual_intent": "flowchart"
     },
     {
@@ -788,28 +788,22 @@ UNIVERSAL_STRUCTURE = [
         "length_intent": "Jelaskan tata kelola proyek, termasuk mekanisme pengambilan keputusan dan pengendalian agar proyek berjalan efektif. (Target: 700 words)."
     },
     {
-        "id": "c_10", "title": "BAB X – PROFIL PERUSAHAAN",
-        "subs": ["10.1 Relevansi Profil dan Kapabilitas Perusahaan", "10.2 Pengalaman Serupa dan Nilai Tambah"],
-        "keywords": "company profile relevant experience capability credentials",
-        "length_intent": "Tunjukkan profil perusahaan penyusun, relevansi kapabilitas, dan pengalaman serupa yang memperkuat keyakinan klien terhadap inisiatif yang diusulkan. (Target: 650 words)."
-    },
-    {
-        "id": "c_11", "title": "BAB XI – STRUKTUR & TENAGA AHLI PROYEK",
-        "subs": ["11.1 Struktur Tim Proyek", "11.2 Tabel Tenaga Ahli dan Kualifikasi"],
+        "id": "c_11", "title": "BAB X – STRUKTUR & TEAM PROYEK",
+        "subs": ["10.1 Struktur Tim Proyek", "10.2 Kapabilitas Konsultan, Pengalaman, dan Sertifikasi"],
         "keywords": "project team structure experts capability experience certification",
-        "length_intent": "Tunjukkan struktur dan komposisi tim proyek beserta detail tenaga ahli, kapabilitas, pengalaman, dan sertifikasi untuk membangun kepercayaan klien. (Target: 700 words)."
+        "length_intent": "Tunjukkan struktur dan komposisi tim proyek beserta kapabilitas konsultan, pengalaman relevan, sertifikasi, dan bukti profil perusahaan penyusun untuk membangun kepercayaan klien. (Target: 800 words)."
     },
     {
-        "id": "c_12", "title": "BAB XII – MODEL PEMBIAYAAN",
-        "subs": ["12.1 Biaya dan Tahapan Pembayaran", "12.2 Model Pekerjaan dan Batasan Pekerjaan"],
+        "id": "c_12", "title": "BAB XI – MODEL PEMBIAYAAN",
+        "subs": ["11.1 Biaya dan Tahapan Pembayaran", "11.2 Model Pekerjaan dan Batasan Pekerjaan"],
         "keywords": "commercial pricing payment terms scope boundaries",
         "length_intent": "Jelaskan model bisnis proyek yang mencakup biaya, tahapan pembayaran, model pekerjaan, dan batasan pekerjaan secara jelas dan tegas. (Target: 700 words)."
     },
     {
-        "id": "c_closing", "title": "PENUTUP & APRESIASI KEMITRAAN",
-        "subs": ["Apresiasi dan Komitmen Kemitraan", "Informasi Kontak dan Langkah Lanjutan"],
-        "keywords": "closing appreciation partnership contact next steps",
-        "length_intent": "Tutup proposal dengan apresiasi profesional, pernyataan komitmen kemitraan, informasi kontak lengkap, dan ajakan langkah tindak lanjut yang jelas. (Target: 350 words)."
+        "id": "c_closing", "title": "BAB XII – PENUTUP",
+        "subs": ["12.1 Apresiasi dan Komitmen Kemitraan", "12.2 Informasi Kontak dan Langkah Lanjutan"],
+        "keywords": "post-flowchart closing appreciation partnership contact email phone next steps",
+        "length_intent": "Tutup proposal sebagai bab post-flowchart dengan ucapan terima kasih dari perusahaan penyusun, komitmen tindak lanjut, serta informasi kontak email, telepon, website, dan kanal komunikasi resmi agar perusahaan yang dituju dapat melanjutkan pembahasan. (Target: 350 words)."
     }
 ]
 

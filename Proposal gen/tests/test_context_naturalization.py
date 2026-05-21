@@ -61,6 +61,21 @@ class ContextNaturalizationTest(unittest.TestCase):
         self.assertNotIn("<", cleaned)
         self.assertNotIn("span", cleaned.lower())
 
+    def test_internal_account_helper_is_not_used_as_project_objective(self) -> None:
+        from main.text_hygiene import naturalize_generation_text
+
+        raw = (
+            "Konteks akun internal menempatkan Accelbyte dengan berlokasi di Daerah Istimewa Yogyakarta; "
+            "segmen swasta / swasta. Gunakan informasi ini sebagai latar segmentasi dan lokasi, bukan sebagai rumusan tujuan proyek."
+        )
+
+        cleaned = naturalize_generation_text(raw, field="konteks_organisasi", client_name="Accelbyte")
+
+        self.assertNotIn("Konteks akun internal", cleaned)
+        self.assertNotIn("Gunakan informasi ini", cleaned)
+        self.assertIn("penajaman kebutuhan", cleaned)
+        self.assertIn("Accelbyte", cleaned)
+
     def test_prompt_only_agent_labels_are_stripped_from_prose_cleanup(self) -> None:
         from main.text_hygiene import clean_markup_artifacts
 

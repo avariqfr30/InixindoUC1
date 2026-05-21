@@ -2,6 +2,12 @@
 import re
 
 _REPLACEMENTS = (
+    (r"\bNama\s+Perusahaan\s+Klien\s*:", "catatan klien:"),
+    (r"\bReferenceAccount\s+mencatat\b", "catatan klien menunjukkan"),
+    (r"\bsource\s*=\s*(?:https?://\S+|/api/[A-Za-z0-9_./-]+)?", ""),
+    (r"\bdataset[_\s-]*code\s*=\s*ConsultantProjectExpertHistory\b", "riwayat pengalaman konsultan"),
+    (r"\bDirangkum\s+dari\s+sumber[^:]*:\s*", "Berdasarkan catatan pendukung yang sudah dipadatkan: "),
+    (r"\bProblem\s*,\s*Opportunity\s*,\s*Directive\b", "kebutuhan prioritas yang perlu dipertegas"),
     (r"\((?:Data Internal),\s*(?:\d{4}|n\.d\.)\)", ""),
     (r"\[[A-Z_]+(?:\s*:?\s*[A-Za-z0-9_-]*)?\]", ""),
     (r"https?://\S+", ""),

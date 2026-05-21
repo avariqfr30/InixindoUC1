@@ -249,6 +249,15 @@ def naturalize_generation_text(value: Any, field: str = "", client_name: str = "
             "disiplin arsitektur layanan, integrasi, keamanan, dan pengukuran kinerja; narasinya tetap disesuaikan "
             "dengan konteks organisasi sektor privat."
         )
+    if field_key == "konteks_organisasi" and re.search(
+        r"\bkonteks\s+akun\s+internal\s+menempatkan\b|\bGunakan\s+informasi\s+ini\s+sebagai\s+latar\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return (
+            f"penajaman kebutuhan, ruang lingkup, dan roadmap kerja yang relevan bagi {client}; "
+            "identitas akun internal dipakai sebagai konteks latar untuk memahami profil klien, bukan sebagai tujuan proyek."
+        )
 
     text = re.sub(r"(?im)^\s*pembina\s+tk\.?\s*[ivxlcdm]+,\s*[ivxlcdm]+/[a-z]\s*$", "", text)
     reference_pattern = re.compile(

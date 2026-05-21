@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from .proposal_shared import *
 from .schema_mapping import SchemaMapper
 from .research import Researcher
+from .capability_intelligence import build_capability_intelligence
 from ollama import Client
 
 # ==========================================
@@ -52,6 +53,7 @@ class FirmAPIClient:
         "project_standards": ("methodology", "team", "commercial"),
         "client_relationship": ("summary",),
         "project_records": ("entity", "topic"),
+        "framework_catalog": ("value", "label"),
     }
 
     def __init__(self, force_source: str = "") -> None:
@@ -238,11 +240,18 @@ class FirmAPIClient:
 
     def validate_config(self, sample_payload: Optional[Any] = None) -> Dict[str, Any]:
         resources: Dict[str, Any] = {}
+        configured_resources = self.resource_config or {}
         resource_names = ["firm_profile", "project_standards", "client_relationship"]
-        if PROJECT_DATA_SOURCE == "api" or "project_records" in (self.resource_config or {}):
+        if "account_records" in configured_resources:
+            resource_names.append("account_records")
+        if PROJECT_DATA_SOURCE == "api" or "project_records" in configured_resources:
             resource_names.append("project_records")
+        if "framework_catalog" in configured_resources:
+            resource_names.append("framework_catalog")
         for resource_name in resource_names:
             resource_spec = dict((self.resource_config or {}).get(resource_name) or {})
+            if resource_spec.get("optional") and not str((((resource_spec.get("request") or {}).get("body") or {}).get("dataset") or "")).strip():
+                continue
             request_spec = self._merge_spec(self.request_defaults, dict(resource_spec.get("request") or {}))
             field_mapping = resource_spec.get("field_mapping") or {}
             path = str(request_spec.get("url") or request_spec.get("path") or "").strip()
@@ -521,7 +530,6 @@ class FirmAPIClient:
     def _project_history_relationship_summary(payload: Dict[str, Any]) -> str:
         project_name = FirmAPIClient._naturalize_internal_text(payload.get("project_name") or payload.get("summary"))
         product_name = FirmAPIClient._naturalize_internal_text(payload.get("product_name"))
-        expert_name = FirmAPIClient._naturalize_internal_text(payload.get("expert_name"))
         position_name = FirmAPIClient._naturalize_internal_text(payload.get("position_name"))
         if not project_name:
             return ""
@@ -529,9 +537,8 @@ class FirmAPIClient:
         parts = [f"Riwayat internal menunjukkan pengalaman proyek pada {project_name}."]
         if product_name:
             parts.append(f"Lingkup/produk terkait: {product_name}.")
-        if expert_name:
-            role = f" sebagai {position_name}" if position_name else ""
-            parts.append(f"Tenaga ahli tercatat: {expert_name}{role}.")
+        if position_name:
+            parts.append(f"Peran tenaga ahli yang tercatat: {position_name}.")
         return " ".join(parts)
 
     @classmethod
@@ -542,6 +549,7 @@ class FirmAPIClient:
         limit_positions: int = 4,
         limit_experts: int = 4,
         limit_projects: int = 3,
+        allow_named_experts: bool = False,
     ) -> Dict[str, Any]:
         grouped: Dict[str, Dict[str, Any]] = {}
         product_order: List[str] = []
@@ -569,6 +577,8 @@ class FirmAPIClient:
                 positions[position_name] = []
             if expert_name and expert_name not in positions[position_name]:
                 positions[position_name].append(expert_name)
+            elif not expert_name:
+                positions[position_name].append(f"record-{len(positions[position_name]) + 1}")
 
         matrix: List[Dict[str, Any]] = []
         for product_name in product_order[: max(1, int(limit_products or 5))]:
@@ -578,7 +588,8 @@ class FirmAPIClient:
                 positions_payload.append(
                     {
                         "position_name": position_name,
-                        "experts": experts[: max(1, int(limit_experts or 4))],
+                        "expert_count": len(experts),
+                        "experts": experts[: max(1, int(limit_experts or 4))] if allow_named_experts else [],
                     }
                 )
             matrix.append(
@@ -610,10 +621,10 @@ class FirmAPIClient:
             product_name = item["product_name"]
             role_bits: List[str] = []
             for position in item.get("positions", []):
-                experts = position.get("experts", [])
-                if not experts:
+                expert_count = int(position.get("expert_count") or len(position.get("experts", []) or []))
+                if expert_count <= 0:
                     continue
-                role_bits.append(f"{position.get('position_name') or 'Tenaga Ahli'} - {', '.join(experts)}")
+                role_bits.append(f"{position.get('position_name') or 'Tenaga Ahli'} ({expert_count} tenaga/riwayat)")
             if role_bits:
                 line = f"{product_name}: " + "; ".join(role_bits)
                 guidance_lines.append(line)
@@ -704,14 +715,13 @@ class FirmAPIClient:
                 {
                     "project_name": project_name,
                     "product_name": str(record.get("product_name") or record.get("topic") or "").strip(),
-                    "expert_name": str(record.get("expert_name") or "").strip(),
                     "position_name": str(record.get("position_name") or "").strip(),
                 }
             )
 
         use_cases = self._dedupe_records(
             project_matches,
-            keys=("project_name", "product_name", "expert_name", "position_name"),
+            keys=("project_name", "product_name", "position_name"),
             limit=8,
         )
         history_format = self._format_project_expert_history(use_cases, limit_products=4)
@@ -759,8 +769,18 @@ class FirmAPIClient:
         terms = self._capability_terms(project_type, service_type, focus_terms)
         if not terms:
             return {"available": False, "summary": "", "matches": [], "expert_guidance": ""}
+        all_records = self.get_project_records()
+        mapped_all_records = [
+            {
+                "project_name": str(record.get("project_name") or record.get("entity") or "").strip(),
+                "product_name": str(record.get("product_name") or record.get("topic") or "").strip(),
+                "expert_name": str(record.get("expert_name") or "").strip(),
+                "position_name": str(record.get("position_name") or "").strip(),
+            }
+            for record in all_records
+        ]
         scored: List[Tuple[int, Dict[str, Any]]] = []
-        for record in self.get_project_records():
+        for record in mapped_all_records:
             project_name = str(record.get("project_name") or record.get("entity") or "").strip()
             product_name = str(record.get("product_name") or record.get("topic") or "").strip()
             haystack = f"{project_name} {product_name}".lower()
@@ -772,7 +792,6 @@ class FirmAPIClient:
                 {
                     "project_name": project_name,
                     "product_name": product_name,
-                    "expert_name": str(record.get("expert_name") or "").strip(),
                     "position_name": str(record.get("position_name") or "").strip(),
                     "matched_terms": [term for term in terms if term.lower() in haystack],
                 },
@@ -780,12 +799,18 @@ class FirmAPIClient:
         scored.sort(key=lambda item: (-item[0], str(item[1].get("project_name") or "").lower()))
         matches = self._dedupe_records(
             [item for _, item in scored],
-            keys=("project_name", "product_name", "expert_name", "position_name"),
+            keys=("project_name", "product_name", "position_name"),
             limit=max(1, int(limit or 5)),
         )
         if not matches:
             return {"available": False, "summary": "", "matches": [], "expert_guidance": ""}
         history_format = self._format_project_expert_history(matches, limit_products=max(1, int(limit or 5)))
+        intelligence = build_capability_intelligence(
+            mapped_all_records,
+            focus_terms=terms,
+            naturalize=self._naturalize_internal_text,
+            limit_cards=max(1, int(limit or 5)),
+        )
         return {
             "available": True,
             "summary": history_format.get("summary", ""),
@@ -793,6 +818,12 @@ class FirmAPIClient:
             "expert_guidance": history_format.get("expert_guidance", ""),
             "expert_history_summary": history_format.get("formatted_summary", ""),
             "product_expert_matrix": history_format.get("product_expert_matrix", []),
+            "aggregate_summary": intelligence.get("aggregate_summary", ""),
+            "evidence_cards": intelligence.get("evidence_cards", []),
+            "coverage_gaps": intelligence.get("coverage_gaps", []),
+            "total_record_count": intelligence.get("total_record_count", len(all_records)),
+            "usable_record_count": intelligence.get("usable_record_count", len(matches)),
+            "strongest_roles": intelligence.get("strongest_roles", []),
         }
 
     def get_expert_bench_context(self, limit_products: int = 8) -> Dict[str, Any]:
@@ -807,6 +838,11 @@ class FirmAPIClient:
                     "position_name": str(record.get("position_name") or "").strip(),
                 }
             )
+        intelligence = build_capability_intelligence(
+            mapped,
+            naturalize=self._naturalize_internal_text,
+            limit_cards=limit_products,
+        )
         product_counts = Counter(str(record.get("product_name") or "").strip() for record in mapped)
         formatted = self._format_project_expert_history(
             self._dedupe_records(
@@ -818,13 +854,14 @@ class FirmAPIClient:
                         str(item.get("project_name") or "").lower(),
                     ),
                 ),
-                keys=("project_name", "product_name", "expert_name", "position_name"),
+                keys=("project_name", "product_name", "position_name"),
                 limit=max(1, len(mapped)),
             ),
             limit_products=limit_products,
             limit_positions=5,
             limit_experts=5,
             limit_projects=2,
+            allow_named_experts=True,
         )
         if not formatted.get("available"):
             return {"available": False, "record_count": len(records), "summary": "", "product_expert_matrix": []}
@@ -835,7 +872,50 @@ class FirmAPIClient:
             "expert_guidance": formatted.get("expert_guidance", ""),
             "expert_history_summary": formatted.get("formatted_summary", ""),
             "product_expert_matrix": formatted.get("product_expert_matrix", []),
+            "aggregate_summary": intelligence.get("aggregate_summary", ""),
+            "evidence_cards": intelligence.get("evidence_cards", []),
+            "coverage_gaps": intelligence.get("coverage_gaps", []),
+            "total_record_count": intelligence.get("total_record_count", len(records)),
+            "usable_record_count": intelligence.get("usable_record_count", len(mapped)),
+            "strongest_roles": intelligence.get("strongest_roles", []),
+            "source": "internal_api",
+            "name_policy": {
+                "allow_named_specialists": True,
+                "allowed_use": "team_chapter_only",
+                "source": "ConsultantProjectExpertHistory",
+            },
         }
+
+    def get_framework_catalog(self) -> List[Dict[str, Any]]:
+        if self.demo_mode:
+            return []
+        resource_spec = dict((self.resource_config or {}).get("framework_catalog") or {})
+        if not resource_spec:
+            return []
+        try:
+            payload = self._request_from_spec(resource_spec)
+            response_path = str(resource_spec.get("response_path") or "").strip()
+            if response_path:
+                payload = self._extract_with_jmespath(payload, response_path)
+            records = payload if isinstance(payload, list) else []
+            field_mapping = resource_spec.get("field_mapping") or {}
+            mapped: List[Dict[str, Any]] = []
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                if field_mapping:
+                    item = {
+                        target_field: self._extract_with_jmespath(record, str(json_path))
+                        for target_field, json_path in field_mapping.items()
+                    }
+                else:
+                    item = dict(record)
+                if str(item.get("value") or item.get("label") or "").strip():
+                    mapped.append(item)
+            return mapped
+        except Exception as exc:
+            logger.warning("Internal framework catalog lookup failed: %s", exc)
+            return []
 
     def get_project_standards(self, project_type: str) -> Dict[str, str]:
         if self.demo_mode:
@@ -1229,6 +1309,9 @@ class DemoDataProvider:
     def get_expert_bench_context(self, limit_products: int = 8) -> Dict[str, Any]:
         return {"available": False, "record_count": 0, "summary": "", "product_expert_matrix": []}
 
+    def get_framework_catalog(self) -> List[Dict[str, Any]]:
+        return []
+
 
 class InternalDataClient:
     def __init__(self, force_source: str = "") -> None:
@@ -1327,6 +1410,12 @@ class InternalDataClient:
             logger.warning("Internal data fallback triggered for expert_bench_context")
             return self.demo_provider.get_expert_bench_context(limit_products)
         return context
+
+    def get_framework_catalog(self) -> List[Dict[str, Any]]:
+        if self.internal_data_source == "demo":
+            return []
+        catalog = self.api_provider.get_framework_catalog()
+        return catalog if isinstance(catalog, list) else []
 
     def doctor_snapshot(self, project_type: str = "Implementation", client_name: str = "PT Contoh Klien") -> Dict[str, Any]:
         snapshot: Dict[str, Any] = {

@@ -1394,14 +1394,11 @@ class AppStateStore:
                 certs = row.get("certifications", [])
                 cert_line = ", ".join(certs[:4]) if isinstance(certs, list) else str(certs or "")
                 role = str(row.get("proposed_role") or "Tenaga Ahli").strip()
-                name = str(row.get("name") or "").strip()
-                if not name:
-                    continue
                 suffix = f" dengan sertifikasi {cert_line}" if cert_line else ""
-                expert_bits.append(f"{name} ({role}{suffix})")
+                expert_bits.append(f"{role}{suffix}")
             if expert_bits:
                 return (
-                    "Kapabilitas internal didukung tenaga ahli bernama, termasuk "
+                    "Kapabilitas internal didukung peran tenaga ahli, termasuk "
                     + "; ".join(expert_bits)
                     + "."
                 )
@@ -1433,7 +1430,11 @@ class AppStateStore:
             parts.append(f"Sertifikasi inti meliputi {', '.join(certification_list)}")
         if parts:
             return ". ".join(parts) + "."
-        return cls._summarize_profile_blob(source, fallback, max_items=3)
+        source_without_names = "\n".join(
+            line for line in source.splitlines()
+            if not cls._looks_like_person_name(line)
+        )
+        return cls._summarize_profile_blob(source_without_names, fallback, max_items=3)
 
     @staticmethod
     def _looks_like_person_name(line: str) -> bool:
@@ -1549,8 +1550,8 @@ class AppStateStore:
         for item in kak_documents:
             item["is_active"] = bool(active_kak_document_id and str(item.get("id") or "") == active_kak_document_id)
         return {
-            "internal_portfolio": self._get_setting("internal_portfolio"),
-            "internal_credentials": self._get_setting("internal_credentials"),
+            "internal_portfolio": "",
+            "internal_credentials": "",
             "active_template_name": self._get_setting("active_template_name"),
             "active_kak_document_id": active_kak_document_id,
             "has_active_template": bool(template_path and Path(template_path).exists()),
@@ -1559,9 +1560,7 @@ class AppStateStore:
             "kak_documents": kak_documents,
         }
 
-    def save_settings(self, internal_portfolio: str = "", internal_credentials: str = "") -> Dict[str, Any]:
-        self._set_setting("internal_portfolio", formalize_caps_text(internal_portfolio or ""))
-        self._set_setting("internal_credentials", formalize_caps_text(internal_credentials or ""))
+    def save_settings(self) -> Dict[str, Any]:
         return self.get_settings()
 
     def build_generation_context(self, company_candidates: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -1569,17 +1568,12 @@ class AppStateStore:
         settings = self.get_settings()
         portfolio_lines = compact_context_lines(
             [
-                settings.get("internal_portfolio", ""),
                 self._collect_supporting_document_text("portfolio", max_documents=3, max_words=120),
             ],
             limit=4,
         )
         credential_lines = compact_context_lines(
             [
-                self._summarize_credential_blob(
-                    str(settings.get("internal_credentials") or ""),
-                    "",
-                ),
                 self._collect_supporting_document_text("credentials", max_documents=3, max_words=100),
             ],
             limit=4,
@@ -1717,13 +1711,10 @@ class AppStateStore:
 
     def enrich_firm_profile(self, firm_profile: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         profile = dict(firm_profile or {})
-        internal_portfolio = self._get_setting("internal_portfolio", "")
-        internal_credentials = self._get_setting("internal_credentials", "")
         portfolio_docs_text = self._collect_supporting_document_text("portfolio", max_documents=4, max_words=180)
         credential_docs_text = self._collect_supporting_document_text("credentials", max_documents=4, max_words=160)
         portfolio_bits = [
             str(profile.get("portfolio_highlights") or "").strip(),
-            internal_portfolio.strip(),
             portfolio_docs_text.strip(),
         ]
         portfolio_text = " ; ".join([item for item in portfolio_bits if item])
@@ -1734,7 +1725,6 @@ class AppStateStore:
             )
         credential_bits = [
             str(profile.get("credential_highlights") or "").strip(),
-            internal_credentials.strip(),
             credential_docs_text.strip(),
         ]
         credential_text = " ; ".join([item for item in credential_bits if item])
@@ -1744,8 +1734,8 @@ class AppStateStore:
                 str(profile.get("credential_highlights") or "").strip() or "Kapabilitas inti dan sertifikasi relevan perusahaan penyusun.",
             )
             profile["internal_expert_rows"] = self._extract_internal_expert_rows(credential_text)
-        structured_rows = self._parse_structured_portfolio_rows(internal_portfolio)
-        if not structured_rows and "|" in portfolio_docs_text:
+        structured_rows = []
+        if "|" in portfolio_docs_text:
             structured_rows = self._parse_structured_portfolio_rows(portfolio_docs_text)
         if not structured_rows:
             structured_rows = self._fallback_portfolio_rows_from_text(portfolio_docs_text)

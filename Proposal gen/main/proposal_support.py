@@ -2558,7 +2558,6 @@ class ProposalSupportMixin:
             for raw in raw_rows[:5]:
                 if not isinstance(raw, dict):
                     continue
-                name = cls._normalize_prose_fragment(str(raw.get("name") or ""))
                 role = cls._normalize_prose_fragment(str(raw.get("proposed_role") or "Tenaga Ahli"))
                 certs = raw.get("certifications") or []
                 if isinstance(certs, list):
@@ -2567,11 +2566,11 @@ class ProposalSupportMixin:
                     cert_line = cls._normalize_prose_fragment(str(certs or ""))
                 assignment = cls._normalize_prose_fragment(str(raw.get("assignment_role") or ""))
                 years = cls._normalize_prose_fragment(str(raw.get("experience_years") or ""))
-                if not name:
+                if not role:
                     continue
                 rows.append(
                     {
-                        "peran": f"{name} - {role}",
+                        "peran": role,
                         "fokus": assignment or f"mengawal area {service_type.lower()} dan kebutuhan {project_type.lower()}",
                         "kompetensi": cert_line or "pengalaman konsultasi dan pengendalian mutu delivery",
                         "keterlibatan": f"aktif sesuai fase kritikal; pengalaman {years}" if years else "aktif sesuai fase kritikal dan kebutuhan review",
@@ -2593,47 +2592,73 @@ class ProposalSupportMixin:
         ai_mode: bool = False,
     ) -> List[Dict[str, str]]:
         context = bench_context if isinstance(bench_context, dict) else {}
+        name_policy = context.get("name_policy") if isinstance(context.get("name_policy"), dict) else {}
+        allow_names = (
+            bool(name_policy.get("allow_named_specialists"))
+            and str(name_policy.get("source") or "").strip() == "ConsultantProjectExpertHistory"
+            and str(context.get("source") or "").strip() == "internal_api"
+        )
         matrix = context.get("product_expert_matrix") or []
         rows: List[Dict[str, str]] = []
-        seen_roles = set()
+        seen_products = set()
         for product in matrix[:6]:
             if not isinstance(product, dict):
                 continue
             product_name = cls._normalize_prose_fragment(product.get("product_name") or "")
+            if not product_name:
+                continue
+            product_key = product_name.lower()
+            if product_key in seen_products:
+                continue
+            seen_products.add(product_key)
             examples = product.get("project_examples") or []
             example_line = cls._human_join(
                 [cls._summarize_phrase(item, "", max_words=5) for item in examples[:2]],
                 fallback="riwayat proyek internal terkait",
                 max_items=2,
             )
-            for position in (product.get("positions") or [])[:4]:
+            positions = []
+            experts: List[str] = []
+            expert_count = 0
+            for position in (product.get("positions") or [])[:5]:
                 if not isinstance(position, dict):
                     continue
                 position_name = cls._normalize_prose_fragment(position.get("position_name") or "Tenaga Ahli")
                 if position_name.lower() in {"formatter", "surveyor", "presenter 1", "presenter 2", "asisten presenter"}:
                     continue
-                role_key = (position_name.lower(), product_name.lower())
-                if role_key in seen_roles:
-                    continue
-                seen_roles.add(role_key)
-                experts = [cls._normalize_prose_fragment(item) for item in (position.get("experts") or []) if cls._normalize_prose_fragment(item)]
-                expert_count = len(experts)
-                role_label = position_name
-                competence = (
-                    f"tercatat pada {expert_count} tenaga/riwayat untuk {product_name}; contoh lingkup: {example_line}"
-                    if expert_count
-                    else f"riwayat proyek internal pada {product_name or 'lingkup terkait'}"
-                )
-                rows.append(
-                    {
-                        "peran": role_label,
-                        "fokus": f"mengawal lingkup {product_name.lower() if product_name else project_type.lower()} agar deliverable selaras dengan kebutuhan {client}",
-                        "kompetensi": competence,
-                        "keterlibatan": "aktif pada fase analisis, desain, review mutu, dan acceptance sesuai kebutuhan workstream",
-                    }
-                )
-                if len(rows) >= 5:
-                    return rows
+                if position_name and position_name not in positions:
+                    positions.append(position_name)
+                position_experts = [
+                    cls._normalize_prose_fragment(item)
+                    for item in (position.get("experts") or [])
+                    if cls._normalize_prose_fragment(item)
+                ]
+                for expert in position_experts:
+                    if expert not in experts:
+                        experts.append(expert)
+                expert_count += int(position.get("expert_count") or len(position_experts))
+            if not positions and not experts:
+                continue
+            name_suffix = ""
+            if allow_names and experts:
+                name_suffix = " - " + cls._human_join(experts[:3], fallback="", max_items=3)
+            role_label = f"Lead Workstream {product_name}{name_suffix}"
+            role_coverage = cls._human_join(positions[:4], fallback="peran pelaksana dan reviewer", max_items=4)
+            competence = (
+                f"riwayat internal pada {product_name} mencakup {expert_count} tenaga/riwayat, contoh lingkup {example_line}, dan cakupan peran {role_coverage}"
+                if expert_count
+                else f"riwayat proyek internal pada {product_name} dengan cakupan peran {role_coverage}"
+            )
+            rows.append(
+                {
+                    "peran": role_label,
+                    "fokus": f"mengarahkan workstream {product_name.lower()} menjadi keluaran yang relevan, dapat direview, dan selaras dengan kebutuhan {client}",
+                    "kompetensi": competence,
+                    "keterlibatan": "intens pada discovery, desain target, validasi artefak, review mutu, dan serah terima workstream",
+                }
+            )
+            if len(rows) >= 5:
+                return rows
         if rows:
             return rows[:5]
         return cls._expert_rows(project_type, service_type, regulations, team_points, ai_mode=ai_mode)
@@ -4286,6 +4311,8 @@ class ProposalSupportMixin:
             settings_context = str((supporting_context or {}).get("settings_context") or "").strip()
             kak_supporting_context = str((supporting_context or {}).get("kak_context") or "").strip()
             client_internal_context = str((supporting_context or {}).get("client_internal_context") or "").strip()
+            evidence_card_prompt = str((supporting_context or {}).get("evidence_card_prompt") or "").strip()
+            scope_contract_prompt = str((supporting_context or {}).get("scope_contract_prompt") or "").strip()
             expert_bench_context = (supporting_context or {}).get("expert_bench_context") or {}
             ai_posture = research_bundle.get("ai_posture", "")
             ai_guidance = str((ai_profile.get("chapter_guidance") or {}).get(chapter.get("id", ""), "")).strip()
@@ -4316,6 +4343,16 @@ class ProposalSupportMixin:
                 expert_bench_context=expert_bench_context,
                 chapter_chain_context=chapter_chain_context,
             )
+            if evidence_card_prompt:
+                extra += (
+                    f" [EVIDENCE_CARDS] Gunakan hanya evidence cards terkurasi berikut sebagai bahan klaim faktual bab ini. "
+                    f"Jangan menampilkan label evidence card, keyakinan, atau sumber di dokumen final: {evidence_card_prompt}"
+                )
+            if scope_contract_prompt and chapter.get("id") not in {"c_1", "c_2", "c_7"}:
+                extra += (
+                    f" [SCOPE_CONTRACT] {scope_contract_prompt} "
+                    "Seluruh narasi bab ini harus tunduk pada batas tersebut; hal di luar cakupan hanya boleh muncul sebagai batasan, bukan komitmen."
+                )
             if settings_context:
                 extra += (
                     f" [SETTINGS_CONTEXT] Gunakan konteks pengaturan internal berikut hanya sebagai penguat, "

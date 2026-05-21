@@ -5,6 +5,7 @@ from .document_rendering import DocumentBuilder, LogoManager, StyleEngine
 from .executive_summary import ExecutiveSummaryBuilder
 from .research import Researcher
 from .proposal_support import ProposalSupportMixin
+from .proposal_quality_pipeline import EvidenceDeckBuilder, ProposalQualityGate, ScopeContractExtractor
 from .text_hygiene import naturalize_generation_text
 
 
@@ -405,7 +406,7 @@ class ProposalEngineMixin:
         firm_profile = self.firm_api.get_firm_profile()
         if app_state_store:
             firm_profile = app_state_store.enrich_firm_profile(firm_profile)
-        includes_writer_profile = any(chapter.get("id") == "c_closing" for chapter in selected_chapters)
+        includes_writer_profile = any(chapter.get("id") in {"c_11", "c_closing"} for chapter in selected_chapters)
         writer_firm_profile = (
             self._build_writer_firm_evidence_profile(firm_profile)
             if includes_writer_profile
@@ -494,7 +495,21 @@ class ProposalEngineMixin:
         chapter_map = {chapter['id']: chapter for chapter in selected_chapters}
         chapter_prompts: Dict[str, str] = {}
         chapter_outputs: Dict[str, str] = {}
+        scope_contract: Dict[str, List[str]] = {}
+        evidence_deck = EvidenceDeckBuilder.build(
+            client=client,
+            project=project,
+            project_goal=project_goal,
+            timeline=timeline,
+            budget=budget,
+            research_bundle=research_bundle,
+            internal_context=str(supporting_context.get("client_internal_context") or ""),
+            value_map=value_map,
+            scope_contract=scope_contract,
+        )
         for chapter in selected_chapters:
+            supporting_context["evidence_card_prompt"] = evidence_deck.for_chapter(chapter["id"])
+            supporting_context["scope_contract_prompt"] = ScopeContractExtractor.to_prompt_text(scope_contract)
             chapter_chain_context = self._build_chapter_chain_context(
                 chapter=chapter,
                 selected_chapters=selected_chapters,
@@ -553,6 +568,19 @@ class ProposalEngineMixin:
                             "yang cukup; silakan tambahkan secara manual."
                         )
                 chapter_outputs[chapter['id']] = cleaned_content
+                if chapter["id"] == "c_7":
+                    scope_contract = ScopeContractExtractor.extract(cleaned_content)
+                    evidence_deck = EvidenceDeckBuilder.build(
+                        client=client,
+                        project=project,
+                        project_goal=project_goal,
+                        timeline=timeline,
+                        budget=budget,
+                        research_bundle=research_bundle,
+                        internal_context=str(supporting_context.get("client_internal_context") or ""),
+                        value_map=value_map,
+                        scope_contract=scope_contract,
+                    )
                 continue
             ctx = self._build_chapter_prompt(
                 chapter,
@@ -589,6 +617,19 @@ class ProposalEngineMixin:
                     allowed_external_citations=allowed_external_citations,
                     personalization_pack=personalization_pack
                 )
+                if chapter["id"] == "c_7":
+                    scope_contract = ScopeContractExtractor.extract(chapter_outputs[chapter["id"]])
+                    evidence_deck = EvidenceDeckBuilder.build(
+                        client=client,
+                        project=project,
+                        project_goal=project_goal,
+                        timeline=timeline,
+                        budget=budget,
+                        research_bundle=research_bundle,
+                        internal_context=str(supporting_context.get("client_internal_context") or ""),
+                        value_map=value_map,
+                        scope_contract=scope_contract,
+                    )
             except Exception as e:
                 logger.error(f"Generation Error for {chapter['title']}: {e}")
 
@@ -829,7 +870,7 @@ class ProposalEngineMixin:
             theme_color=theme_color,
             logo_stream=logo_stream,
         )
-        executive_summary = ExecutiveSummaryBuilder.build(
+        executive_summary = ExecutiveSummaryBuilder.build_from_chapters(
             client=client,
             project=project,
             project_goal=project_goal,
@@ -838,7 +879,20 @@ class ProposalEngineMixin:
             value_map=value_map,
             personalization_pack=personalization_pack,
             selected_chapters=selected_chapters,
+            chapter_outputs=chapter_outputs,
         )
+        final_quality_gate = ProposalQualityGate.evaluate(
+            chapter_outputs=chapter_outputs,
+            selected_chapters=selected_chapters,
+            scope_contract=scope_contract,
+            executive_summary=executive_summary,
+        )
+        if not final_quality_gate["passes"]:
+            logger.warning(
+                "Final proposal QA findings | categories=%s | findings=%s",
+                final_quality_gate["categories"],
+                final_quality_gate["findings"],
+            )
         DocumentBuilder.process_content(doc, executive_summary, theme_color, "Ringkasan Eksekutif")
         doc.add_page_break()
         DocumentBuilder.add_table_of_contents(
@@ -899,6 +953,9 @@ class ProposalEngineMixin:
                 is_first_chapter=is_first_rendered_chapter,
             )
             DocumentBuilder.process_content(doc, content, theme_color, chapter['title'])
+            if chapter['id'] == "c_11" and not rendered_firm_profile:
+                DocumentBuilder.add_writer_firm_profile_section(doc, writer_firm_profile, theme_color)
+                rendered_firm_profile = True
             if chapter['id'] == "c_closing" and not rendered_firm_profile:
                 DocumentBuilder.add_writer_firm_profile_section(doc, writer_firm_profile, theme_color)
                 rendered_firm_profile = True
@@ -918,6 +975,8 @@ class ProposalEngineMixin:
             "generated_words": generated_words,
             "using_template": using_template,
             "proposal_mode": proposal_mode,
+            "final_quality_gate": final_quality_gate,
+            "scope_contract": scope_contract,
         }
         return doc, base_name.replace(" ", "_"), metadata
 

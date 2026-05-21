@@ -84,12 +84,33 @@ class InternalApiRefreshTest(unittest.TestCase):
         script = "\n".join(script.string or "" for script in soup.find_all("script"))
 
         self.assertIsNotNone(save_button)
-        self.assertEqual(save_button.text.strip(), "Simpan & Aktifkan Internal API")
+        self.assertEqual(save_button.text.strip(), "Simpan & Aktifkan API Internal")
         self.assertIsNotNone(refresh_button)
         self.assertIn("Muat Ulang Data Sekarang", refresh_button.text)
+        self.assertIsNone(soup.select_one("#settings-portfolio"))
+        self.assertIsNone(soup.select_one("#settings-credentials"))
+        self.assertIsNone(soup.select_one("#btn-save-settings"))
+        self.assertIsNotNone(soup.select_one("#settings-portfolio-files"))
+        self.assertIsNotNone(soup.select_one("#settings-credential-files"))
+        self.assertIn("Sumber portofolio tidak diisi manual", soup.get_text(" "))
+        self.assertIn("Sumber kapabilitas, sertifikasi, dan tenaga ahli tidak diisi manual", soup.get_text(" "))
+        self.assertNotIn("btnSaveSettings", script)
+        self.assertNotIn("settingsPortfolio:", script)
+        self.assertNotIn("settingsCredentials:", script)
         self.assertIn("setInternalApiConnectionState", script)
         self.assertIn("api_connection_active", script)
         self.assertIn("/api/internal-api/refresh", script)
+        self.assertIn("source-status-grid", template)
+        self.assertIn("readinessResources", script)
+        self.assertIn("readiness: data.readiness", script)
+        self.assertIn("renderFrameworkOptions(config)", script)
+        self.assertIn("config.framework_options", script)
+        self.assertIn("applyKakSuggestions(latestKakSuggestions, true)", script)
+        self.assertIn("field yang masih kosong", script)
+        self.assertNotIn("Sumber data proyek", script)
+        self.assertNotIn("data.config_file", script)
+        self.assertNotIn("missing_required_mapping", script)
+        self.assertNotIn("mapped_fields", script)
 
     def test_internal_api_setup_treats_environment_resource_config_as_active(self) -> None:
         client = self.app.test_client()
@@ -115,6 +136,7 @@ class InternalApiRefreshTest(unittest.TestCase):
         payload = response.get_json()
         self.assertTrue(payload["api_connection_active"])
         self.assertTrue(payload["can_refresh_dataset"])
+        self.assertIn("readiness", payload)
 
     def test_internal_api_activation_payload_shape_is_stable(self) -> None:
         from main.internal_api_runtime import internal_api_activation_payload
@@ -137,7 +159,36 @@ class InternalApiRefreshTest(unittest.TestCase):
         self.assertTrue(payload["api_connection_active"])
         self.assertTrue(payload["can_refresh_dataset"])
         self.assertEqual(payload["connection_label"], "Aktif memakai Internal API/APIDog")
+        self.assertIn("readiness", payload)
         self.assertEqual(payload["validation"], {"ok": True})
+
+    def test_internal_api_readiness_hides_mapping_details_behind_labels(self) -> None:
+        from main.internal_api_runtime import internal_api_readiness
+
+        payload = internal_api_readiness(
+            {
+                "resources": {
+                    "account_records": {
+                        "ok": True,
+                        "mapped_fields": ["company_name"],
+                        "missing_required_mapping": [],
+                    },
+                    "project_records": {
+                        "ok": False,
+                        "mapped_fields": ["project_name"],
+                        "missing_required_mapping": ["topic"],
+                    },
+                }
+            }
+        )
+
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["resources"][0]["label"], "Daftar klien")
+        self.assertEqual(payload["resources"][0]["status_label"], "Siap otomatis")
+        self.assertEqual(payload["resources"][1]["label"], "Riwayat proyek & tenaga ahli")
+        self.assertEqual(payload["resources"][1]["missing_required_count"], 1)
+        self.assertNotIn("mapped_fields", payload["resources"][0])
+        self.assertNotIn("missing_required_mapping", payload["resources"][1])
 
     def test_internal_api_refresh_payload_shape_is_stable(self) -> None:
         from main.internal_api_runtime import internal_api_refresh_payload

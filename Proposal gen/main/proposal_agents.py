@@ -241,7 +241,8 @@ class ProposalAgentWorkflow:
 
         if isinstance(expert_bench_context, dict):
             expert_text = (
-                expert_bench_context.get("expert_history_summary")
+                expert_bench_context.get("aggregate_summary")
+                or expert_bench_context.get("expert_history_summary")
                 or expert_bench_context.get("expert_guidance")
                 or expert_bench_context.get("summary")
                 or ""
