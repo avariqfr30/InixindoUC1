@@ -28,6 +28,7 @@ class ContextNaturalizationTest(unittest.TestCase):
         self.assertNotIn("ReferenceAccount", cleaned)
         self.assertNotIn("Pembina Tk", cleaned)
         self.assertNotIn("Data internal", cleaned)
+        self.assertNotIn("Identitas akun internal", cleaned)
 
     def test_literal_ui_tokens_are_reframed_as_business_context(self) -> None:
         from main.text_hygiene import naturalize_generation_text
@@ -73,6 +74,7 @@ class ContextNaturalizationTest(unittest.TestCase):
 
         self.assertNotIn("Konteks akun internal", cleaned)
         self.assertNotIn("Gunakan informasi ini", cleaned)
+        self.assertNotIn("identitas akun internal", cleaned.lower())
         self.assertIn("penajaman kebutuhan", cleaned)
         self.assertIn("Accelbyte", cleaned)
 
@@ -136,8 +138,9 @@ class ContextNaturalizationTest(unittest.TestCase):
 
         self.assertIn("roadmap kerja", cleaned)
         self.assertIn("Ajinomoto Indonesia", cleaned)
-        self.assertIn("bukan sebagai tujuan proyek", cleaned)
+        self.assertIn("latar segmentasi dan lokasi", cleaned)
         self.assertNotIn("teridentifikasi sebagai klien", cleaned)
+        self.assertNotIn("identitas akun internal", cleaned.lower())
 
     def test_spbe_problem_does_not_trigger_fake_channel_adoption_kpi(self) -> None:
         from main.proposal_support import ProposalSupportMixin

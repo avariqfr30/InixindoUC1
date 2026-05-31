@@ -67,6 +67,65 @@ class FrameworkCatalogTest(unittest.TestCase):
         self.assertEqual(service.options()["source"], "internal_api")
         self.assertEqual(service.resolve("SPBE"), "Perpres SPBE No. 95 Tahun 2018")
 
+    def test_reference_framework_records_expose_versions_and_osint_evidence(self) -> None:
+        from main.framework_catalog import FrameworkCatalogService
+
+        provider = Mock()
+        provider.get_framework_catalog.return_value = [
+            {
+                "value": "ITIL",
+                "label": "ITIL",
+                "description": "Service management framework.",
+                "issuer": "Axelos",
+                "versions": [
+                    {
+                        "value": "ITIL v3",
+                        "label": "ITIL v3 / 2011",
+                        "description": "Lifecycle service management.",
+                    },
+                    {
+                        "value": "ITIL 4",
+                        "label": "ITIL 4",
+                        "description": "Service value system.",
+                    },
+                ],
+            }
+        ]
+        researcher = Mock()
+        researcher.search.return_value = [
+            {
+                "title": "ITIL 4 Foundation",
+                "link": "https://www.axelos.com/itil",
+                "snippet": "ITIL is a framework for IT service management.",
+            }
+        ]
+
+        payload = FrameworkCatalogService(provider, researcher=researcher).options()
+
+        option = payload["options"][0]
+        self.assertEqual(option["value"], "ITIL")
+        self.assertEqual([item["value"] for item in option["versions"]], ["ITIL v3", "ITIL 4"])
+        self.assertEqual(option["recommended_version"], "ITIL 4")
+        self.assertEqual(option["osint_evidence"][0]["url"], "https://www.axelos.com/itil")
+        researcher.search.assert_called_once()
+
+    def test_resolves_selected_reference_framework_version(self) -> None:
+        from main.framework_catalog import FrameworkCatalogService
+
+        provider = Mock()
+        provider.get_framework_catalog.return_value = [
+            {
+                "value": "ITIL",
+                "label": "ITIL",
+                "versions": [
+                    {"value": "ITIL v3", "label": "ITIL v3 / 2011"},
+                    {"value": "ITIL 4", "label": "ITIL 4"},
+                ],
+            }
+        ]
+
+        self.assertEqual(FrameworkCatalogService(provider).resolve("ITIL 4"), "ITIL 4")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -81,6 +81,20 @@ class ProposalAgentWorkflow:
         },
     }
 
+    SINGLE_MODEL_DESK_POLICY = (
+        "[SINGLE_MODEL_DESK_POLICY] "
+        "All specialist passes run on the same configured model instance. Do not route by model name, do not imply multiple models, "
+        "and do not mention model architecture in the proposal. Separation is created only through role prompts, evidence lanes, "
+        "schema-bound outputs, cached context, and deterministic validators."
+    )
+
+    DESK_OUTPUT_CONTRACT = (
+        "[DESK_OUTPUT_CONTRACT] "
+        "Research and internal-data passes must output evidence cards; strategy and solution passes may output decisions; "
+        "risk/compliance must output rejected claims or caveats; editor/main may output final prose. "
+        "Final prose may use only accepted facts, accepted decisions, and resolved caveats."
+    )
+
     CHAPTER_SPECIALIST_AGENT_MAP: Dict[str, List[str]] = {
         "c_1": ["client_intelligence", "capability_evidence"],
         "c_2": ["client_intelligence", "framework_regulatory"],
@@ -271,6 +285,11 @@ class ProposalAgentWorkflow:
             "[RISK_COMPLIANCE_AGENT] Risk & Compliance Agent must mark unsupported claims, missing caveats, data gaps, fake specificity, and weak assumptions as rejected or needs-review before prose. "
             "[EDITOR_MAIN_AGENT] Editor/Main Agent assembles final user-facing content only from accepted evidence cards, rejected claims, and style rules."
         )
+        quality_gate = (
+            "[DESK_QUALITY_GATE] "
+            "Before final prose, reject raw UI helper text, backend labels, source paths, endpoint names, status summaries, ungrounded numbers, "
+            "and repeated fallback sentences. If two specialist lanes conflict, prefer the narrower sourced claim or write the caveat naturally."
+        )
         efficiency_policy = (
             "[EFFICIENCY_POLICY] "
             "Optimize for user wait time: keep this as a single model pass per chapter; reuse cached research_bundle, cached internal API context, and prior chapter_chain_context. "
@@ -319,8 +338,11 @@ class ProposalAgentWorkflow:
             f"Konteks internal klien sebagai latar: {internal_brief}. "
             f"Basis kapabilitas internal/tenaga ahli: {expert_brief}. "
             f"Profil personalisasi klien: {profile_brief or 'sesuaikan dengan konteks klien yang tersedia'}. "
+            f"{cls.SINGLE_MODEL_DESK_POLICY} "
+            f"{cls.DESK_OUTPUT_CONTRACT} "
             f"{evidence_schema} "
             f"{evidence_pipeline} "
+            f"{quality_gate} "
             f"{efficiency_policy} "
             f"{' '.join(specialist_blocks)} "
             "[MAIN_SYNTHESIS_AGENT] "

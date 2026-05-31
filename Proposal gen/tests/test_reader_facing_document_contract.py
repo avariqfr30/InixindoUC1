@@ -13,8 +13,10 @@ if str(ROOT) not in sys.path:
 from main.document_rendering import DocumentBuilder
 from main.executive_summary import ExecutiveSummaryBuilder
 from main.finance import FinancialAnalyzer
+from main.proposal_support import ProposalSupportMixin
 from main.reader_facing_hygiene import sanitize_reader_facing_sources
-from main.config import UNIVERSAL_STRUCTURE
+from main.text_hygiene import naturalize_generation_text
+from main.config import KAK_RESPONSE_STRUCTURE, UNIVERSAL_STRUCTURE
 
 
 class ReaderFacingDocumentContractTests(unittest.TestCase):
@@ -41,6 +43,25 @@ class ReaderFacingDocumentContractTests(unittest.TestCase):
         closing = UNIVERSAL_STRUCTURE[-1]
         self.assertIn("post-flowchart", closing["keywords"])
         self.assertIn("email", closing["length_intent"].lower())
+
+    def test_kak_response_chapters_keep_bab_3_to_8_reference_structure(self):
+        expected = [
+            ("k_1", "BAB 1: DATA INFORMASI DAN PENGALAMAN PERUSAHAAN"),
+            ("k_2", "BAB 2: TANGGAPAN DAN SARAN TERHADAP KERANGKA ACUAN KERJA"),
+            ("k_3", "BAB 3: PENDEKATAN DAN METODOLOGI"),
+            ("k_4", "BAB 4: PROGRAM KERJA DAN JADWAL PENUGASAN"),
+            ("k_5", "BAB 5: STRUKTUR ORGANISASI KOMPOSISI TIM DAN URAIAN TUGAS"),
+            ("k_6", "BAB 6: HASIL KERJA (DELIVERABLE)"),
+            ("k_7", "BAB 7: FASILITAS PENDUKUNG PELAKSANAAN PEKERJAAN"),
+            ("k_8", "BAB 8: INOVASI GAGASAN BARU"),
+            ("c_closing", "PENUTUP & APRESIASI KEMITRAAN"),
+        ]
+
+        self.assertEqual([(chapter["id"], chapter["title"]) for chapter in KAK_RESPONSE_STRUCTURE], expected)
+        methodology = KAK_RESPONSE_STRUCTURE[2]
+        self.assertEqual(methodology["subs"], ["3.1 Pemilihan Framework", "3.2 Metodologi Pekerjaan"])
+        timeline = KAK_RESPONSE_STRUCTURE[3]
+        self.assertEqual(timeline["subs"], ["4.1 Program Kerja / Timeline", "4.2 Tabel Penugasan Tenaga Ahli"])
 
     def test_team_chapter_is_the_writer_firm_capability_home(self):
         team_chapter = next(chapter for chapter in UNIVERSAL_STRUCTURE if chapter["id"] == "c_11")
@@ -71,6 +92,9 @@ class ReaderFacingDocumentContractTests(unittest.TestCase):
             "ReferenceDataset",
             "ReferenceAccount",
             "ConsultantProjectExpertHistory",
+            "Identitas akun internal",
+            "Konteks akun internal",
+            "Gunakan informasi ini",
             "source-of-truth",
             "cache",
             "sync",
@@ -293,6 +317,30 @@ class ReaderFacingDocumentContractTests(unittest.TestCase):
         self.assertIn("tonggak kerja", summary)
         self.assertLess(len(summary.split()), 520)
 
+    def test_executive_summary_prefers_substantive_chapter_signals_over_boilerplate(self):
+        chapters = [{"id": "c_6", "title": "BAB VII – SOLUTION DESIGN"}]
+        chapter_outputs = {
+            "c_6": (
+                "Pembahasan pada bagian ini perlu menjelaskan keputusan kerja dan konteks bisnis.\n"
+                "- Fokus utama harus tetap pada apa yang perlu dipertegas.\n\n"
+                "Keluaran utama yang perlu disetujui adalah arsitektur target, matriks prioritas, "
+                "dan KPI operasional untuk mengendalikan risiko implementasi."
+            )
+        }
+
+        summary = ExecutiveSummaryBuilder.build_from_chapters(
+            client="PT Contoh",
+            project="Transformasi Layanan Digital",
+            project_goal="tata kelola layanan digital",
+            selected_chapters=chapters,
+            chapter_outputs=chapter_outputs,
+        )
+
+        self.assertIn("arsitektur target", summary)
+        self.assertIn("KPI operasional", summary)
+        self.assertNotIn("Pembahasan pada bagian ini", summary)
+        self.assertNotIn("Fokus utama harus tetap", summary)
+
     def test_budget_recommendation_uses_silent_scope_contract(self):
         narrow = FinancialAnalyzer._dynamic_budget_from_osint(
             "PT Contoh",
@@ -355,6 +403,7 @@ class ReaderFacingDocumentContractTests(unittest.TestCase):
         )
 
         self.assertNotIn("Konteks akun internal", summary)
+        self.assertNotIn("Identitas akun internal", summary)
         self.assertNotIn("Gunakan informasi ini", summary)
         self.assertNotIn("BAB I", summary)
         self.assertNotIn("BAB IX", summary)
@@ -374,6 +423,44 @@ class ReaderFacingDocumentContractTests(unittest.TestCase):
 
         self.assertNotIn("Problem, Opportunity, Directive", summary)
         self.assertIn("kebutuhan prioritas yang perlu dipertegas", summary)
+
+    def test_account_context_naturalizer_does_not_emit_internal_identity_helper(self):
+        clean = naturalize_generation_text(
+            (
+                "Data internal ReferenceAccount mencatat Accelbyte "
+                "(lokasi Daerah Istimewa Yogyakarta; segmentasi SWASTA / Swasta)."
+            ),
+            field="konteks_organisasi",
+            client_name="Accelbyte",
+        )
+
+        self.assertIn("Accelbyte", clean)
+        self.assertNotIn("Identitas akun internal", clean)
+        self.assertNotIn("identitas akun internal", clean)
+        self.assertNotIn("Data internal", clean)
+        self.assertNotIn("ReferenceAccount", clean)
+        self.assertNotIn("segmentasi SWASTA / Swasta", clean)
+
+    def test_missing_heading_repair_uses_chapter_specific_non_boilerplate_content(self):
+        chapter = {
+            "id": "c_11",
+            "title": "BAB X – STRUKTUR & TEAM PROYEK",
+            "subs": ["10.1 Struktur Tim Proyek", "10.2 Kapabilitas Konsultan, Pengalaman, dan Sertifikasi"],
+        }
+
+        repaired = ProposalSupportMixin()._ensure_required_headings(chapter, "")
+
+        self.assertIn("## 10.1 Struktur Tim Proyek", repaired)
+        self.assertIn("## 10.2 Kapabilitas Konsultan, Pengalaman, dan Sertifikasi", repaired)
+        for forbidden in [
+            "Pembahasan pada bagian ini perlu menjelaskan",
+            "Pembahasan pada Pembahasan ini",
+            "Fokus utama harus tetap pada apa yang perlu dipertegas",
+            "Risiko, dependensi, dan indikator hasil perlu dijelaskan",
+        ]:
+            self.assertNotIn(forbidden, repaired)
+        self.assertIn("struktur kerja", repaired.lower())
+        self.assertIn("kapabilitas", repaired.lower())
 
 
 if __name__ == "__main__":

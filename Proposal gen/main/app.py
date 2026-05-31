@@ -49,6 +49,7 @@ from .config import (
 from .auth_flow import AuthFlow
 from .core import ProposalGenerator
 from .finance import FinancialAnalyzer
+from .internal_evidence_summary import build_internal_evidence_summary
 from .job_queue import GenerationQueue
 from .knowledge_store import KnowledgeBase
 from .proposal_request_service import BUDGET_REQUIRED_FIELDS, ProposalRequestService
@@ -593,6 +594,16 @@ def proposal_settings():
         return jsonify(app_state_store.settings.get_settings())
 
     return jsonify(app_state_store.settings.save_settings())
+
+
+@app.route('/api/settings/internal-evidence')
+def proposal_internal_evidence():
+    try:
+        bench_context = proposal_generator.firm_api.get_expert_bench_context(limit_products=8)
+        return jsonify(build_internal_evidence_summary(bench_context))
+    except Exception:
+        logger.exception("Internal evidence summary failed")
+        return jsonify(build_internal_evidence_summary({}))
 
 
 @app.route('/api/settings/template', methods=['POST', 'DELETE'])

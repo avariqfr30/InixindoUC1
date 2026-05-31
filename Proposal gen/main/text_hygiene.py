@@ -256,7 +256,7 @@ def naturalize_generation_text(value: Any, field: str = "", client_name: str = "
     ):
         return (
             f"penajaman kebutuhan, ruang lingkup, dan roadmap kerja yang relevan bagi {client}; "
-            "identitas akun internal dipakai sebagai konteks latar untuk memahami profil klien, bukan sebagai tujuan proyek."
+            "profil klien yang tersedia dipakai sebagai latar segmentasi dan lokasi."
         )
 
     text = re.sub(r"(?im)^\s*pembina\s+tk\.?\s*[ivxlcdm]+,\s*[ivxlcdm]+/[a-z]\s*$", "", text)
@@ -276,7 +276,7 @@ def naturalize_generation_text(value: Any, field: str = "", client_name: str = "
             segment_match = re.search(r"segmentasi\s+(.+)$", details, flags=re.IGNORECASE)
             location = normalize_spacing(location_match.group(1)) if location_match else ""
             classification = normalize_spacing(segment_match.group(1)) if segment_match else ""
-        parts = [f"Identitas akun internal mengonfirmasi {name}" if name else "Identitas akun internal mengonfirmasi klien"]
+        parts = [f"Profil klien yang tersedia menempatkan {name}" if name else "Profil klien yang tersedia menjadi latar awal"]
         qualifiers = []
         if location:
             qualifiers.append(f"di {location}")
@@ -295,7 +295,7 @@ def naturalize_generation_text(value: Any, field: str = "", client_name: str = "
     ):
         return (
             f"penajaman kebutuhan, ruang lingkup, dan roadmap kerja yang relevan bagi {client}; "
-            "detail identitas akun internal dipakai hanya sebagai konteks latar, bukan sebagai tujuan proyek."
+            "profil klien yang tersedia dipakai sebagai latar segmentasi dan lokasi."
         )
     text = re.sub(r"\bData internal\b", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\bReferenceAccount\b", "", text, flags=re.IGNORECASE)

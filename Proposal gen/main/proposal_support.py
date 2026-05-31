@@ -267,7 +267,7 @@ class ProposalSupportMixin:
 
     @staticmethod
     def _has_external_evidence(osint_block: str) -> bool:
-        return any(line.strip().startswith("Sumber eksternal") for line in (osint_block or "").splitlines())
+        return any(line.strip().startswith(("Sumber eksternal", "Bukti eksternal")) for line in (osint_block or "").splitlines())
 
     @staticmethod
     def _extract_osint_facts(osint_block: str, max_items: int = 3) -> List[Dict[str, str]]:
@@ -278,6 +278,22 @@ class ProposalSupportMixin:
         )
         for raw_line in (osint_block or "").splitlines():
             line = raw_line.strip()
+            if line.startswith("Bukti eksternal"):
+                match = re.search(r"Bukti eksternal\s+\d+\s*:\s*(?P<fact>.*?)(?P<citation>\([^)]+\))\s*$", line)
+                if not match:
+                    continue
+                fact = ProposalSupportMixin._sanitize_anchor_fact(match.group("fact") or "")
+                citation = (match.group("citation") or "").strip()
+                if fact:
+                    facts.append({
+                        "fact": fact[:240],
+                        "title": "",
+                        "url": "",
+                        "citation": citation,
+                    })
+                if len(facts) >= max_items:
+                    break
+                continue
             if not line.startswith("Sumber eksternal"):
                 continue
             match = re.search(pattern, line)
@@ -1284,6 +1300,12 @@ class ProposalSupportMixin:
             flags=re.IGNORECASE,
         )
         text = re.sub(
+            r"Bukti eksternal\s+\d+\s*:\s*",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
             r"\((?:[A-Za-z0-9.-]+\.[A-Za-z]{2,}|Data Internal),\s*(?:\d{4}|n\.d\.)\)",
             "",
             text,
@@ -2120,12 +2142,49 @@ class ProposalSupportMixin:
         }
 
     @classmethod
+    def _scope_basis_sentence(
+        cls,
+        scope_contract: Optional[Dict[str, List[str]]] = None,
+        technique_contract: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        in_scope: List[str] = []
+        if isinstance(scope_contract, dict):
+            in_scope = [
+                str(item or "").strip()
+                for item in (scope_contract.get("in_scope") or [])
+                if str(item or "").strip()
+            ]
+        if not in_scope and isinstance(technique_contract, dict):
+            seed = technique_contract.get("scope_contract_seed") or {}
+            if isinstance(seed, dict):
+                in_scope = [
+                    str(item or "").strip()
+                    for item in (seed.get("in_scope") or [])
+                    if str(item or "").strip()
+                ]
+        if not in_scope and isinstance(technique_contract, dict):
+            scope_basis = str(technique_contract.get("scope_basis") or "").strip()
+            if scope_basis:
+                in_scope = [scope_basis]
+        return cls._human_join(
+            [
+                cls._summarize_phrase(item, "", max_words=9)
+                for item in in_scope[:3]
+                if cls._summarize_phrase(item, "", max_words=9)
+            ],
+            fallback="",
+            max_items=3,
+        )
+
+    @classmethod
     def _framework_reference_rows(
         cls,
         regulations: str,
         project_type: str,
         ai_mode: bool = False,
         context_hint: str = "",
+        scope_contract: Optional[Dict[str, List[str]]] = None,
+        technique_contract: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, str]]:
         raw_items = [re.sub(r"\s+", " ", item).strip(" -.;:") for item in re.split(r"[,;/\n]+", str(regulations or ""))]
         selected = [item for item in raw_items if item]
@@ -2149,6 +2208,7 @@ class ProposalSupportMixin:
                     selected = ["Standar delivery internal", "Kontrol mutu", "Tata kelola proyek", "Acuan implementasi"]
 
         rows: List[Dict[str, str]] = []
+        scope_basis = cls._scope_basis_sentence(scope_contract, technique_contract)
         for item in selected[:4]:
             profile = cls._framework_profile(
                 item,
@@ -2157,12 +2217,15 @@ class ProposalSupportMixin:
                 ai_mode=ai_mode,
             )
             ringkas = cls._framework_tldr(item, ai_mode=ai_mode)
+            relevansi = profile["relevansi"]
+            if scope_basis:
+                relevansi = f"{relevansi.rstrip('.')} dengan mengacu pada ruang lingkup {scope_basis}."
             rows.append(
                 {
                     "acuan": item,
                     "ringkas": ringkas,
                     "peran": profile["peran"],
-                    "relevansi": profile["relevansi"],
+                    "relevansi": relevansi,
                     "pembeda": profile["pembeda"],
                 }
             )
@@ -2178,6 +2241,8 @@ class ProposalSupportMixin:
         notes: str = "",
         ai_mode: bool = False,
         context_hint: str = "",
+        scope_contract: Optional[Dict[str, List[str]]] = None,
+        technique_contract: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, str]]:
         raw_items = [re.sub(r"\s+", " ", item).strip(" -.;:") for item in re.split(r"[,;/\n]+", str(regulations or ""))]
         selected = [item for item in raw_items if item]
@@ -2188,6 +2253,8 @@ class ProposalSupportMixin:
                     project_type,
                     ai_mode=ai_mode,
                     context_hint=context_hint,
+                    scope_contract=scope_contract,
+                    technique_contract=technique_contract,
                 )
             ]
 
@@ -2196,6 +2263,7 @@ class ProposalSupportMixin:
         middle_phase = phase_plan[1]["phase"] if len(phase_plan) > 1 else (phase_plan[0]["phase"] if phase_plan else "fase tengah")
         last_phase = phase_plan[-1]["phase"] if phase_plan else "fase akhir"
         short_notes = cls._summarize_phrase(notes, "kebutuhan kontrol mutu dan keputusan kerja", max_words=14)
+        scope_basis = cls._scope_basis_sentence(scope_contract, technique_contract)
 
         rows: List[Dict[str, str]] = []
         for item in selected[:4]:
@@ -2250,6 +2318,8 @@ class ProposalSupportMixin:
 
             if context_hint:
                 penggunaan = f"{penggunaan.rstrip('.')} dengan tetap menjaga {context_hint.lower()}."
+            if scope_basis:
+                penggunaan = f"{penggunaan.rstrip('.')} pada batas ruang lingkup {scope_basis}."
 
             rows.append(
                 {
@@ -2268,8 +2338,16 @@ class ProposalSupportMixin:
         service_type: str,
         timeline: str,
         ai_mode: bool = False,
+        scope_contract: Optional[Dict[str, List[str]]] = None,
+        technique_contract: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, str]]:
         phase_plan = cls._build_ai_phase_plan(timeline) if ai_mode else cls._build_phase_plan(project_type, timeline)
+        scope_basis = cls._scope_basis_sentence(scope_contract, technique_contract)
+        methodology_basis = cls._summarize_phrase(
+            (technique_contract or {}).get("methodology_basis", ""),
+            "",
+            max_words=16,
+        )
         rows: List[Dict[str, str]] = []
         for idx, item in enumerate(phase_plan, start=1):
             if idx == 1:
@@ -2278,13 +2356,129 @@ class ProposalSupportMixin:
                 gate = "keluaran akhir diterima dan langkah lanjutan disepakati"
             else:
                 gate = "hasil fase tervalidasi sebelum masuk ke fase berikutnya"
+            if scope_basis:
+                gate = f"{gate}; quality gate memeriksa {scope_basis}"
+            tujuan = item["activity"]
+            if methodology_basis and idx == 1:
+                tujuan = f"{tujuan} berdasarkan {methodology_basis.lower()}"
+            evidence = (
+                "berita acara, daftar keputusan, dan baseline kebutuhan"
+                if idx == 1
+                else "catatan review, matriks revisi, dan sign-off fase"
+                if idx == len(phase_plan)
+                else "working paper, matriks analisis, notulen validasi, dan daftar tindak lanjut"
+            )
             rows.append(
                 {
                     "fase": item["phase"],
                     "periode": item["period"],
-                    "tujuan": item["activity"],
+                    "tujuan": tujuan,
+                    "aktivitas": item.get("activity", tujuan),
                     "keluaran": item["deliverable"],
                     "quality_gate": gate,
+                    "evidence": evidence,
+                }
+            )
+        return rows
+
+    @classmethod
+    def _kak_framework_selection_criteria(
+        cls,
+        client: str,
+        project_goal: str,
+        notes: str,
+        regulations: str,
+        ai_mode: bool = False,
+    ) -> List[str]:
+        short_goal = cls._summarize_phrase(project_goal, "tujuan pekerjaan dalam KAK", max_words=14)
+        short_notes = cls._summarize_phrase(notes, "ruang lingkup dan kondisi pelaksanaan", max_words=14)
+        short_regulations = cls._summarize_phrase(regulations, "acuan, standar, atau regulasi yang dipilih", max_words=12)
+        criteria = [
+            f"Relevansi langsung terhadap KAK, terutama untuk memastikan {short_goal.lower()} tidak berhenti pada narasi umum.",
+            f"Kesesuaian dengan konteks {client}, termasuk karakter organisasi, prioritas kerja, dan batas pelaksanaan yang tersedia.",
+            f"Kemampuan framework menghasilkan artefak yang dapat diperiksa, seperti matriks analisis, register keputusan, quality gate, dan bukti penerimaan.",
+            f"Kesesuaian dengan acuan teknis atau regulasi yang dipilih, termasuk {short_regulations.lower()}.",
+            f"Kelayakan eksekusi terhadap {short_notes.lower()}, sehingga metodologi tetap realistis terhadap waktu, data, dan ketersediaan counterpart.",
+        ]
+        if ai_mode:
+            criteria.append("Kesiapan guardrail AI, termasuk kontrol data, human oversight, evaluasi hasil, dan keputusan stop/go sebelum perluasan adopsi.")
+        return criteria[:6]
+
+    @classmethod
+    def _kak_risk_rows(
+        cls,
+        client: str,
+        project_goal: str,
+        notes: str,
+        timeline: str,
+        ai_mode: bool = False,
+    ) -> List[Dict[str, str]]:
+        short_goal = cls._summarize_phrase(project_goal, "tujuan pekerjaan", max_words=12)
+        short_notes = cls._summarize_phrase(notes, "kondisi dan kebutuhan pelaksanaan", max_words=12)
+        rows = [
+            {
+                "risiko": "Ruang lingkup melebar dari tujuan KAK",
+                "dampak": f"Fokus pekerjaan {short_goal.lower()} menjadi kabur dan deliverable sulit diterima.",
+                "mitigasi": "Gunakan scope boundary, change log, dan persetujuan formal sebelum menambah area kerja.",
+            },
+            {
+                "risiko": "Ketergantungan data atau narasumber terlambat",
+                "dampak": f"Analisis terhadap {short_notes.lower()} tidak cukup kuat untuk masuk ke fase desain atau rekomendasi.",
+                "mitigasi": "Tetapkan daftar kebutuhan data, PIC, tenggat respons, dan opsi eskalasi sejak kickoff.",
+            },
+            {
+                "risiko": "Quality gate tidak dipahami sama oleh semua pihak",
+                "dampak": "Review berulang terjadi karena kriteria penerimaan deliverable tidak eksplisit.",
+                "mitigasi": "Definisikan acceptance criteria, bukti minimum, dan format sign-off pada setiap fase.",
+            },
+            {
+                "risiko": "Jadwal pelaksanaan tidak seimbang dengan kedalaman analisis",
+                "dampak": f"Timeline {timeline or 'proyek'} berisiko menjadi daftar aktivitas tanpa kontrol prioritas.",
+                "mitigasi": "Gunakan milestone, review berkala, dan prioritisasi output agar fase kritis tidak tertunda.",
+            },
+        ]
+        if ai_mode:
+            rows.append(
+                {
+                    "risiko": "Adopsi solusi bergerak lebih cepat daripada kesiapan kontrol",
+                    "dampak": "Pilot atau perluasan solusi berisiko menghasilkan output yang sulit diaudit dan sulit diterima pengguna.",
+                    "mitigasi": "Pasang readiness review, validation checklist, human oversight, dan stop/go criteria sebelum scale-up.",
+                }
+            )
+        return rows[:5]
+
+    @classmethod
+    def _kak_deliverable_acceptance_rows(
+        cls,
+        project_type: str,
+        service_type: str,
+        timeline: str,
+        ai_mode: bool = False,
+    ) -> List[Dict[str, str]]:
+        deliverables = cls._deliverable_matrix(project_type, service_type, ai_mode=ai_mode)
+        rows: List[Dict[str, str]] = []
+        for idx, item in enumerate(deliverables, start=1):
+            category = item["kategori"]
+            lowered = category.lower()
+            if "dokumen" in lowered:
+                format_label = "Dokumen final, lampiran kerja, dan softcopy yang dapat ditelusuri versinya"
+                acceptance = "struktur dokumen lengkap, isi sesuai KAK, dan revisi final ditutup melalui persetujuan"
+            elif "pendampingan" in lowered:
+                format_label = "Sesi kerja, notulen, action log, dan bahan keputusan"
+                acceptance = "agenda terlaksana, keputusan tercatat, dan tindak lanjut memiliki PIC serta tenggat"
+            elif "kegiatan" in lowered:
+                format_label = "Workshop, FGD, review milestone, atau presentasi hasil"
+                acceptance = "daftar hadir, materi, catatan masukan, dan kesepakatan hasil tersedia"
+            else:
+                format_label = "Dukungan terbatas, checklist kesiapan, dan catatan serah terima"
+                acceptance = "batas dukungan jelas, isu kritis tercatat, dan transisi kontrol disetujui"
+            rows.append(
+                {
+                    "deliverable": item["bentuk"],
+                    "format": format_label,
+                    "fungsi": item["tujuan"],
+                    "waktu": f"mengikuti milestone fase {idx} dalam horizon {timeline or 'pelaksanaan'}",
+                    "acceptance": acceptance,
                 }
             )
         return rows
@@ -2373,8 +2567,9 @@ class ProposalSupportMixin:
         )
         return [
             {"fasilitas": "Perangkat kolaborasi dan rapat kerja", "dukungan": "rapat daring/luring, koordinasi rutin, dan dokumentasi hasil rapat", "manfaat": "mempercepat sinkronisasi keputusan selama pelaksanaan"},
-            {"fasilitas": "Sarana pengolahan dokumen dan analisis", "dukungan": "penyusunan bahan kerja, reviu mutu, dan finalisasi deliverable", "manfaat": "menjaga konsistensi kualitas keluaran"},
-            {"fasilitas": "Dukungan manajemen proyek", "dukungan": f"pengendalian jadwal, tindak lanjut, dan administrasi untuk layanan {service_type}", "manfaat": "menjaga ritme kerja tetap terukur"},
+            {"fasilitas": "Sarana pengolahan dokumen dan analisis", "dukungan": "template laporan, spreadsheet kerja, bahan presentasi, dan reviu mutu deliverable", "manfaat": "menjaga konsistensi substansi, format, dan bukti penerimaan keluaran"},
+            {"fasilitas": "Dukungan manajemen proyek dan backlog", "dukungan": f"kanban/action tracker, risk register, milestone log, dan administrasi untuk layanan {service_type}", "manfaat": "menjaga ritme kerja, dependensi, dan tindak lanjut tetap terukur"},
+            {"fasilitas": "Perangkat keamanan dan penyimpanan kerja", "dukungan": "kontrol akses dokumen, repositori kerja terbatas, dan media penyimpanan terenkripsi bila dibutuhkan", "manfaat": "mengurangi risiko kebocoran bahan kerja dan menjaga keterlacakan versi dokumen"},
             {"fasilitas": "Kapabilitas pendukung perusahaan", "dukungan": credentials, "manfaat": "memastikan pelaksanaan pekerjaan didukung sumber daya perusahaan yang memadai"},
         ]
 
@@ -2388,7 +2583,8 @@ class ProposalSupportMixin:
         rows = [
             {"gagasan": "Penguatan quality gate pekerjaan", "nilai_tambah": f"membantu {client} menilai hasil tiap fase secara lebih objektif", "penerapan": "diterapkan pada titik review dan persetujuan keluaran"},
             {"gagasan": "Format deliverable yang lebih siap pakai", "nilai_tambah": "memudahkan sponsor dan tim inti menindaklanjuti hasil kerja", "penerapan": "dimuat pada dokumen, tabel kerja, dan bahan keputusan"},
-            {"gagasan": "Ritme koordinasi yang lebih disiplin", "nilai_tambah": "menurunkan risiko miskomunikasi dan deviasi prioritas", "penerapan": "dipakai pada forum kerja, notulen, dan action tracker"},
+            {"gagasan": "Indeks kesehatan program atau backlog", "nilai_tambah": "memberi early warning atas prioritas, dependensi, dan status penyelesaian", "penerapan": "dipakai pada dashboard ringkas, review mingguan, atau lampiran monitoring"},
+            {"gagasan": "Knowledge Transfer by Design", "nilai_tambah": "membuat alih pengetahuan berjalan paralel dengan penyusunan deliverable", "penerapan": "dipakai melalui walkthrough dokumen, catatan keputusan, dan sesi serah terima terstruktur"},
         ]
         if ai_mode:
             rows.append(
@@ -2398,7 +2594,7 @@ class ProposalSupportMixin:
             rows.append(
                 {"gagasan": "Pemetaan kesiapan implementasi per fase", "nilai_tambah": "membantu pelaksanaan bergerak lebih stabil dan mudah dikendalikan", "penerapan": "dipakai sebelum transisi dari desain ke eksekusi"}
             )
-        return rows[:4]
+        return rows[:5] if ai_mode else rows[:4]
 
     @classmethod
     def _company_experience_rows(
@@ -2595,9 +2791,35 @@ class ProposalSupportMixin:
         name_policy = context.get("name_policy") if isinstance(context.get("name_policy"), dict) else {}
         allow_names = (
             bool(name_policy.get("allow_named_specialists"))
-            and str(name_policy.get("source") or "").strip() == "ConsultantProjectExpertHistory"
+            and "ConsultantProjectExpertHistory" in str(name_policy.get("source") or "")
             and str(context.get("source") or "").strip() == "internal_api"
         )
+        employee_rows = context.get("employee_expertise_rows") or []
+        certification_terms: List[str] = []
+        expertise_projects: List[str] = []
+        for employee_row in employee_rows:
+            if not isinstance(employee_row, dict):
+                continue
+            for cert in employee_row.get("certifications") or []:
+                cert_text = re.sub(r"\s+", " ", str(cert or "")).strip()
+                if cert_text and cert_text not in certification_terms:
+                    certification_terms.append(cert_text)
+            for project_name in employee_row.get("projects") or []:
+                project_text = cls._normalize_prose_fragment(project_name)
+                if project_text and project_text not in expertise_projects:
+                    expertise_projects.append(project_text)
+        employee_expertise_bits: List[str] = []
+        if certification_terms:
+            employee_expertise_bits.append(
+                "sertifikasi relevan seperti "
+                + cls._human_join(certification_terms[:5], fallback="", max_items=5)
+            )
+        if expertise_projects:
+            employee_expertise_bits.append(
+                "pengalaman tenaga ahli pada "
+                + cls._human_join(expertise_projects[:4], fallback="", max_items=4)
+            )
+        employee_expertise_summary = "; ".join(employee_expertise_bits)
         matrix = context.get("product_expert_matrix") or []
         rows: List[Dict[str, str]] = []
         seen_products = set()
@@ -2644,11 +2866,9 @@ class ProposalSupportMixin:
                 name_suffix = " - " + cls._human_join(experts[:3], fallback="", max_items=3)
             role_label = f"Lead Workstream {product_name}{name_suffix}"
             role_coverage = cls._human_join(positions[:4], fallback="peran pelaksana dan reviewer", max_items=4)
-            competence = (
-                f"riwayat internal pada {product_name} mencakup {expert_count} tenaga/riwayat, contoh lingkup {example_line}, dan cakupan peran {role_coverage}"
-                if expert_count
-                else f"riwayat proyek internal pada {product_name} dengan cakupan peran {role_coverage}"
-            )
+            competence = f"riwayat internal pada {product_name} mencakup contoh lingkup {example_line} dan cakupan peran {role_coverage}"
+            if employee_expertise_summary:
+                competence = f"{competence}; diperkuat {employee_expertise_summary}"
             rows.append(
                 {
                     "peran": role_label,
@@ -2928,12 +3148,25 @@ class ProposalSupportMixin:
         ai_profile = personalization_pack.get("ai_adoption_profile", {}) or {}
         ai_mode = bool(ai_profile.get("enabled"))
         normalized_mode = self._normalize_proposal_mode(proposal_mode)
+        proposal_technique_contract = (
+            (supporting_context or {}).get("proposal_technique_contract")
+            if isinstance((supporting_context or {}).get("proposal_technique_contract"), dict)
+            else {}
+        )
+        active_scope_contract = (
+            (supporting_context or {}).get("active_scope_contract")
+            if isinstance((supporting_context or {}).get("active_scope_contract"), dict)
+            else (proposal_technique_contract.get("scope_contract_seed") or {})
+        )
         terminology = personalization_pack.get("terminology", []) or []
         kpi_blueprint = personalization_pack.get("kpi_blueprint", []) or []
         term_line = ", ".join(terminology[:3]) if terminology else "tata kelola, pelaksanaan, pengendalian risiko"
         kpi_line = self._human_join(kpi_blueprint[:3], fallback=f"hasil bisnis utama {client}")
         short_notes = self._summarize_phrase(notes, "risiko delivery dan kesiapan stakeholder")
-        short_project = self._summarize_phrase(project, "inisiatif prioritas klien")
+        short_project = self._summarize_phrase(
+            proposal_technique_contract.get("background_basis", project),
+            "inisiatif prioritas klien",
+        )
         short_goal = self._summarize_phrase(project_goal, "kebutuhan inti klien")
         short_value = self._summarize_phrase(
             value_map.get("value_statement", ""),
@@ -3061,6 +3294,8 @@ class ProposalSupportMixin:
                 project_type,
                 ai_mode=ai_mode,
                 context_hint=framework_context_hint,
+                scope_contract=active_scope_contract,
+                technique_contract=proposal_technique_contract,
             )
         )
         framework_application_rows = "\n".join(
@@ -3073,11 +3308,20 @@ class ProposalSupportMixin:
                 notes=notes,
                 ai_mode=ai_mode,
                 context_hint=framework_context_hint,
+                scope_contract=active_scope_contract,
+                technique_contract=proposal_technique_contract,
             )
         )
         methodology_rows = "\n".join(
-            f"| {item['fase']} | {item['periode']} | {item['tujuan']} | {item['keluaran']} | {item['quality_gate']} |"
-            for item in self._methodology_rows(project_type, service_type, timeline, ai_mode=ai_mode)
+            f"| {item['fase']} | {item['periode']} | {item['tujuan']} | {item['aktivitas']} | {item['keluaran']} | {item['quality_gate']} | {item['evidence']} |"
+            for item in self._methodology_rows(
+                project_type,
+                service_type,
+                timeline,
+                ai_mode=ai_mode,
+                scope_contract=active_scope_contract,
+                technique_contract=proposal_technique_contract,
+            )
         )
 
         if normalized_mode == "kak_response" and chapter["id"].startswith("k_"):
@@ -3106,9 +3350,32 @@ class ProposalSupportMixin:
                 f"{label}) {text}"
                 for label, text in response_points
             )
+            framework_selection_criteria = "\n".join(
+                f"{idx}. {item}"
+                for idx, item in enumerate(
+                    self._kak_framework_selection_criteria(
+                        client,
+                        project_goal,
+                        notes,
+                        regulations,
+                        ai_mode=ai_mode,
+                    ),
+                    start=1,
+                )
+            )
             phase_rows = "\n".join(
                 f"| {item['phase']} | {item['period']} | {item['activity']} | {item['deliverable']} |"
                 for item in phase_plan
+            )
+            methodology_risk_rows = "\n".join(
+                f"| {item['risiko']} | {item['dampak']} | {item['mitigasi']} |"
+                for item in self._kak_risk_rows(
+                    client,
+                    project_goal,
+                    notes,
+                    timeline,
+                    ai_mode=ai_mode,
+                )
             )
             expert_rows = "\n".join(
                 f"| {item['peran']} | {item['fokus']} | {item['kompetensi']} | {item['keterlibatan']} |"
@@ -3117,6 +3384,15 @@ class ProposalSupportMixin:
             deliverable_rows = "\n".join(
                 f"| {item['kategori']} | {item['bentuk']} | {item['tujuan']} |"
                 for item in self._deliverable_matrix(project_type, service_type, ai_mode=ai_mode)
+            )
+            deliverable_acceptance_rows = "\n".join(
+                f"| {item['deliverable']} | {item['format']} | {item['fungsi']} | {item['waktu']} | {item['acceptance']} |"
+                for item in self._kak_deliverable_acceptance_rows(
+                    project_type,
+                    service_type,
+                    timeline,
+                    ai_mode=ai_mode,
+                )
             )
             facility_rows = "\n".join(
                 f"| {item['fasilitas']} | {item['dukungan']} | {item['manfaat']} |"
@@ -3191,10 +3467,11 @@ class ProposalSupportMixin:
                     f"## {self._chapter_subtitle(chapter, 0, '3.1 Pemilihan Framework')}\n"
                     f"Pemilihan kerangka acuan dilakukan untuk memastikan pekerjaan {short_project.lower()} memiliki dasar kerja yang jelas, terukur, dan dapat dipertanggungjawabkan. "
                     f"Kerangka yang dipilih juga harus mampu menjaga konsistensi antara kebutuhan {client}, ruang lingkup pekerjaan, dan bentuk keluaran yang dijanjikan.\n"
-                    "1. Kerangka acuan dipilih berdasarkan relevansi terhadap tujuan pekerjaan, kompleksitas lingkup, dan kebutuhan tata kelola.\n"
-                    "2. Kerangka acuan dipakai sebagai pedoman agar analisis, keputusan, dan keluaran pekerjaan mempunyai standar yang konsisten.\n"
-                    "| Kerangka / Acuan | Ringkasnya | Mengapa Dipakai pada Pekerjaan Ini |\n"
-                    "| --- | --- | --- |\n"
+                    "Kriteria pemilihan framework yang digunakan adalah sebagai berikut.\n"
+                    f"{framework_selection_criteria}\n"
+                    "Kerangka acuan dipakai sebagai integrated framework stack, bukan daftar standar yang berdiri sendiri. Setiap acuan diberi peran yang berbeda agar analisis, keputusan, pelaksanaan, dan keluaran pekerjaan mempunyai standar yang konsisten.\n"
+                    "| Kerangka / Acuan | Ringkasnya | Mengapa Dipakai pada Pekerjaan Ini | Pembeda Peran |\n"
+                    "| --- | --- | --- | --- |\n"
                     f"{framework_rows}\n"
                     f"{ai_kak_note}\n\n"
                     f"## {self._chapter_subtitle(chapter, 1, '3.2 Metodologi Pekerjaan')}\n"
@@ -3207,9 +3484,13 @@ class ProposalSupportMixin:
                     f"{framework_application_rows}\n"
                     "- Framework di atas dipakai sebagai perangkat kerja yang memengaruhi checkpoint, keluaran, dan cara mengambil keputusan pada tiap fase.\n"
                     "- Untuk acuan custom atau internal, penerapannya tetap harus dapat ditelusuri ke checklist, kriteria review, atau acceptance yang nyata.\n"
-                    "| Fase | Periode | Tujuan Kerja | Keluaran Utama | Gerbang Mutu |\n"
-                    "| --- | --- | --- | --- | --- |\n"
+                    "| Fase | Periode | Tujuan Kerja | Aktivitas Utama | Keluaran Utama | Gerbang Mutu | Evidence / Acceptance |\n"
+                    "| --- | --- | --- | --- | --- | --- | --- |\n"
                     f"{methodology_rows}\n"
+                    "Pengendalian mutu dan risiko pelaksanaan ditetapkan sejak awal agar metode tidak berhenti sebagai urutan aktivitas.\n"
+                    "| Risiko Utama | Dampak terhadap Pekerjaan | Mitigasi Pelaksanaan |\n"
+                    "| --- | --- | --- |\n"
+                    f"{methodology_risk_rows}\n"
                     f"- Dengan struktur ini, pekerjaan dapat dikendalikan secara lebih teratur dari awal sampai akhir.\n"
                     f"- Metodologi juga menjadi dasar bagi penyusunan program kerja, jadwal penugasan, dan pengendalian mutu pada bab berikutnya."
                 )
@@ -3270,11 +3551,16 @@ class ProposalSupportMixin:
                     f"Bab hasil kerja menjelaskan keluaran utama yang akan diterima {client} dari pelaksanaan pekerjaan. "
                     f"Penjelasan ini dibuat agar ekspektasi terhadap bentuk hasil, fungsi praktis, dan relevansi tiap keluaran dapat dipahami sejak awal (Data Internal, {year}).\n\n"
                     "## 6.1 Hasil Kerja (Deliverable)\n"
-                    f"| Kategori Keluaran | Bentuk Keluaran | Tujuan Praktis |\n"
+                    f"| Keluaran Utama | Format / Bentuk Serah Terima | Fungsi Praktis | Waktu / Keterkaitan Milestone | Dasar Penerimaan |\n"
+                    "| --- | --- | --- | --- | --- |\n"
+                    f"{deliverable_acceptance_rows}\n\n"
+                    "Ringkasan kategori keluaran berikut menunjukkan kelompok hasil kerja yang akan dikendalikan selama pelaksanaan.\n"
+                    "| Kategori Keluaran | Bentuk Keluaran | Tujuan Praktis |\n"
                     "| --- | --- | --- |\n"
                     f"{deliverable_rows}\n\n"
                     "1. Setiap hasil kerja diarahkan untuk mendukung keputusan, pengendalian, atau tindak lanjut yang dibutuhkan klien.\n"
                     "2. Keluaran tidak hanya diposisikan sebagai dokumen, tetapi sebagai artefak kerja yang siap digunakan pada fase berikutnya.\n"
+                    "3. Penerimaan deliverable mengacu pada kelengkapan isi, bukti validasi, dan penutupan revisi yang disepakati.\n"
                     f"- Bentuk keluaran akhir akan dikalibrasi dengan kebutuhan rinci pekerjaan {client} tanpa melepaskan inti scope yang telah ditawarkan.\n"
                     f"- Dengan penjelasan ini, klien dapat menilai kecukupan hasil kerja secara lebih objektif."
                 )
@@ -3597,9 +3883,19 @@ class ProposalSupportMixin:
             )
 
         if chapter["id"] == "c_7":
+            scope_driver = self._human_join(
+                [
+                    proposal_technique_contract.get("goals", ""),
+                    proposal_technique_contract.get("customer_notes", ""),
+                    proposal_technique_contract.get("existing_condition", ""),
+                    notes,
+                ],
+                fallback=notes,
+                max_items=4,
+            )
             scope_rows = "\n".join(
                 f"| {item['lingkup']} | {item['aktivitas']} | {item['keluaran']} | {item['batasan']} |"
-                for item in self._scope_matrix(project_type, service_type, project, notes, ai_mode=ai_mode)
+                for item in self._scope_matrix(project_type, service_type, project, scope_driver, ai_mode=ai_mode)
             )
             return (
                 f"Ruang lingkup pekerjaan untuk {client} perlu dijelaskan secara tegas agar komitmen delivery, bentuk keluaran, dan batasannya terbaca jelas sejak awal. "
@@ -4312,6 +4608,7 @@ class ProposalSupportMixin:
             kak_supporting_context = str((supporting_context or {}).get("kak_context") or "").strip()
             client_internal_context = str((supporting_context or {}).get("client_internal_context") or "").strip()
             evidence_card_prompt = str((supporting_context or {}).get("evidence_card_prompt") or "").strip()
+            context_intelligence_prompt = str((supporting_context or {}).get("context_intelligence_prompt") or "").strip()
             scope_contract_prompt = str((supporting_context or {}).get("scope_contract_prompt") or "").strip()
             expert_bench_context = (supporting_context or {}).get("expert_bench_context") or {}
             ai_posture = research_bundle.get("ai_posture", "")
@@ -4347,6 +4644,12 @@ class ProposalSupportMixin:
                 extra += (
                     f" [EVIDENCE_CARDS] Gunakan hanya evidence cards terkurasi berikut sebagai bahan klaim faktual bab ini. "
                     f"Jangan menampilkan label evidence card, keyakinan, atau sumber di dokumen final: {evidence_card_prompt}"
+                )
+            if context_intelligence_prompt:
+                extra += (
+                    f" [CONTEXT_INTELLIGENCE] Pakai sintesis konteks berikut untuk memilih angle bab, "
+                    f"menghindari salin-tempel helper mentah, dan membuat narasi terasa spesifik. "
+                    f"Jangan menampilkan label, schema, endpoint, nama dataset, atau istilah context intelligence di dokumen final: {context_intelligence_prompt}"
                 )
             if scope_contract_prompt and chapter.get("id") not in {"c_1", "c_2", "c_7"}:
                 extra += (
@@ -4687,13 +4990,60 @@ class ProposalSupportMixin:
 
         patched = content.rstrip()
         for heading in missing_h2:
-            patched += (
-                f"\n\n## {heading}\n"
-                "Pembahasan pada bagian ini perlu menjelaskan keputusan kerja, konteks bisnis, dan arah hasil yang paling relevan secara langsung.\n"
-                "- Fokus utama harus tetap pada apa yang perlu dipertegas, dikendalikan, atau diselaraskan sejak awal.\n"
-                "- Risiko, dependensi, dan indikator hasil perlu dijelaskan dalam bahasa yang bisa segera ditindaklanjuti.\n"
-            )
+            patched += f"\n\n## {heading}\n{self._missing_heading_recovery(chapter, heading)}\n"
         return patched
+
+    def _missing_heading_recovery(self, chapter: Dict[str, Any], heading: str) -> str:
+        chapter_id = str((chapter or {}).get("id") or "").strip()
+        normalized_heading = str(heading or "").lower()
+        if chapter_id == "c_11":
+            if "struktur tim" in normalized_heading:
+                return (
+                    "Struktur kerja disusun untuk menjaga alur keputusan, pengendalian mutu, dan koordinasi harian tetap jelas. "
+                    "Komposisi minimum mencakup pengarah proyek, koordinator delivery, tenaga ahli substansi, dan peninjau mutu agar keluaran yang diterima klien tidak bergantung pada satu peran saja."
+                )
+            if "kapabilitas" in normalized_heading or "sertifikasi" in normalized_heading:
+                return (
+                    "Kapabilitas konsultan perlu dibaca dari kombinasi pengalaman proyek sejenis, penguasaan kerangka kerja, dan sertifikasi yang relevan. "
+                    "Bagian ini sebaiknya menonjolkan kemampuan tim untuk menerjemahkan kebutuhan klien menjadi artefak kerja yang dapat direview, diterima, dan ditindaklanjuti."
+                )
+        if chapter_id == "c_12":
+            if "biaya" in normalized_heading or "pembayaran" in normalized_heading:
+                return (
+                    "Model biaya dikaitkan dengan keluaran kerja dan tonggak penerimaan agar nilai investasi dapat dibaca secara transparan. "
+                    "Pembayaran sebaiknya mengikuti kemajuan fase, acceptance keluaran, dan perubahan ruang lingkup yang disepakati tertulis."
+                )
+            if "batasan" in normalized_heading or "model pekerjaan" in normalized_heading:
+                return (
+                    "Model pekerjaan menempatkan estimasi sebagai baseline komersial yang tunduk pada ruang lingkup, asumsi, dan ketersediaan pihak klien. "
+                    "Biaya pihak ketiga, lisensi, perjalanan khusus, atau perluasan pekerjaan perlu dipisahkan sebagai komponen di luar baseline."
+                )
+        if chapter_id == "c_closing":
+            if "apresiasi" in normalized_heading or "komitmen" in normalized_heading:
+                return (
+                    "Inixindo Jogja mengapresiasi kesempatan untuk mendukung penajaman kebutuhan dan penyusunan arah kerja yang lebih terukur. "
+                    "Komitmen kemitraan diarahkan pada proses yang terbuka, keluaran yang dapat dipertanggungjawabkan, dan tindak lanjut yang mudah diputuskan oleh sponsor."
+                )
+            if "kontak" in normalized_heading or "langkah" in normalized_heading:
+                return (
+                    "Langkah berikutnya adalah menyepakati ruang lingkup final, menetapkan PIC utama, dan menjadwalkan sesi klarifikasi awal. "
+                    "Komunikasi lanjutan dapat diarahkan melalui kanal resmi perusahaan penyusun yang tercantum pada bagian kontak."
+                )
+        if chapter_id == "c_3":
+            if "penajaman" in normalized_heading:
+                return (
+                    "Kebutuhan utama perlu dikerucutkan menjadi prioritas kerja yang paling menentukan keberhasilan proyek. "
+                    "Klasifikasi masalah, peluang, dan arahan digunakan sebagai alat bantu keputusan, bukan sebagai daftar istilah yang disalin mentah."
+                )
+            if "tujuan" in normalized_heading:
+                return (
+                    "Tujuan proyek perlu menghubungkan kebutuhan prioritas dengan jenis pekerjaan yang dipilih. "
+                    "Dengan begitu, sponsor dapat membaca mengapa bentuk engagement ini tepat dan batas hasil apa yang realistis dicapai."
+                )
+        return (
+            "Subbagian ini perlu menegaskan keputusan, keluaran, dan batas kerja yang relevan dengan kebutuhan klien. "
+            "Isi disusun sebagai jembatan ke langkah berikutnya agar pembaca memahami apa yang harus diputuskan, dikerjakan, dan diterima sebagai hasil."
+        )
 
     def _ensure_list_structure(
         self,
@@ -5442,6 +5792,8 @@ class ProposalSupportMixin:
                 min(1.0, self._count_signal_hits(chapter_outputs.get("k_4", ""), self._chapter_usefulness_terms("k_4"), max_hits=4) / 2.0) if chapter_map.get("k_4") else 1.0,
                 min(1.0, self._count_signal_hits(chapter_outputs.get("k_5", ""), self._chapter_usefulness_terms("k_5"), max_hits=4) / 2.0) if chapter_map.get("k_5") else 1.0,
                 min(1.0, self._count_signal_hits(chapter_outputs.get("k_6", ""), self._chapter_usefulness_terms("k_6"), max_hits=4) / 2.0) if chapter_map.get("k_6") else 1.0,
+                min(1.0, self._count_signal_hits(chapter_outputs.get("k_7", ""), self._chapter_usefulness_terms("k_7"), max_hits=4) / 2.0) if chapter_map.get("k_7") else 1.0,
+                min(1.0, self._count_signal_hits(chapter_outputs.get("k_8", ""), self._chapter_usefulness_terms("k_8"), max_hits=4) / 2.0) if chapter_map.get("k_8") else 1.0,
                 min(1.0, self._count_signal_hits(chapter_outputs.get("k_1", ""), self._chapter_usefulness_terms("k_1"), max_hits=4) / 2.0) if chapter_map.get("k_1") else 1.0,
             ]
         else:
@@ -5749,7 +6101,7 @@ class ProposalSupportMixin:
     @staticmethod
     def _source_safe_firm_evidence_text(firm_name: str, value: str) -> str:
         cleaned = re.sub(r"\s+", " ", str(value or "").replace("\xa0", " ")).strip()
-        if cleaned.startswith("Sumber eksternal"):
+        if cleaned.startswith(("Sumber eksternal", "Bukti eksternal")):
             facts = ProposalSupportMixin._extract_osint_facts(cleaned, max_items=2)
             fact_text = ProposalSupportMixin._human_join(
                 [item.get("fact", "") for item in facts],
@@ -5760,6 +6112,7 @@ class ProposalSupportMixin:
                 cleaned = fact_text
         cleaned = re.sub(r"(?i)\bdirangkum\s+dari\s+sumber\s+publik/?OSINT\s*:?", "", cleaned).strip()
         cleaned = re.sub(r"(?i)\bSumber eksternal\s+\d+\s*:\s*", "", cleaned)
+        cleaned = re.sub(r"(?i)\bBukti eksternal\s+\d+\s*:\s*", "", cleaned)
         cleaned = re.sub(r"(?i)\bfakta\s*=", "", cleaned)
         cleaned = re.sub(r"(?i)\s*\|\s*sumber\s*=[^|]+", "", cleaned)
         cleaned = re.sub(r"(?i)\s*\|\s*url\s*=\S+", "", cleaned)

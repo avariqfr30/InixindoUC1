@@ -97,6 +97,20 @@
         "company_category_name": "company_category_name",
         "company_category_desc": "company_category_desc"
       }
+    },
+    "employee_expertise": {
+      "request": {
+        "body": {
+          "dataset": "EmployeeExpertise"
+        }
+      },
+      "response_path": "data.dataset_result",
+      "field_mapping": {
+        "employee_id": "employee_id",
+        "employee_name": "employee_name",
+        "certifications": "certifications",
+        "projects": "projects"
+      }
     }
   }
 }

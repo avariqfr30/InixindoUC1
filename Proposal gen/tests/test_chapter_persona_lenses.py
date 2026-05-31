@@ -220,6 +220,10 @@ class ChapterPersonaLensesTest(unittest.TestCase):
         )
 
         self.assertIn("[EVIDENCE_CARD_SCHEMA]", brief)
+        self.assertIn("[SINGLE_MODEL_DESK_POLICY]", brief)
+        self.assertIn("same configured model instance", brief)
+        self.assertIn("[DESK_OUTPUT_CONTRACT]", brief)
+        self.assertIn("[DESK_QUALITY_GATE]", brief)
         self.assertIn("fact | why_it_matters | source_lane | confidence | gap", brief)
         self.assertIn("[INTERNAL_DATA_AGENT]", brief)
         self.assertIn("[COMMERCIAL_STRATEGY_AGENT]", brief)

@@ -84,7 +84,7 @@ class InternalApiRefreshTest(unittest.TestCase):
         script = "\n".join(script.string or "" for script in soup.find_all("script"))
 
         self.assertIsNotNone(save_button)
-        self.assertEqual(save_button.text.strip(), "Simpan & Aktifkan API Internal")
+        self.assertEqual(save_button.text.strip(), "Simpan & Aktifkan Sumber Data")
         self.assertIsNotNone(refresh_button)
         self.assertIn("Muat Ulang Data Sekarang", refresh_button.text)
         self.assertIsNone(soup.select_one("#settings-portfolio"))
@@ -94,17 +94,25 @@ class InternalApiRefreshTest(unittest.TestCase):
         self.assertIsNotNone(soup.select_one("#settings-credential-files"))
         self.assertIn("Sumber portofolio tidak diisi manual", soup.get_text(" "))
         self.assertIn("Sumber kapabilitas, sertifikasi, dan tenaga ahli tidak diisi manual", soup.get_text(" "))
+        self.assertIn("Pengguna proposal cukup memakai bukti yang sudah diringkas otomatis", soup.get_text(" "))
+        self.assertIsNotNone(soup.select_one("#portfolio-internal-evidence"))
+        self.assertIsNotNone(soup.select_one("#credential-internal-evidence"))
         self.assertNotIn("btnSaveSettings", script)
         self.assertNotIn("settingsPortfolio:", script)
         self.assertNotIn("settingsCredentials:", script)
         self.assertIn("setInternalApiConnectionState", script)
         self.assertIn("api_connection_active", script)
         self.assertIn("/api/internal-api/refresh", script)
-        self.assertIn("source-status-grid", template)
-        self.assertIn("readinessResources", script)
+        self.assertNotIn("source-status-grid", template)
+        self.assertNotIn("readinessResources", script)
         self.assertIn("readiness: data.readiness", script)
         self.assertIn("renderFrameworkOptions(config)", script)
         self.assertIn("config.framework_options", script)
+        self.assertIn("data-framework-versions", script)
+        self.assertIn("framework-version-select", script)
+        self.assertIn("framework-option-name", script)
+        self.assertIsNotNone(soup.select_one("#select-perusahaan[type='text']"))
+        self.assertIsNotNone(soup.select_one("#group-framework.framework-options"))
         self.assertIn("applyKakSuggestions(latestKakSuggestions, true)", script)
         self.assertIn("field yang masih kosong", script)
         self.assertNotIn("Sumber data proyek", script)
@@ -205,6 +213,42 @@ class InternalApiRefreshTest(unittest.TestCase):
         self.assertTrue(payload["api_connection_active"])
         self.assertTrue(payload["can_refresh_dataset"])
         self.assertEqual(payload["config_file"], "/tmp/internal_api_config.json")
+
+    def test_firm_api_client_caches_dataset_resource_fetches_per_instance(self) -> None:
+        from main.runtime_components import FirmAPIClient
+
+        client = FirmAPIClient.__new__(FirmAPIClient)
+        client.demo_mode = False
+        client.resource_config = {
+            "project_records": {
+                "request": {"body": {"dataset": "ConsultantProjectExpertHistory"}},
+                "response_path": "data.dataset_result",
+                "field_mapping": {
+                    "project_name": "project_name",
+                    "product_name": "product_name",
+                },
+            }
+        }
+        client.request_defaults = {}
+        client._resource_record_cache = {}
+        client._request_from_spec = Mock(
+            return_value={
+                "data": {
+                    "dataset_result": [
+                        {
+                            "project_name": "Penyusunan Arsitektur SPBE",
+                            "product_name": "Arsitektur SPBE",
+                        }
+                    ]
+                }
+            }
+        )
+
+        first = client._get_mapped_resource_records("project_records", apply_filters=False)
+        second = client._get_mapped_resource_records("project_records", apply_filters=False)
+
+        self.assertEqual(first, second)
+        client._request_from_spec.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -11,6 +11,12 @@ import diskcache as dc
 from ollama import Client
 from pydantic import BaseModel, Field
 
+from .config import (
+    OLLAMA_API_KEY,
+    OLLAMA_WEB_FETCH_URL,
+    OLLAMA_WEB_SEARCH_URL,
+    SEARCH_PROVIDER,
+)
 from .proposal_shared import *
 
 # Initialize ultra-fast disk caching for OSINT (survives server restarts)
@@ -30,6 +36,12 @@ def smart_osint_cache(expire_success=86400, expire_empty=3600, ignore_empty=True
             key_parts = [func.__name__]
             if inject_llm:
                 key_parts.append(str(LLM_MODEL))
+            if func.__name__ in {"search", "fetch_full_markdown"}:
+                provider = str(globals().get("SEARCH_PROVIDER", "serper")).strip().lower() or "serper"
+                key_parts.append(f"provider={provider}")
+                if provider == "ollama":
+                    configured = bool(str(globals().get("OLLAMA_API_KEY", "") or "").strip())
+                    key_parts.append(f"ollama_key_configured={configured}")
                 
             for arg in args:
                 if isinstance(arg, str):
@@ -82,10 +94,92 @@ class Researcher:
         return key not in placeholder_keys
 
     @staticmethod
+    def _search_provider() -> str:
+        provider = str(SEARCH_PROVIDER or "serper").strip().lower()
+        return provider if provider in {"serper", "ollama"} else "serper"
+
+    @staticmethod
+    def _has_ollama_api_key() -> bool:
+        return bool(str(OLLAMA_API_KEY or "").strip())
+
+    @staticmethod
+    def _ollama_headers() -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {str(OLLAMA_API_KEY or '').strip()}",
+            "Content-Type": "application/json",
+        }
+
+    @staticmethod
+    def _normalize_ollama_search_results(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        raw_results = payload.get("results", []) if isinstance(payload, dict) else []
+        if not isinstance(raw_results, list):
+            return normalized
+
+        for item in raw_results:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            link = str(item.get("url") or item.get("link") or "").strip()
+            snippet = str(item.get("content") or item.get("snippet") or "").strip()
+            if not (title or link or snippet):
+                continue
+            normalized.append(
+                {
+                    "title": title,
+                    "link": link,
+                    "snippet": snippet,
+                    "url": link,
+                    "content": snippet,
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _ollama_web_search(query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        if not Researcher._has_ollama_api_key():
+            return []
+        try:
+            response = requests.post(
+                OLLAMA_WEB_SEARCH_URL,
+                headers=Researcher._ollama_headers(),
+                json={"query": query, "max_results": max(1, min(int(limit or 5), 10))},
+                timeout=8,
+            )
+            response.raise_for_status()
+            return Researcher._normalize_ollama_search_results(response.json())
+        except requests.RequestException as e:
+            logger.warning(f"Ollama web search error | query='{query[:60]}...' | error={str(e)[:100]}")
+            return []
+        except Exception as e:
+            logger.warning(f"Ollama web search parse error | query='{query[:60]}...' | error={str(e)[:100]}")
+            return []
+
+    @staticmethod
     @smart_osint_cache(expire_success=43200, ignore_empty=True)
     def fetch_full_markdown(url: str) -> str:
         """Fetches the clean markdown text of any URL using Jina Reader."""
         if not url: return ""
+        if Researcher._search_provider() == "ollama":
+            if not Researcher._has_ollama_api_key():
+                return ""
+            try:
+                response = requests.post(
+                    OLLAMA_WEB_FETCH_URL,
+                    headers=Researcher._ollama_headers(),
+                    json={"url": url},
+                    timeout=12,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                content = str(payload.get("content", "") if isinstance(payload, dict) else "")
+                return content[:6000]
+            except requests.RequestException as e:
+                logger.warning(f"Ollama web fetch error | url='{url[:80]}...' | error={str(e)[:100]}")
+                return ""
+            except Exception as e:
+                logger.warning(f"Ollama web fetch parse error | url='{url[:80]}...' | error={str(e)[:100]}")
+                return ""
         try:
             jina_url = f"https://r.jina.ai/{url}"
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -148,15 +242,49 @@ class Researcher:
         return cleaned
 
     @staticmethod
+    def _summarize_osint_fact(fact: str, item: Optional[Dict[str, Any]] = None, max_words: int = 34) -> str:
+        text = Researcher._clean_osint_fact(fact)
+        if not text and item:
+            text = Researcher._clean_osint_fact(" ".join([
+                str(item.get("snippet", "") or ""),
+                str(item.get("title", "") or ""),
+            ]))
+        text = re.sub(r"(?i)\b(sumber|source|url|link)\s*=\s*[^|]+", " ", text)
+        text = re.sub(r"\s*\|\s*", ". ", text)
+        text = re.sub(r"\s+", " ", text).strip(" -;,.")
+        if not text:
+            return ""
+        sentences = [part.strip(" -;,.") for part in re.split(r"(?<=[.!?])\s+|;\s+", text) if part.strip(" -;,.")]
+        priority_terms = (
+            "meningkat", "risiko", "prioritas", "transformasi", "digital", "layanan",
+            "regulasi", "pelanggan", "efisiensi", "governance", "AI", "data",
+        )
+        if sentences:
+            sentences.sort(
+                key=lambda sentence: (
+                    any(term.lower() in sentence.lower() for term in priority_terms),
+                    bool(re.search(r"\b\d+(?:[,.]\d+)?%?\b|Rp\s*\d+", sentence)),
+                    len(sentence),
+                ),
+                reverse=True,
+            )
+            text = sentences[0]
+        words = text.split()
+        if len(words) > max_words:
+            text = " ".join(words[:max_words]).rstrip(" ,;:") + "."
+        if text and text[-1] not in ".!?":
+            text += "."
+        return text
+
+    @staticmethod
     def _format_source_evidence_item(item: Dict[str, Any], fact_override: str = "", index: int = 1) -> str:
-        title = str(item.get("title", "") or "Sumber tanpa judul").strip()
         link = str(item.get("link", "") or "-").strip()
-        fact = Researcher._clean_osint_fact(str(fact_override or item.get("snippet", "") or ""))
+        fact = Researcher._summarize_osint_fact(str(fact_override or item.get("snippet", "") or ""), item=item)
         if not fact:
             return ""
         source_name = Researcher._source_name(link)
         citation = f"({source_name}, {Researcher._citation_year(item)})"
-        return f"Sumber eksternal {max(1, int(index or 1))}: fakta={fact} | sumber={title} | url={link} | sitasi_apa={citation}"
+        return f"Bukti eksternal {max(1, int(index or 1))}: {fact} {citation}"
 
     @staticmethod
     def _combine_summary_and_evidence(summary: str, evidence_lines: List[str], fallback: str = "") -> str:
@@ -187,9 +315,12 @@ class Researcher:
     @staticmethod
     @smart_osint_cache(expire_success=86400, expire_empty=3600, ignore_empty=False)
     def search(query: str, limit: int = 5, recency_bucket: str = "") -> List[Dict[str, Any]]:
-        """General web search using Serper.dev"""
+        """General web search using the configured provider."""
+        if Researcher._search_provider() == "ollama":
+            return Researcher._ollama_web_search(query, limit=limit)
+
         if not Researcher._has_serper_key():
-            return []
+            return Researcher._ollama_web_search(query, limit=limit)
         
         url = "https://google.serper.dev/search"
         payload_data = {"q": query, "gl": "id", "num": limit}
@@ -205,10 +336,13 @@ class Researcher:
                 timeout=8
             )
             response.raise_for_status()
-            return response.json().get('organic', [])
+            results = response.json().get('organic', [])
+            if results:
+                return results
+            return Researcher._ollama_web_search(query, limit=limit)
         except requests.RequestException as e:
             logger.warning(f"Serper API Error | query='{query[:60]}...' | error={str(e)[:100]}")
-            return []
+            return Researcher._ollama_web_search(query, limit=limit)
 
     @staticmethod
     def _dedupe_results(items: List[Dict[str, Any]], limit: int = 10) -> List[Dict[str, Any]]:
@@ -561,13 +695,12 @@ class Researcher:
         if not items: return f"{fallback} (sumber daring, n.d.)"
         lines = []
         for i, item in enumerate(items, start=1):
-            title = item.get('title', 'Sumber tanpa judul')
-            snippet = Researcher._clean_osint_fact(str(item.get('snippet', '') or ''))
+            snippet = Researcher._summarize_osint_fact(str(item.get('snippet', '') or ''), item=item)
             link = item.get('link', '-')
             if not snippet: continue
             source_name = Researcher._source_name(link)
             citation = f"({source_name}, {Researcher._citation_year(item)})"
-            lines.append(f"Sumber eksternal {i}: fakta={snippet} | sumber={title} | url={link} | sitasi_apa={citation}")
+            lines.append(f"Bukti eksternal {i}: {snippet} {citation}")
         return "\n".join(lines) if lines else f"{fallback} (sumber daring, n.d.)"
 
     # =========================================================

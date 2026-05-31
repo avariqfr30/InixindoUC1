@@ -3,6 +3,9 @@ import re
 
 _REPLACEMENTS = (
     (r"\bNama\s+Perusahaan\s+Klien\s*:", "catatan klien:"),
+    (r"\bKonteks\s+akun\s+internal\b", "profil klien yang tersedia"),
+    (r"\b(?:detail\s+)?Identitas\s+akun\s+internal\b", "profil klien yang tersedia"),
+    (r"\bGunakan\s+informasi\s+ini\b[^.]*\.?", ""),
     (r"\bReferenceAccount\s+mencatat\b", "catatan klien menunjukkan"),
     (r"\bsource\s*=\s*(?:https?://\S+|/api/[A-Za-z0-9_./-]+)?", ""),
     (r"\bdataset[_\s-]*code\s*=\s*ConsultantProjectExpertHistory\b", "riwayat pengalaman konsultan"),

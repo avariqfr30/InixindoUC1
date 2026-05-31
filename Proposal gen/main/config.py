@@ -246,8 +246,25 @@ FIRM_API_RESOURCE_CONFIG = _merge_resource_configs(
 )
 
 # External service configuration.
+def _normalize_search_provider(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"ollama", "serper"}:
+        return normalized
+    return "serper"
+
+
+SEARCH_PROVIDER = _normalize_search_provider(os.getenv("SEARCH_PROVIDER", "serper"))
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "SERPER_API")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").strip() or "http://127.0.0.1:11434"
+OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
+OLLAMA_WEB_SEARCH_URL = (
+    os.getenv("OLLAMA_WEB_SEARCH_URL", "https://ollama.com/api/web_search").strip()
+    or "https://ollama.com/api/web_search"
+)
+OLLAMA_WEB_FETCH_URL = (
+    os.getenv("OLLAMA_WEB_FETCH_URL", "https://ollama.com/api/web_fetch").strip()
+    or "https://ollama.com/api/web_fetch"
+)
 
 # Model and storage config.
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-oss:120b-cloud").strip() or "gpt-oss:120b-cloud"

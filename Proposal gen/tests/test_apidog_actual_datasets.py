@@ -64,9 +64,10 @@ class ApidogActualDatasetTest(unittest.TestCase):
             {"project_name__icontains": "{client_name}"},
         )
         self.assertEqual(resources["account_records"]["request"]["body"]["dataset"], "ReferenceAccount")
-        self.assertNotIn("framework_catalog", resources)
+        self.assertEqual(resources["framework_catalog"]["request"]["body"]["dataset"], "ReferenceFramework")
+        self.assertEqual(resources["framework_catalog"]["field_mapping"]["versions"], "children")
 
-    def test_framework_catalog_dataset_is_optional_until_api_provides_it(self) -> None:
+    def test_framework_catalog_dataset_can_be_overridden_when_needed(self) -> None:
         from main.internal_api_setup import build_internal_api_config
 
         config = build_internal_api_config(
@@ -83,6 +84,94 @@ class ApidogActualDatasetTest(unittest.TestCase):
         self.assertTrue(resource["optional"])
         self.assertEqual(resource["request"]["body"]["dataset"], "ReferenceFrameworkStandard")
         self.assertEqual(resource["field_mapping"]["label"], "framework_name")
+        self.assertEqual(resource["field_mapping"]["versions"], "children")
+
+    def test_employee_expertise_dataset_is_active_and_maps_live_schema(self) -> None:
+        from main.internal_api_setup import build_internal_api_config
+
+        config = build_internal_api_config(
+            {
+                "url": "https://internal-api.example.com/api/Resource/dataset",
+                "method": "POST",
+                "body_encoding": "form",
+                "auth_mode": "basic",
+                "datasets": {"employee_expertise": "EmployeeExpertise"},
+            }
+        )
+
+        resource = config["resources"]["employee_expertise"]
+        self.assertNotIn("optional", resource)
+        self.assertEqual(resource["request"]["body"]["dataset"], "EmployeeExpertise")
+        self.assertEqual(resource["response_path"], "data.dataset_result")
+        self.assertEqual(resource["field_mapping"]["employee_name"], "employee_name")
+        self.assertEqual(resource["field_mapping"]["certifications"], "certifications")
+        self.assertEqual(resource["field_mapping"]["projects"], "projects")
+
+    def test_expert_bench_context_adds_employee_expertise_without_replacing_project_history(self) -> None:
+        from main.runtime_components import FirmAPIClient
+
+        client = FirmAPIClient.__new__(FirmAPIClient)
+        client.demo_mode = False
+        client.resource_config = {
+            "project_records": {
+                "request": {"body": {"dataset": "ConsultantProjectExpertHistory"}},
+                "response_path": "data.dataset_result",
+                "field_mapping": {
+                    "entity": "project_name",
+                    "topic": "product_name",
+                    "project_name": "project_name",
+                    "expert_name": "expert_name",
+                    "position_name": "position_name",
+                },
+            },
+            "employee_expertise": {
+                "request": {"body": {"dataset": "EmployeeExpertise"}},
+                "response_path": "data.dataset_result",
+                "field_mapping": {
+                    "employee_name": "employee_name",
+                    "certifications": "certifications",
+                    "projects": "projects",
+                },
+            },
+        }
+
+        def fake_request(spec, **_context):
+            dataset = ((spec.get("request") or {}).get("body") or {}).get("dataset")
+            if dataset == "EmployeeExpertise":
+                return {
+                    "data": {
+                        "dataset_result": [
+                            {
+                                "employee_name": "Andi Yuniantoro",
+                                "certifications": ["TOGAF 9 Foundations", "COBIT 5", "ISO/IEC 27001 Foundation"],
+                                "projects": ["Arsitektur SPBE", "Masterplan TIK"],
+                            }
+                        ]
+                    }
+                }
+            return {
+                "data": {
+                    "dataset_result": [
+                        {
+                            "project_name": "PI06 - Kajian Arsitektur SPBE Domain Infrastruktur",
+                            "product_name": "Arsitektur SPBE",
+                            "expert_name": "Andi Yuniantoro",
+                            "position_name": "Project Manager",
+                        }
+                    ]
+                }
+            }
+
+        client._request_from_spec = fake_request
+
+        context = client.get_expert_bench_context(limit_products=3)
+
+        self.assertTrue(context["available"])
+        self.assertEqual(context["employee_expertise_record_count"], 1)
+        self.assertIn("sertifikasi internal", context["employee_expertise_summary"].lower())
+        self.assertIn("TOGAF", context["employee_expertise_summary"])
+        self.assertEqual(context["name_policy"]["source"], "ConsultantProjectExpertHistory+EmployeeExpertise")
+        self.assertEqual(context["product_expert_matrix"][0]["product_name"], "Arsitektur SPBE")
 
     def test_validation_includes_client_account_records_for_settings_readiness(self) -> None:
         from main.internal_api_setup import build_internal_api_config

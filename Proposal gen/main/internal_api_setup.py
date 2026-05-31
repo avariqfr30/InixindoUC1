@@ -40,7 +40,16 @@ RESOURCE_ALIASES: Dict[str, Dict[str, List[str]]] = {
         "description": ["description", "summary", "guidance", "proposal_use_guidance", "when_to_use"],
         "resolved": ["resolved", "framework_version", "standard_version", "version", "versi"],
         "aliases": ["aliases", "keywords", "synonyms"],
+        "issuer": ["issuer", "publisher", "owner", "framework_issuer", "standard_issuer"],
+        "category": ["category", "framework_category", "standard_category"],
+        "versions": ["versions", "children", "items"],
         "available": ["available", "active", "capability_status", "status"],
+    },
+    "employee_expertise": {
+        "employee_id": ["employee_id", "id_pegawai", "kode_pegawai"],
+        "employee_name": ["employee_name", "nama_pegawai", "nama_tenaga_ahli", "expert_name"],
+        "certifications": ["certifications", "sertifikasi", "certification", "credentials"],
+        "projects": ["projects", "project_history", "pengalaman", "riwayat_proyek"],
     },
     "account_records": {
         "company_name": ["company_name", "company", "client", "client_name", "nama_perusahaan", "nama_klien"],
@@ -58,7 +67,8 @@ DEFAULT_DATASETS = {
     "client_relationship": "ConsultantProjectExpertHistory",
     "project_records": "ConsultantProjectExpertHistory",
     "account_records": "ReferenceAccount",
-    "framework_catalog": "",
+    "framework_catalog": "ReferenceFramework",
+    "employee_expertise": "EmployeeExpertise",
 }
 
 
@@ -69,6 +79,7 @@ DEFAULT_RESPONSE_PATHS = {
     "project_records": "data.dataset_result",
     "account_records": "data.dataset_result",
     "framework_catalog": "data.dataset_result",
+    "employee_expertise": "data.dataset_result",
 }
 
 
@@ -183,9 +194,24 @@ def build_internal_api_config(data: Dict[str, Any]) -> Dict[str, Any]:
                 "description": "proposal_use_guidance",
                 "resolved": "framework_version",
                 "aliases": "aliases",
+                "issuer": "issuer",
+                "category": "category",
+                "versions": "children",
                 "available": "capability_status",
             },
             "optional": True,
+        }
+    employee_dataset = str(datasets.get("employee_expertise") or DEFAULT_DATASETS["employee_expertise"]).strip()
+    if employee_dataset:
+        resources["employee_expertise"] = {
+            "request": {"body": {"dataset": employee_dataset}},
+            "response_path": str(paths.get("employee_expertise") or DEFAULT_RESPONSE_PATHS["employee_expertise"]),
+            "field_mapping": {
+                "employee_id": "employee_id",
+                "employee_name": "employee_name",
+                "certifications": "certifications",
+                "projects": "projects",
+            },
         }
 
     return {

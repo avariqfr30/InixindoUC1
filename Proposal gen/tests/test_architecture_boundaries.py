@@ -76,6 +76,34 @@ class ArchitectureBoundariesTest(unittest.TestCase):
 
         self.assertEqual(service.company_candidates(), ["Alpha", "Beta"])
 
+    def test_client_context_service_returns_http_safe_unknown_client_payload(self) -> None:
+        from main.runtime_services import ClientContextService
+
+        generator = Mock()
+        generator.firm_api.get_client_context.side_effect = LookupError("client not found")
+        prefetch_research = Mock(return_value="queued")
+
+        service = ClientContextService(generator, Mock(), prefetch_research=prefetch_research)
+
+        payload = service.client_context_payload("Unknown Client")
+
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["client_name"], "Unknown Client")
+        self.assertEqual(payload["account_summary"], "")
+        self.assertEqual(payload["use_case_summary"], "")
+        self.assertEqual(payload["use_cases"], [])
+        self.assertEqual(payload["expert_guidance"], "")
+        self.assertEqual(payload["osint_prefetch_status"], "queued")
+        self.assertIn("OSINT", payload["osint_context_note"])
+        self.assertNotIn("error", payload)
+        prefetch_research.assert_called_once_with(
+            {
+                "nama_perusahaan": "Unknown Client",
+                "potensi_framework": "",
+                "konteks_organisasi": "Unknown Client",
+            }
+        )
+
     def test_generation_request_service_keeps_required_field_validation_out_of_route(self) -> None:
         from main.proposal_request_service import GENERATION_REQUIRED_FIELDS, ProposalRequestService
 

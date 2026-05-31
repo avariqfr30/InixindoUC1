@@ -1,6 +1,7 @@
 """Framework catalogue and resolver for proposal framework choices."""
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -144,15 +145,16 @@ def _resolve_regulation(context: Optional[Dict[str, Any]]) -> str:
 class FrameworkCatalogService:
     """Resolves UI framework choices through API-backed catalogue data or fallback defaults."""
 
-    def __init__(self, provider: Any = None) -> None:
+    def __init__(self, provider: Any = None, researcher: Any = None) -> None:
         self.provider = provider
+        self.researcher = researcher
 
     @staticmethod
     def fallback_options() -> List[Dict[str, Any]]:
         return [dict(item) for item in FALLBACK_FRAMEWORK_OPTIONS]
 
     def options(self) -> Dict[str, Any]:
-        api_options = self._provider_options()
+        api_options = self._normalize_options(self._provider_options())
         options = api_options or self.fallback_options()
         return {
             "source": "internal_api" if api_options else "fallback",
@@ -166,6 +168,11 @@ class FrameworkCatalogService:
                     "value": str(item.get("value") or item.get("label") or "").strip(),
                     "label": str(item.get("label") or item.get("value") or "").strip(),
                     "description": str(item.get("description") or "").strip(),
+                    "issuer": str(item.get("issuer") or "").strip(),
+                    "category": str(item.get("category") or "").strip(),
+                    "versions": item.get("versions") if isinstance(item.get("versions"), list) else [],
+                    "recommended_version": str(item.get("recommended_version") or item.get("resolved") or item.get("value") or "").strip(),
+                    "osint_evidence": self._osint_evidence(item),
                     "available": bool(item.get("available", True)),
                 }
                 for item in options
@@ -186,20 +193,128 @@ class FrameworkCatalogService:
         options = [item for item in raw if isinstance(item, dict)]
         return options
 
+    @staticmethod
+    def _truthy_active(value: Any) -> bool:
+        text = str(value if value is not None else "1").strip().lower()
+        return text not in {"0", "false", "no", "inactive", "tidak aktif"}
+
+    @staticmethod
+    def _parse_list_value(value: Any) -> List[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item or "").strip()]
+        text = str(value or "").strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item or "").strip()]
+        except Exception:
+            pass
+        return [item.strip() for item in re.split(r"[,;/\n]+", text) if item.strip()]
+
+    def _normalize_version_item(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        value = str(
+            raw.get("value")
+            or raw.get("child_short_name")
+            or raw.get("child_name")
+            or raw.get("label")
+            or raw.get("child_code")
+            or ""
+        ).strip()
+        label = str(raw.get("label") or raw.get("child_name") or raw.get("child_short_name") or value).strip()
+        version = str(raw.get("version") or raw.get("child_version") or "").strip()
+        return {
+            "value": value or label,
+            "label": label or value,
+            "description": str(raw.get("description") or raw.get("child_description") or "").strip(),
+            "version": version,
+            "issuer": str(raw.get("issuer") or raw.get("child_issuer") or "").strip(),
+            "category": str(raw.get("category") or raw.get("child_category") or "").strip(),
+            "available": self._truthy_active(raw.get("available", raw.get("child_is_active", True))),
+        }
+
+    def _normalize_options(self, raw_options: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        for raw in raw_options:
+            value = str(raw.get("value") or raw.get("parent_code") or raw.get("parent_short_name") or raw.get("label") or "").strip()
+            label = str(raw.get("label") or raw.get("parent_short_name") or raw.get("parent_name") or value).strip()
+            versions = [
+                self._normalize_version_item(item)
+                for item in (raw.get("versions") or raw.get("children") or [])
+                if isinstance(item, dict)
+            ]
+            versions = [item for item in versions if item.get("value") and item.get("available", True)]
+            resolved = str(raw.get("resolved") or raw.get("parent_version") or "").strip()
+            recommended = versions[-1]["value"] if versions else (resolved or value or label)
+            aliases = self._parse_list_value(raw.get("aliases"))
+            aliases.extend([value, label, raw.get("parent_name"), raw.get("parent_short_name"), raw.get("parent_code")])
+            normalized.append(
+                {
+                    "value": value or label,
+                    "label": label or value,
+                    "description": str(raw.get("description") or raw.get("parent_description") or "").strip(),
+                    "resolved": recommended,
+                    "recommended_version": recommended,
+                    "aliases": _dedupe([str(item or "") for item in aliases]),
+                    "issuer": str(raw.get("issuer") or raw.get("parent_issuer") or "").strip(),
+                    "category": str(raw.get("category") or raw.get("parent_category") or "").strip(),
+                    "versions": versions,
+                    "available": self._truthy_active(raw.get("available", raw.get("parent_is_active", True))),
+                }
+            )
+        return normalized
+
+    def _osint_evidence(self, item: Dict[str, Any]) -> List[Dict[str, str]]:
+        researcher = self.researcher
+        if researcher is None or not hasattr(researcher, "search"):
+            return []
+        query_parts = [
+            str(item.get("label") or item.get("value") or "").strip(),
+            str(item.get("issuer") or "").strip(),
+            "framework official guidance",
+        ]
+        query = " ".join(part for part in query_parts if part)
+        if not query.strip():
+            return []
+        try:
+            results = researcher.search(query, limit=3)
+        except Exception:
+            return []
+        evidence: List[Dict[str, str]] = []
+        for result in results or []:
+            if not isinstance(result, dict):
+                continue
+            title = str(result.get("title") or "").strip()
+            url = str(result.get("link") or result.get("url") or "").strip()
+            snippet = str(result.get("snippet") or result.get("content") or "").strip()
+            if title or url or snippet:
+                evidence.append({"title": title, "url": url, "snippet": snippet})
+            if len(evidence) >= 2:
+                break
+        return evidence
+
     def resolve(self, raw_value: str, context: Optional[Dict[str, Any]] = None) -> str:
         selected = _split_frameworks(raw_value)
         if not selected:
             return ""
-        options = self._provider_options() or self.fallback_options()
+        options = self._normalize_options(self._provider_options()) or self.fallback_options()
         lookup: Dict[str, Dict[str, Any]] = {}
         for option in options:
             aliases = [option.get("value"), option.get("label"), option.get("resolved"), *(option.get("aliases") or [])]
+            for version in option.get("versions") or []:
+                if isinstance(version, dict):
+                    aliases.extend([version.get("value"), version.get("label"), version.get("version")])
             for alias in aliases:
                 key = _normalize_token(str(alias or ""))
                 if key:
                     lookup[key] = option
         resolved: List[str] = []
         for item in selected:
+            version_value = self._resolve_version_value(options, item)
+            if version_value:
+                resolved.append(version_value)
+                continue
             option = lookup.get(_normalize_token(item))
             if not option:
                 resolved.append(item)
@@ -214,11 +329,34 @@ class FrameworkCatalogService:
             resolved.append(value)
         return ", ".join(_dedupe(resolved))
 
+    @staticmethod
+    def _resolve_version_value(options: List[Dict[str, Any]], item: str) -> str:
+        item_key = _normalize_token(item)
+        for option in options:
+            for version in option.get("versions") or []:
+                if not isinstance(version, dict):
+                    continue
+                candidates = [version.get("value"), version.get("label"), version.get("version")]
+                if item_key in {_normalize_token(str(candidate or "")) for candidate in candidates}:
+                    return str(version.get("value") or version.get("label") or item).strip()
+        return ""
+
     def confirmation_payload(self, raw_value: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         selected = _split_frameworks(raw_value)
+        options = self._normalize_options(self._provider_options()) or self.fallback_options()
         items: List[Dict[str, Any]] = []
         for item in selected:
             normalized = _normalize_token(item)
+            catalog_option = self._catalog_option_for_selection(options, item)
+            if catalog_option and catalog_option.get("versions"):
+                items.append(
+                    {
+                        "selection": item,
+                        "recommended": catalog_option.get("recommended_version") or catalog_option["versions"][0]["value"],
+                        "options": catalog_option["versions"],
+                    }
+                )
+                continue
             if normalized not in FALLBACK_FRAMEWORK_ALTERNATIVES:
                 continue
             alternatives = FALLBACK_FRAMEWORK_ALTERNATIVES[normalized]
@@ -242,3 +380,12 @@ class FrameworkCatalogService:
             "items": items,
             "resolved_framework": self.resolve(raw_value, context=context),
         }
+
+    @staticmethod
+    def _catalog_option_for_selection(options: List[Dict[str, Any]], item: str) -> Optional[Dict[str, Any]]:
+        item_key = _normalize_token(item)
+        for option in options:
+            aliases = [option.get("value"), option.get("label"), option.get("resolved"), *(option.get("aliases") or [])]
+            if item_key in {_normalize_token(str(alias or "")) for alias in aliases}:
+                return option
+        return None

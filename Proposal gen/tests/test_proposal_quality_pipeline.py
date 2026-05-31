@@ -8,6 +8,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from main.proposal_quality_pipeline import (
+    ContextIntelligenceDesk,
     EvidenceDeckBuilder,
     ProposalQualityGate,
     ScopeContractExtractor,
@@ -33,6 +34,47 @@ class ProposalQualityPipelineTests(unittest.TestCase):
         self.assertIn("tata kelola layanan lebih terkendali", chapter_text)
         for forbidden in ["ReferenceAccount", "dataset_code", "ConsultantProjectExpertHistory", "source="]:
             self.assertNotIn(forbidden, chapter_text)
+
+    def test_context_intelligence_desk_synthesizes_raw_helpers_for_chapter_guidance(self):
+        packet = ContextIntelligenceDesk.build(
+            client="PT Contoh",
+            project="Transformasi Layanan Digital",
+            project_goal="Problem, Opportunity, Directive",
+            notes="ReferenceAccount mencatat Identitas akun internal: source=/api/Resource/dataset.",
+            research_bundle={
+                "profile": "PT Contoh memperluas layanan digital untuk memperkuat operasi.",
+                "regulations": "Regulasi SPBE dan ISO perlu dipakai sebagai acuan tata kelola.",
+            },
+            internal_context="APIDog ReferenceAccount dataset_code=ReferenceAccount; lokasi DIY; segmentasi SWASTA.",
+            value_map={"value_statement": "tata kelola layanan lebih terkendali"},
+            scope_contract={"in_scope": ["asesmen tata kelola dan roadmap prioritas"], "out_of_scope": ["implementasi aplikasi penuh"]},
+        )
+
+        guidance = packet.for_chapter("c_4")
+
+        self.assertIn("PT Contoh", guidance)
+        self.assertIn("tata kelola layanan", guidance.lower())
+        self.assertIn("asesmen tata kelola", guidance.lower())
+        for forbidden in ["ReferenceAccount", "APIDog", "dataset_code", "source=", "/api/Resource/dataset", "Identitas akun internal"]:
+            self.assertNotIn(forbidden, guidance)
+
+    def test_context_intelligence_desk_keeps_weak_osint_and_internal_confidence_silent(self):
+        packet = ContextIntelligenceDesk.build(
+            client="PT Contoh",
+            project="Audit Tata Kelola",
+            project_goal="Memperkuat tata kelola layanan",
+            research_bundle={},
+            internal_context="lokasi DIY; segmentasi SWASTA; status prospek aktif",
+            value_map={"value_statement": "keputusan kerja lebih terukur"},
+        )
+
+        guidance = packet.for_chapter("c_1")
+        team_guidance = packet.for_chapter("c_10")
+
+        self.assertIn("tidak memaksakan klaim eksternal", guidance.lower())
+        self.assertIn("data kemampuan internal", team_guidance.lower())
+        for forbidden in ["keyakinan", "confidence", "dataset", "Internal API", "APIDog"]:
+            self.assertNotIn(forbidden, guidance + team_guidance)
 
     def test_scope_contract_extracts_boundaries_for_later_chapters(self):
         scope_text = (
@@ -60,7 +102,7 @@ class ProposalQualityPipelineTests(unittest.TestCase):
         }
         result = ProposalQualityGate.evaluate(
             chapter_outputs={
-                "c_4": "ReferenceAccount mencatat source=/api/Resource/dataset.",
+                "c_4": "ReferenceAccount mencatat source=/api/Resource/dataset. Identitas akun internal mengonfirmasi klien.",
                 "c_6": "Solusi mencakup implementasi penuh aplikasi walau scope membatasinya.",
             },
             selected_chapters=[

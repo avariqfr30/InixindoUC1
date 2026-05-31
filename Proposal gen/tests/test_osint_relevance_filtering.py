@@ -72,6 +72,27 @@ class OsintRelevanceFilteringTest(unittest.TestCase):
         self.assertEqual(filtered[0]["title"], "ExampleBank annual report")
         self.assertNotIn("Old ExampleBank note", [item["title"] for item in filtered])
 
+    def test_external_evidence_is_synthesized_before_document_use(self) -> None:
+        from main.research import Researcher
+
+        evidence = Researcher._format_source_evidence_item(
+            {
+                "title": "Raw Webpage Title That Should Not Become The Proof",
+                "snippet": "ExampleBank melaporkan peningkatan adopsi layanan digital sebesar 35% untuk mempercepat respons pelanggan.",
+                "link": "https://examplebank.co.id/reports/digital",
+                "date": "2026",
+            },
+            index=1,
+        )
+
+        self.assertIn("Bukti eksternal 1:", evidence)
+        self.assertIn("peningkatan adopsi layanan digital", evidence)
+        self.assertIn("(examplebank.co.id, 2026)", evidence)
+        self.assertNotIn("url=", evidence)
+        self.assertNotIn("sumber=", evidence)
+        self.assertNotIn("https://", evidence)
+        self.assertNotIn("Raw Webpage Title", evidence)
+
 
 if __name__ == "__main__":
     unittest.main()

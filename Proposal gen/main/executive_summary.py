@@ -51,6 +51,8 @@ class ExecutiveSummaryBuilder:
         raw_helper_markers = [
             "pain points",
             "konteks klien",
+            "konteks akun internal",
+            "identitas akun internal",
             "data internal",
             "referenceaccount",
             "gunakan informasi ini",
@@ -114,14 +116,31 @@ class ExecutiveSummaryBuilder:
         text = ExecutiveSummaryBuilder._plain_text(markdown)
         if not text:
             return ""
-        sentences = re.split(r"(?<=[.!?])\s+", text)
-        chosen = []
-        for sentence in sentences:
-            cleaned = sentence.strip()
-            if cleaned:
-                chosen.append(cleaned)
-            if len(" ".join(chosen).split()) >= max_words:
-                break
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", text)
+            if sentence.strip()
+        ]
+        generic_patterns = [
+            r"pembahasan pada bagian ini",
+            r"fokus utama harus tetap",
+            r"risiko, dependensi, dan indikator hasil",
+            r"bagian ini perlu menjelaskan",
+        ]
+        substantive_tokens = (
+            "keluaran", "manfaat", "risiko", "batas", "milestone", "tonggak",
+            "governance", "tata kelola", "kpi", "scope", "ruang lingkup",
+            "arsitektur", "prioritas", "indikator", "keputusan",
+        )
+        ranked = []
+        for index, sentence in enumerate(sentences):
+            lowered = sentence.lower()
+            if any(re.search(pattern, lowered) for pattern in generic_patterns):
+                continue
+            score = sum(1 for token in substantive_tokens if token in lowered)
+            ranked.append((score, -index, sentence))
+        ranked.sort(reverse=True)
+        chosen = [item[2] for item in ranked[:2]] if ranked else sentences[:1]
         words = " ".join(chosen).split()
         if len(words) <= max_words:
             return " ".join(chosen).strip()

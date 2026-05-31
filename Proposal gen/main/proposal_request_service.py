@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from .internal_evidence_summary import build_internal_evidence_summary, document_context_lines
 from .proposal_shared import logger
 from .text_hygiene import normalize_payload
 
@@ -239,6 +240,20 @@ class ProposalRequestService:
             expert_bench_context = self.proposal_generator.firm_api.get_expert_bench_context(limit_products=8)
             if expert_bench_context.get("available"):
                 supporting_context["expert_bench_context"] = expert_bench_context
+                internal_evidence = build_internal_evidence_summary(expert_bench_context)
+                evidence_lines = document_context_lines(internal_evidence)
+                if evidence_lines:
+                    supporting_context["internal_evidence_summary"] = internal_evidence
+                    supporting_context["internal_evidence_context"] = evidence_lines
+                    merged_context = "\n".join(
+                        item
+                        for item in [
+                            str(supporting_context.get("settings_context") or "").strip(),
+                            *evidence_lines,
+                        ]
+                        if item
+                    )
+                    supporting_context["settings_context"] = merged_context
         except Exception:
             logger.exception("Internal expert bench context enrichment failed")
 

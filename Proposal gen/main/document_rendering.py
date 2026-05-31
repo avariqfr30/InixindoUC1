@@ -1481,7 +1481,7 @@ class DocumentBuilder:
             if not pending:
                 return
             if DocumentBuilder._is_valid_markdown_table_block(pending):
-                output.extend(pending)
+                output.extend(DocumentBuilder._dedupe_markdown_table_rows(pending))
             else:
                 for row in pending:
                     if DocumentBuilder._is_markdown_table_separator(row):
@@ -1501,6 +1501,21 @@ class DocumentBuilder:
             output.append(raw_line)
         flush_pending()
         return "\n".join(output).strip()
+
+    @staticmethod
+    def _dedupe_markdown_table_rows(lines: List[str]) -> List[str]:
+        if len(lines) < 3:
+            return lines
+        output = lines[:2]
+        seen = set()
+        for row in lines[2:]:
+            cells = DocumentBuilder._markdown_table_cells(row)
+            signature = tuple(re.sub(r"\s+", " ", cell).strip().lower() for cell in cells)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            output.append(row)
+        return output
 
     @staticmethod
     def _normalize_markdown_blocks(raw_text: str) -> str:

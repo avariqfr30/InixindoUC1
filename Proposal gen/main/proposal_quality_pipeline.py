@@ -19,6 +19,12 @@ RAW_HELPER_PATTERNS = [
     r"/api/Resource/dataset",
     r"\bendpoint\b",
     r"\bDirangkum dari sumber\b",
+    r"\bKonteks akun internal\b",
+    r"\b(?:detail\s+)?Identitas akun internal\b",
+    r"\bGunakan informasi ini\b",
+    r"\bPembahasan pada Pembahasan ini\b",
+    r"\bPembahasan pada bagian ini perlu menjelaskan\b",
+    r"\bFokus utama harus tetap pada apa yang perlu dipertegas\b",
 ]
 
 
@@ -105,6 +111,130 @@ class EvidenceDeckBuilder:
         if scope_contract.get("out_of_scope"):
             cards.append(EvidenceCard(("c_4", "c_5", "c_6", "c_8", "c_9", "c_12"), "Hal di luar cakupan: " + "; ".join(scope_contract["out_of_scope"][:4]), "kontrak_ruang_lingkup", "high"))
         return EvidenceDeck(cards)
+
+
+@dataclass(frozen=True)
+class ContextDeskPacket:
+    context_brief: str
+    chapter_guidance: Dict[str, str]
+    risk_notes: List[str]
+    evidence_deck: EvidenceDeck
+
+    def for_chapter(self, chapter_id: str) -> str:
+        parts = [self.context_brief, self.chapter_guidance.get(chapter_id, "")]
+        cleaned = [_clean_text(part, max_words=70) for part in parts if str(part or "").strip()]
+        if not cleaned:
+            return ""
+        return "\n".join(f"- {item}" for item in cleaned)
+
+
+class ContextIntelligenceDesk:
+    """Synthesizes raw UI, OSINT, and internal helper context into hidden writing guidance."""
+
+    CHAPTER_FOCUS = {
+        "c_1": "gunakan sebagai cerita pembuka tentang kondisi klien dan alasan kebutuhan muncul",
+        "c_2": "hubungkan konteks klien dengan masalah yang perlu diselesaikan",
+        "c_3": "klasifikasikan kebutuhan tanpa menyalin kategori input mentah",
+        "c_4": "pilih pendekatan, standar, atau regulasi yang paling relevan dengan kebutuhan",
+        "c_5": "jelaskan metodologi yang menjaga pekerjaan tetap terukur",
+        "c_6": "turunkan solusi dari kebutuhan dan batas ruang lingkup",
+        "c_7": "jadikan batas pekerjaan sebagai kontrak naratif untuk bab setelahnya",
+        "c_8": "susun tahapan, aktivitas, dan keluaran yang realistis",
+        "c_9": "jelaskan tata kelola, dependensi, dan kontrol keputusan proyek",
+        "c_10": "tunjukkan kapabilitas tim tanpa menyalin biodata atau tabel mentah",
+        "c_11": "ringkas bukti kemampuan dan sertifikasi menjadi alasan kepercayaan",
+        "c_12": "ikat model biaya dengan scope, tahapan, dan asumsi kerja",
+        "c_closing": "tutup dengan ajakan komunikasi yang bersih dan profesional",
+    }
+
+    @classmethod
+    def build(
+        cls,
+        client: str,
+        project: str,
+        project_goal: str = "",
+        notes: str = "",
+        regulations: str = "",
+        research_bundle: Optional[Dict[str, Any]] = None,
+        internal_context: str = "",
+        value_map: Optional[Dict[str, Any]] = None,
+        scope_contract: Optional[Dict[str, List[str]]] = None,
+        timeline: str = "",
+        budget: str = "",
+    ) -> ContextDeskPacket:
+        research_bundle = research_bundle or {}
+        value_map = value_map or {}
+        scope_contract = scope_contract or {}
+        source_text = " ".join(
+            str(item or "")
+            for item in [
+                project_goal,
+                notes,
+                regulations,
+                internal_context,
+                research_bundle.get("profile"),
+                research_bundle.get("news"),
+                value_map.get("value_statement"),
+            ]
+        )
+        synthesized_need = cls._synthesize_need(source_text)
+        profile_signal = _clean_text(research_bundle.get("profile") or research_bundle.get("news") or "", max_words=28)
+        value_signal = _clean_text(value_map.get("value_statement") or "", max_words=24)
+        external_guard = "" if profile_signal else "tidak memaksakan klaim eksternal ketika pembanding publik belum cukup kuat"
+        brief_parts = [
+            f"{client} perlu dibaca sebagai penerima proposal untuk {project}",
+            synthesized_need,
+            profile_signal,
+            value_signal,
+            external_guard,
+        ]
+        context_brief = ". ".join(part for part in (_clean_text(item, max_words=32) for item in brief_parts) if part)
+
+        chapter_guidance: Dict[str, str] = {}
+        scope_text = ScopeContractExtractor.to_prompt_text(scope_contract)
+        for chapter_id, focus in cls.CHAPTER_FOCUS.items():
+            cues = [focus]
+            if chapter_id in {"c_4", "c_5", "c_6", "c_8", "c_9", "c_12"} and scope_text:
+                cues.append(scope_text)
+            if chapter_id in {"c_4", "c_5"} and regulations:
+                cues.append(f"Acuan yang relevan: {regulations}")
+            if chapter_id in {"c_10", "c_11"} and internal_context:
+                cues.append("pakai data kemampuan internal sebagai bukti kecocokan peran, bukan sebagai daftar mentah")
+            chapter_guidance[chapter_id] = _clean_text(". ".join(cues), max_words=64)
+
+        evidence_deck = EvidenceDeckBuilder.build(
+            client=client,
+            project=project,
+            project_goal=synthesized_need or project_goal,
+            timeline=timeline,
+            budget=budget,
+            research_bundle=research_bundle,
+            internal_context=internal_context,
+            value_map=value_map,
+            scope_contract=scope_contract,
+        )
+        risk_notes = [
+            "Jangan menampilkan nama dataset, endpoint, source path, atau label workflow internal.",
+            "Jangan mengubah metadata akun menjadi pain point, KPI, atau scope jika tidak didukung konteks.",
+        ]
+        return ContextDeskPacket(context_brief=context_brief, chapter_guidance=chapter_guidance, risk_notes=risk_notes, evidence_deck=evidence_deck)
+
+    @staticmethod
+    def _synthesize_need(text: str) -> str:
+        cleaned = _clean_text(text, max_words=44)
+        lowered = cleaned.lower()
+        needs = []
+        if any(token in lowered for token in ("spbe", "tata kelola", "governance")):
+            needs.append("penguatan tata kelola dan kesiapan eksekusi")
+        if any(token in lowered for token in ("iso", "regulasi", "standard", "standar")):
+            needs.append("keselarasan dengan standar dan regulasi yang relevan")
+        if any(token in lowered for token in ("pain", "problem", "risiko", "keluhan")):
+            needs.append("pengurangan risiko operasional yang paling terasa")
+        if any(token in lowered for token in ("opportunity", "peluang", "directive", "arah")):
+            needs.append("penajaman peluang dan arahan manajemen menjadi rencana kerja")
+        if needs:
+            return "Kebutuhan utama dibaca sebagai " + "; ".join(dict.fromkeys(needs))
+        return cleaned
 
 
 class ScopeContractExtractor:

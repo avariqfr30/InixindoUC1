@@ -14,6 +14,7 @@ from .internal_api_runtime import (
 )
 from .internal_api_setup import build_internal_api_config, write_json_config
 from .framework_catalog import FrameworkCatalogService
+from .research import Researcher
 from .proposal_shared import MANAGED_INTERNAL_API_CONFIG_PATH, logger
 
 
@@ -136,27 +137,39 @@ class ClientContextService:
                 "use_cases": [],
                 "expert_guidance": "",
             }
+        osint_prefetch_status = ""
+        osint_context_note = (
+            "OSINT client research is being prepared for generation: public profile, recent signals, "
+            "track record, and persuasive context will be used as proposal helpers."
+        )
+        try:
+            osint_prefetch_status = self.prefetch_research(
+                {
+                    "nama_perusahaan": normalized_client,
+                    "potensi_framework": "",
+                    "konteks_organisasi": normalized_client,
+                }
+            )
+        except Exception:
+            logger.exception("OSINT prefetch failed for selected client %s", normalized_client)
+            osint_prefetch_status = "failed"
         try:
             context = self.proposal_generator.firm_api.get_client_context(normalized_client)
-            try:
-                context["osint_prefetch_status"] = self.prefetch_research(
-                    {
-                        "nama_perusahaan": normalized_client,
-                        "potensi_framework": "",
-                        "konteks_organisasi": normalized_client,
-                    }
-                )
-                context["osint_context_note"] = (
-                    "OSINT client research is being prepared for generation: public profile, recent signals, "
-                    "track record, and persuasive context will be used as proposal helpers."
-                )
-            except Exception:
-                logger.exception("OSINT prefetch failed for selected client %s", normalized_client)
-                context["osint_prefetch_status"] = "failed"
+            context["osint_prefetch_status"] = osint_prefetch_status
+            context["osint_context_note"] = osint_context_note
             return context
         except Exception as exc:
-            logger.exception("Internal client context lookup failed for %s", normalized_client)
-            return {"available": False, "client_name": normalized_client, "error": str(exc), "use_cases": []}
+            logger.info("Internal client context lookup missed for %s: %s", normalized_client, exc)
+            return {
+                "available": False,
+                "client_name": normalized_client,
+                "account_summary": "",
+                "use_case_summary": "",
+                "use_cases": [],
+                "expert_guidance": "",
+                "osint_prefetch_status": osint_prefetch_status,
+                "osint_context_note": osint_context_note,
+            }
 
     def internal_context_text(self, client_name: str, payload: Optional[Dict[str, Any]] = None) -> str:
         payload = payload or {}
@@ -248,7 +261,7 @@ class FrameworkOptionService:
             provider = self.provider_factory()
         except Exception:
             provider = None
-        return FrameworkCatalogService(provider)
+        return FrameworkCatalogService(provider, researcher=Researcher)
 
     def options_payload(self) -> Dict[str, Any]:
         return self._catalog().options()

@@ -54,6 +54,7 @@ class FirmAPIClient:
         "client_relationship": ("summary",),
         "project_records": ("entity", "topic"),
         "framework_catalog": ("value", "label"),
+        "employee_expertise": ("employee_name",),
     }
 
     def __init__(self, force_source: str = "") -> None:
@@ -96,6 +97,7 @@ class FirmAPIClient:
             pass
         else:
             logger.warning("Unknown FIRM_API_AUTH_MODE=%s. Falling back to unauthenticated requests.", self.auth_mode)
+        self._resource_record_cache: Dict[str, List[Dict[str, Any]]] = {}
 
     @staticmethod
     def _load_json_config(path_value: str) -> Dict[str, Any]:
@@ -248,6 +250,8 @@ class FirmAPIClient:
             resource_names.append("project_records")
         if "framework_catalog" in configured_resources:
             resource_names.append("framework_catalog")
+        if "employee_expertise" in configured_resources:
+            resource_names.append("employee_expertise")
         for resource_name in resource_names:
             resource_spec = dict((self.resource_config or {}).get(resource_name) or {})
             if resource_spec.get("optional") and not str((((resource_spec.get("request") or {}).get("body") or {}).get("dataset") or "")).strip():
@@ -380,6 +384,26 @@ class FirmAPIClient:
         if not resource_spec:
             return []
 
+        cache_context = {
+            "resource_name": resource_name,
+            "apply_filters": apply_filters,
+            "context": context,
+            "request": resource_spec.get("request") or {},
+            "response_path": resource_spec.get("response_path") or "",
+            "record_filters": resource_spec.get("record_filters") or {},
+            "field_mapping": resource_spec.get("field_mapping") or {},
+        }
+        try:
+            cache_key = json.dumps(cache_context, sort_keys=True, default=str)
+        except TypeError:
+            cache_key = str(cache_context)
+        cache = getattr(self, "_resource_record_cache", None)
+        if cache is None:
+            cache = {}
+            self._resource_record_cache = cache
+        if cache_key in cache:
+            return [dict(record) for record in cache[cache_key]]
+
         payload = self._request_from_spec(resource_spec, **context)
         response_path = self._render_template_value(resource_spec.get("response_path") or "", context)
         if response_path:
@@ -411,17 +435,23 @@ class FirmAPIClient:
 
         field_mapping = resource_spec.get("field_mapping") or {}
         if not field_mapping:
+            cache[cache_key] = [dict(record) for record in records]
             return records
-        return [
+        mapped_records = [
             {
                 target_field: self._extract_with_jmespath(record, str(json_path))
                 for target_field, json_path in field_mapping.items()
             }
             for record in records
         ]
+        cache[cache_key] = [dict(record) for record in mapped_records]
+        return mapped_records
 
     def get_account_records(self) -> List[Dict[str, Any]]:
         return self._get_mapped_resource_records("account_records", apply_filters=False)
+
+    def get_employee_expertise_records(self) -> List[Dict[str, Any]]:
+        return self._get_mapped_resource_records("employee_expertise", apply_filters=False)
 
     def uses_demo_logic(self) -> bool:
         return self.demo_mode or self.data_acquisition_mode == "demo"
@@ -661,6 +691,74 @@ class FirmAPIClient:
         return f"Konteks akun internal menempatkan {company_name}{suffix}. Gunakan informasi ini sebagai latar segmentasi dan lokasi, bukan sebagai rumusan tujuan proyek."
 
     @staticmethod
+    def _flatten_text_items(value: Any, limit: int = 6) -> List[str]:
+        items: List[str] = []
+
+        def collect(node: Any) -> None:
+            if len(items) >= max(1, int(limit or 6)):
+                return
+            if isinstance(node, dict):
+                for child in node.values():
+                    collect(child)
+            elif isinstance(node, list):
+                for child in node:
+                    collect(child)
+            else:
+                text = FirmAPIClient._naturalize_internal_text(node)
+                if text and text not in items:
+                    items.append(text)
+
+        collect(value)
+        return items[: max(1, int(limit or 6))]
+
+    @classmethod
+    def _format_employee_expertise(cls, records: List[Dict[str, Any]], limit: int = 5) -> Dict[str, Any]:
+        normalized: List[Dict[str, Any]] = []
+        certification_terms: List[str] = []
+        project_terms: List[str] = []
+        for record in records or []:
+            if not isinstance(record, dict):
+                continue
+            employee_name = cls._naturalize_internal_text(record.get("employee_name"))
+            certifications = cls._flatten_text_items(record.get("certifications"), limit=8)
+            projects = cls._flatten_text_items(record.get("projects"), limit=6)
+            if not employee_name and not certifications and not projects:
+                continue
+            for cert in certifications:
+                if cert not in certification_terms:
+                    certification_terms.append(cert)
+            for project in projects:
+                if project not in project_terms:
+                    project_terms.append(project)
+            normalized.append(
+                {
+                    "employee_name": employee_name,
+                    "certifications": certifications,
+                    "projects": projects,
+                }
+            )
+
+        if not normalized:
+            return {"available": False, "record_count": len(records or []), "summary": "", "rows": []}
+
+        cert_line = ", ".join(certification_terms[:8])
+        project_line = ", ".join(project_terms[:5])
+        parts = [f"Data sertifikasi internal mencakup {len(normalized)} tenaga ahli."]
+        if cert_line:
+            parts.append(f"Area sertifikasi yang dapat ditonjolkan: {cert_line}.")
+        if project_line:
+            parts.append(f"Pengalaman terkait yang tercatat mencakup {project_line}.")
+        return {
+            "available": True,
+            "record_count": len(records or []),
+            "usable_record_count": len(normalized),
+            "summary": " ".join(parts),
+            "rows": normalized[: max(1, int(limit or 5))],
+            "certifications": certification_terms[:12],
+            "projects": project_terms[:10],
+        }
+
+    @staticmethod
     def _normalized_relationship_mode(raw_mode: str, summary: str) -> str:
         mode = str(raw_mode or "").strip().lower()
         if mode in {"existing", "new"}:
@@ -669,7 +767,7 @@ class FirmAPIClient:
 
     @staticmethod
     def _has_osint_evidence(summary: str) -> bool:
-        return any(line.strip().startswith("Sumber eksternal") for line in (summary or "").splitlines())
+        return any(line.strip().startswith(("Sumber eksternal", "Bukti eksternal")) for line in (summary or "").splitlines())
 
     def get_client_options(self, limit: int = 500) -> List[str]:
         names: List[str] = []
@@ -828,6 +926,17 @@ class FirmAPIClient:
 
     def get_expert_bench_context(self, limit_products: int = 8) -> Dict[str, Any]:
         records = self.get_project_records()
+        try:
+            employee_records = self.get_employee_expertise_records()
+        except AttributeError:
+            employee_records = []
+        except Exception:
+            logger.exception("Internal employee expertise lookup failed")
+            employee_records = []
+        employee_expertise = self._format_employee_expertise(
+            employee_records,
+            limit=limit_products,
+        )
         mapped: List[Dict[str, Any]] = []
         for record in records:
             mapped.append(
@@ -864,7 +973,15 @@ class FirmAPIClient:
             allow_named_experts=True,
         )
         if not formatted.get("available"):
-            return {"available": False, "record_count": len(records), "summary": "", "product_expert_matrix": []}
+            return {
+                "available": bool(employee_expertise.get("available")),
+                "record_count": len(records),
+                "summary": employee_expertise.get("summary", ""),
+                "product_expert_matrix": [],
+                "employee_expertise_summary": employee_expertise.get("summary", ""),
+                "employee_expertise_rows": employee_expertise.get("rows", []),
+                "employee_expertise_record_count": employee_expertise.get("record_count", 0),
+            }
         return {
             "available": True,
             "record_count": len(records),
@@ -879,10 +996,15 @@ class FirmAPIClient:
             "usable_record_count": intelligence.get("usable_record_count", len(mapped)),
             "strongest_roles": intelligence.get("strongest_roles", []),
             "source": "internal_api",
+            "employee_expertise_summary": employee_expertise.get("summary", ""),
+            "employee_expertise_rows": employee_expertise.get("rows", []),
+            "employee_expertise_record_count": employee_expertise.get("record_count", 0),
             "name_policy": {
                 "allow_named_specialists": True,
                 "allowed_use": "team_chapter_only",
-                "source": "ConsultantProjectExpertHistory",
+                "source": "ConsultantProjectExpertHistory+EmployeeExpertise"
+                if employee_expertise.get("available")
+                else "ConsultantProjectExpertHistory",
             },
         }
 
@@ -910,6 +1032,18 @@ class FirmAPIClient:
                     }
                 else:
                     item = dict(record)
+                if not str(item.get("value") or "").strip():
+                    item["value"] = record.get("parent_code") or record.get("parent_short_name") or record.get("framework_code")
+                if not str(item.get("label") or "").strip():
+                    item["label"] = record.get("parent_short_name") or record.get("parent_name") or record.get("framework_name")
+                if not str(item.get("description") or "").strip():
+                    item["description"] = record.get("parent_description") or record.get("proposal_use_guidance")
+                if not str(item.get("issuer") or "").strip():
+                    item["issuer"] = record.get("parent_issuer")
+                if not str(item.get("category") or "").strip():
+                    item["category"] = record.get("parent_category")
+                if "versions" not in item and "children" in record:
+                    item["versions"] = record.get("children")
                 if str(item.get("value") or item.get("label") or "").strip():
                     mapped.append(item)
             return mapped

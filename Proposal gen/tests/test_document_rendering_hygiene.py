@@ -48,6 +48,23 @@ class DocumentRenderingHygieneTest(unittest.TestCase):
         self.assertEqual(len(doc.tables), 1)
         self.assertEqual(doc.tables[0].cell(1, 0).text.strip(), "Governance")
 
+    def test_renderer_deduplicates_repeated_markdown_table_body_rows(self) -> None:
+        from main.document_rendering import DocumentBuilder
+
+        doc = Document()
+        raw = (
+            "| Peran | Fokus | Dampak |\n"
+            "| --- | --- | --- |\n"
+            "| Project Manager | Mengawal scope | Keputusan terkendali |\n"
+            "| Project Manager | Mengawal scope | Keputusan terkendali |\n"
+            "| Tenaga Ahli | Menyusun arsitektur | Desain lebih siap |\n"
+        )
+
+        DocumentBuilder.process_content(doc, raw, (0, 51, 102), "BAB XI")
+
+        self.assertEqual(len(doc.tables), 1)
+        self.assertEqual(len(doc.tables[0].rows), 3)
+
     def test_bullets_after_markdown_table_do_not_become_table_rows(self) -> None:
         from main.document_rendering import DocumentBuilder
 

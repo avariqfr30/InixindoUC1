@@ -31,6 +31,11 @@
         .checkbox-group { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
         .checkbox-group label { display: flex; align-items: center; font-weight: 400; margin: 0; font-size: 0.9rem; cursor: pointer; }
         .checkbox-group input[type="checkbox"] { width: auto; margin-right: 6px; margin-bottom: 0; }
+        .framework-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 12px; align-items: start; }
+        .framework-options .framework-option { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #ffffff; line-height: 1.25; }
+        .framework-options .framework-option input[type="checkbox"] { flex: 0 0 auto; margin: 0; }
+        .framework-option-name { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+        .framework-version-select { flex: 1 1 150px; min-width: 140px; max-width: 100%; width: auto; margin: 0; padding: 7px 28px 7px 9px; font-size: 0.88rem; }
         
         .finance-panel { background: #f1f5f9; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 15px; }
         .finance-tier { display: flex; justify-content: space-between; padding: 8px; border-bottom: 1px solid #cbd5e1; cursor: pointer; transition: 0.2s; }
@@ -74,12 +79,10 @@
         .source-policy-box { background: #f8fafc; border: 1px solid #dbe3ef; border-radius: 8px; padding: 12px; margin: 8px 0 14px; color: #334155; }
         .source-policy-box strong { display: block; font-size: 0.94rem; margin-bottom: 4px; color: #1f2937; }
         .source-policy-box .small-note { margin: 0; }
-        .source-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-top: 10px; }
-        .source-status-card { border: 1px solid #dbe3ef; border-radius: 8px; padding: 10px; background: #fff; }
-        .source-status-card strong { display: block; color: #1f2937; font-size: 0.9rem; }
-        .source-status-card span { display: block; color: #64748b; font-size: 0.8rem; margin-top: 3px; }
-        .source-status-ok { border-color: #86efac; background: #f0fdf4; }
-        .source-status-warn { border-color: #fde68a; background: #fffbeb; }
+        .internal-evidence-card { margin-top: 10px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #ffffff; }
+        .internal-evidence-card h4 { margin: 0 0 6px; font-size: 0.9rem; color: #1f2937; }
+        .internal-evidence-card p { margin: 0; font-size: 0.82rem; line-height: 1.45; color: #475569; }
+        .internal-evidence-card ul { margin: 7px 0 0 18px; padding: 0; color: #475569; font-size: 0.82rem; line-height: 1.45; }
         .settings-section { border-top: 1px solid #e2e8f0; padding-top: 16px; margin-top: 16px; }
         .status-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; color: #475569; font-size: 0.84rem; line-height: 1.5; }
         .upload-row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
@@ -130,7 +133,8 @@
             </div>
             
             <label for="select-perusahaan">Nama Perusahaan Klien</label>
-            <select id="select-perusahaan"></select>
+            <input type="text" id="select-perusahaan" list="company-options" placeholder="Pilih atau ketik nama klien..." autocomplete="off">
+            <datalist id="company-options"></datalist>
 
             <div id="client-context-panel" class="finance-panel hidden">
                 <label for="select-client-context">Konteks Internal Klien</label>
@@ -219,7 +223,7 @@
                 </div>
 
                 <label>Potensi Kerangka Kerja (Bisa pilih lebih dari satu)</label>
-                <div class="checkbox-group" id="group-framework">
+                <div class="checkbox-group framework-options" id="group-framework">
                     <label><input type="checkbox" value="ITIL"> ITIL</label>
                     <label><input type="checkbox" value="TOGAF"> TOGAF</label>
                     <label><input type="checkbox" value="COBIT"> COBIT</label>
@@ -275,6 +279,9 @@
             <div class="source-policy-box">
                 <strong>Portofolio Internal / Pengalaman Serupa</strong>
                 <p class="small-note">Sumber portofolio tidak diisi manual. Aplikasi memakai profil/riwayat dari API internal dan file pendukung yang diunggah.</p>
+                <div id="portfolio-internal-evidence" class="internal-evidence-card">
+                    <p>Bukti pengalaman akan muncul otomatis setelah sumber internal tersedia.</p>
+                </div>
             </div>
             <label for="settings-portfolio-files">File Pendukung Portofolio</label>
             <div class="upload-row">
@@ -288,6 +295,9 @@
             <div class="source-policy-box">
                 <strong>Kapabilitas &amp; Sertifikasi Internal</strong>
                 <p class="small-note">Sumber kapabilitas, sertifikasi, dan tenaga ahli tidak diisi manual. Aplikasi memakai data yang terkonfirmasi dari API internal dan file pendukung yang diunggah.</p>
+                <div id="credential-internal-evidence" class="internal-evidence-card">
+                    <p>Bukti kapabilitas akan muncul otomatis setelah sumber internal tersedia.</p>
+                </div>
             </div>
             <label for="settings-credential-files">File Pendukung Kapabilitas & Sertifikasi</label>
             <div class="upload-row">
@@ -308,10 +318,10 @@
             </div>
 
             <div class="settings-section">
-                <h3>Internal API / APIDog</h3>
-                <p class="small-note">Masukkan endpoint dataset internal. Sistem akan membuat mapping dasar, menyimpan config, mengaktifkan sumber data API untuk sesi berjalan, lalu refresh knowledge base di background.</p>
+                <h3>Sumber Data Internal</h3>
+                <p class="small-note">Bagian ini dipakai tim teknis untuk menghubungkan sumber data perusahaan. Pengguna proposal cukup memakai bukti yang sudah diringkas otomatis di atas.</p>
                 <label for="settings-api-url">Titik Akses API Data</label>
-                <input type="url" id="settings-api-url" placeholder="https://xxx.com/api/Resource/dataset" />
+                <input type="url" id="settings-api-url" placeholder="https://xxx.com/data" />
                 <div class="grid-2">
                     <div>
                         <label for="settings-api-auth-mode">Mode Auth</label>
@@ -329,9 +339,9 @@
                         </select>
                     </div>
                 </div>
-                <div id="internal-api-status" class="status-box">Status Internal API belum dimuat.</div>
+                <div id="internal-api-status" class="status-box">Koneksi sumber data belum dimuat.</div>
                 <div class="upload-row">
-                    <button type="button" id="btn-save-internal-api" class="secondary">Simpan & Aktifkan API Internal</button>
+                    <button type="button" id="btn-save-internal-api" class="secondary">Simpan & Aktifkan Sumber Data</button>
                     <button type="button" id="btn-refresh-internal-api" class="secondary" disabled>Muat Ulang Data Sekarang</button>
                 </div>
             </div>
@@ -363,6 +373,7 @@
             successStep: document.getElementById('step-success'),
             successMessage: document.getElementById('success-message'),
             selPerusahaan: document.getElementById('select-perusahaan'),
+            companyOptions: document.getElementById('company-options'),
             clientContextPanel: document.getElementById('client-context-panel'),
             selClientContext: document.getElementById('select-client-context'),
             clientContextSummary: document.getElementById('client-context-summary'),
@@ -404,9 +415,11 @@
             settingsPortfolioFiles: document.getElementById('settings-portfolio-files'),
             btnUploadPortfolioFiles: document.getElementById('btn-upload-portfolio-files'),
             portfolioDocList: document.getElementById('portfolio-doc-list'),
+            portfolioInternalEvidence: document.getElementById('portfolio-internal-evidence'),
             settingsCredentialFiles: document.getElementById('settings-credential-files'),
             btnUploadCredentialFiles: document.getElementById('btn-upload-credential-files'),
             credentialDocList: document.getElementById('credential-doc-list'),
+            credentialInternalEvidence: document.getElementById('credential-internal-evidence'),
             settingsTemplateFile: document.getElementById('settings-template-file'),
             templateStatus: document.getElementById('template-status'),
             btnUploadTemplate: document.getElementById('btn-upload-template'),
@@ -661,7 +674,10 @@
         // Build final framework value including custom input.
         const getFinalFrameworks = () => {
             const checked = Array.from(ui.groupFramework.querySelectorAll('input:checked:not(#cb-lainnya)'))
-                                 .map(cb => cb.value);
+                                 .map(cb => {
+                                     const select = ui.groupFramework.querySelector(`.framework-version-select[data-framework-version-for="${CSS.escape(cb.value)}"]`);
+                                     return select && select.value ? select.value : cb.value;
+                                 });
             if (ui.cbLainnya.checked && ui.inpFrameworkLainnya.value.trim() !== '') {
                 checked.push(ui.inpFrameworkLainnya.value.trim());
             }
@@ -702,11 +718,9 @@
             const companyRes = await fetch('/api/companies');
             const data = await companyRes.json();
             const currentValue = ui.selPerusahaan.value;
-            ui.selPerusahaan.innerHTML = `<option value="" disabled selected>Pilih Klien...</option>`;
-            data.forEach(d => ui.selPerusahaan.add(new Option(d, d)));
-            if (currentValue && data.includes(currentValue)) {
-                ui.selPerusahaan.value = currentValue;
-            }
+            ui.companyOptions.innerHTML = '';
+            data.forEach(d => ui.companyOptions.appendChild(new Option(d, d)));
+            ui.selPerusahaan.value = currentValue || '';
             return data;
         }
 
@@ -850,14 +864,29 @@
             const selected = getFinalFrameworks();
             const rows = options
                 .filter(item => item && item.value && item.label && item.available !== false)
-                .map(item => `
-                    <label title="${escapeHtml(item.description || '')}">
-                        <input type="checkbox" value="${escapeHtml(item.value)}"> ${escapeHtml(item.label)}
-                    </label>
-                `)
+                .map(item => {
+                    const versions = Array.isArray(item.versions) ? item.versions.filter(version => version && version.value) : [];
+                    const versionSelect = versions.length > 1
+                        ? `<select class="framework-version-select" data-framework-version-for="${escapeHtml(item.value)}" title="Pilih versi ${escapeHtml(item.label)}">
+                            ${versions.map(version => `
+                                <option value="${escapeHtml(version.value)}" ${version.value === item.recommended_version ? 'selected' : ''}>${escapeHtml(version.label || version.value)}</option>
+                            `).join('')}
+                        </select>`
+                        : '';
+                    const evidence = Array.isArray(item.osint_evidence) && item.osint_evidence.length
+                        ? ` data-osint-evidence="${escapeHtml(item.osint_evidence.map(source => source.url || source.title || '').filter(Boolean).join(' | '))}"`
+                        : '';
+                    return `
+                        <label class="framework-option" title="${escapeHtml(item.description || '')}">
+                            <input type="checkbox" value="${escapeHtml(item.value)}" data-framework-versions="${escapeHtml(JSON.stringify(versions))}"${evidence}>
+                            <span class="framework-option-name">${escapeHtml(item.label)}</span>
+                            ${versionSelect}
+                        </label>
+                    `;
+                })
                 .join('');
             if (!rows) return;
-            ui.groupFramework.innerHTML = `${rows}<label><input type="checkbox" id="cb-lainnya" value="Lainnya"> Lainnya..</label>`;
+            ui.groupFramework.innerHTML = `${rows}<label class="framework-option"><input type="checkbox" id="cb-lainnya" value="Lainnya"><span class="framework-option-name">Lainnya..</span></label>`;
             ui.cbLainnya = document.getElementById('cb-lainnya');
             bindFrameworkOtherToggle();
             applyFrameworkValue(selected);
@@ -871,7 +900,12 @@
             const known = Array.from(ui.groupFramework.querySelectorAll('input:not(#cb-lainnya)')).map(cb => cb.value.toLowerCase());
             const custom = [];
             ui.groupFramework.querySelectorAll('input:not(#cb-lainnya)').forEach(cb => {
-                cb.checked = values.some(value => value.toLowerCase() === cb.value.toLowerCase());
+                const versions = JSON.parse(cb.dataset.frameworkVersions || '[]');
+                const versionValues = versions.map(version => String(version.value || '').toLowerCase()).filter(Boolean);
+                const selectedVersion = values.find(value => versionValues.includes(value.toLowerCase()));
+                cb.checked = values.some(value => value.toLowerCase() === cb.value.toLowerCase()) || Boolean(selectedVersion);
+                const select = ui.groupFramework.querySelector(`.framework-version-select[data-framework-version-for="${CSS.escape(cb.value)}"]`);
+                if (select && selectedVersion) select.value = selectedVersion;
             });
             values.forEach(value => {
                 if (!known.includes(value.toLowerCase())) custom.push(value);
@@ -883,9 +917,9 @@
 
         function applyPayload(payload = {}) {
             if (payload.nama_perusahaan) {
-                const exists = Array.from(ui.selPerusahaan.options).some(option => option.value === payload.nama_perusahaan);
+                const exists = Array.from(ui.companyOptions.options).some(option => option.value === payload.nama_perusahaan);
                 if (!exists) {
-                    ui.selPerusahaan.add(new Option(payload.nama_perusahaan, payload.nama_perusahaan));
+                    ui.companyOptions.appendChild(new Option(payload.nama_perusahaan, payload.nama_perusahaan));
                 }
             }
             ui.selPerusahaan.value = payload.nama_perusahaan || '';
@@ -1034,9 +1068,9 @@
             const payload = suggestions || {};
             if (!Object.keys(payload).length) return;
             if (payload.nama_perusahaan && (!onlyEmpty || !ui.selPerusahaan.value)) {
-                const exists = Array.from(ui.selPerusahaan.options).some(option => option.value === payload.nama_perusahaan);
+                const exists = Array.from(ui.companyOptions.options).some(option => option.value === payload.nama_perusahaan);
                 if (!exists) {
-                    ui.selPerusahaan.add(new Option(payload.nama_perusahaan, payload.nama_perusahaan));
+                    ui.companyOptions.appendChild(new Option(payload.nama_perusahaan, payload.nama_perusahaan));
                 }
                 ui.selPerusahaan.value = payload.nama_perusahaan;
                 loadClientContext(payload.nama_perusahaan);
@@ -1094,12 +1128,55 @@
                 ui.templateStatus.textContent = data.has_active_template
                     ? `Template aktif: ${data.active_template_name || 'blanko proposal'}`
                     : 'Belum ada template blanko aktif.';
+                await loadInternalEvidenceSummary();
                 await loadInternalApiSetup();
             } catch (_) {
                 ui.portfolioDocList.innerHTML = '<div class="template-status">File pendukung portofolio belum bisa dimuat.</div>';
                 ui.credentialDocList.innerHTML = '<div class="template-status">File pendukung kapabilitas belum bisa dimuat.</div>';
                 ui.kakDocList.innerHTML = '<div class="template-status">Dokumen KAK/TOR belum bisa dimuat.</div>';
                 ui.templateStatus.textContent = 'Pengaturan belum bisa dimuat.';
+            }
+        }
+
+        function renderInternalEvidenceSection(target, section, fallback) {
+            if (!target) return;
+            const data = section || {};
+            const title = data.title || 'Bukti internal';
+            const summary = data.summary || fallback;
+            const bullets = Array.isArray(data.bullets) ? data.bullets.filter(Boolean) : [];
+            target.innerHTML = `
+                <h4>${escapeHtml(title)}</h4>
+                <p>${escapeHtml(summary)}</p>
+                ${bullets.length ? `<ul>${bullets.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : ''}
+            `;
+        }
+
+        async function loadInternalEvidenceSummary() {
+            try {
+                const res = await fetch('/api/settings/internal-evidence');
+                const data = await res.json();
+                if (!res.ok) throw new Error('Bukti internal belum bisa dimuat.');
+                renderInternalEvidenceSection(
+                    ui.portfolioInternalEvidence,
+                    data.portfolio,
+                    'Bukti pengalaman akan muncul otomatis setelah sumber internal tersedia.'
+                );
+                renderInternalEvidenceSection(
+                    ui.credentialInternalEvidence,
+                    data.credentials,
+                    'Bukti kapabilitas akan muncul otomatis setelah sumber internal tersedia.'
+                );
+            } catch (_) {
+                renderInternalEvidenceSection(
+                    ui.portfolioInternalEvidence,
+                    {},
+                    'Bukti pengalaman belum bisa dimuat saat ini.'
+                );
+                renderInternalEvidenceSection(
+                    ui.credentialInternalEvidence,
+                    {},
+                    'Bukti kapabilitas belum bisa dimuat saat ini.'
+                );
             }
         }
 
@@ -1113,29 +1190,13 @@
             if (validation.auth_mode && ui.settingsApiAuthMode) {
                 ui.settingsApiAuthMode.value = validation.auth_mode;
             }
-            const readiness = (data && data.readiness) || {};
-            const readinessResources = Array.isArray(readiness.resources) ? readiness.resources : [];
-            const resourceRows = readinessResources.map((payload) => {
-                const ok = Boolean(payload.ready);
-                const missingCount = Number(payload.missing_required_count || 0);
-                const statusLabel = payload.status_label || (ok ? 'Siap otomatis' : 'Perlu mapping');
-                return `
-                    <div class="source-status-card ${ok ? 'source-status-ok' : 'source-status-warn'}">
-                        <strong>${escapeHtml(payload.label || 'Sumber data internal')}</strong>
-                        <span>${escapeHtml(payload.description || 'Sumber data internal')}</span>
-                        <span>Status: ${escapeHtml(statusLabel)}${missingCount ? ` · ${missingCount} mapping perlu dicek` : ''}</span>
-                    </div>
-                `;
-            }).join('');
             const connectionClass = data.api_connection_active ? 'status-active' : 'status-inactive';
-            const connectionLabel = data.connection_label || (data.api_connection_active ? 'Aktif memakai Internal API/APIDog' : 'Belum aktif untuk sesi berjalan');
-            const refreshState = data.sync_in_progress ? 'refresh berjalan' : (data.can_refresh_dataset ? 'siap refresh manual' : 'belum tersedia');
+            const connectionLabel = data.api_connection_active ? 'Sumber data internal sudah terhubung' : 'Sumber data internal belum terhubung';
+            const refreshState = data.sync_in_progress ? 'pemutakhiran sedang berjalan' : (data.can_refresh_dataset ? 'dapat dimuat ulang oleh tim teknis' : 'menunggu konfigurasi teknis');
             ui.internalApiStatus.innerHTML = `
-                <div>Config: <strong>${data.config_exists ? 'tersedia' : 'belum ada'}</strong></div>
-                <div>Connection: <strong class="${connectionClass}">${escapeHtml(connectionLabel)}</strong></div>
-                <div>Dataset refresh: <strong>${escapeHtml(refreshState)}</strong></div>
-                ${data.last_refresh_error ? `<div>Catatan refresh: ${escapeHtml(data.last_refresh_error)}</div>` : ''}
-                <div class="source-status-grid">${resourceRows || '<div class="source-status-card source-status-warn"><strong>Sumber data</strong><span>Belum dikonfigurasi.</span></div>'}</div>
+                <div><strong class="${connectionClass}">${escapeHtml(connectionLabel)}</strong></div>
+                <div>Pembaruan data: <strong>${escapeHtml(refreshState)}</strong></div>
+                ${data.last_refresh_error ? '<div>Tim teknis perlu mengecek koneksi sumber data.</div>' : ''}
             `;
             setInternalApiConnectionState(data);
         }
@@ -1145,17 +1206,17 @@
             const syncing = Boolean(data && data.sync_in_progress);
             if (ui.btnSaveInternalApi) {
                 ui.btnSaveInternalApi.disabled = active;
-                ui.btnSaveInternalApi.textContent = active ? 'Internal API Sudah Aktif' : 'Simpan & Aktifkan Internal API';
+                ui.btnSaveInternalApi.textContent = active ? 'Sumber Data Sudah Aktif' : 'Simpan & Aktifkan Sumber Data';
                 ui.btnSaveInternalApi.title = active
-                    ? 'API internal sudah aktif. Gunakan Muat Ulang Data Sekarang untuk mengambil perubahan data terbaru.'
-                    : 'Simpan endpoint dan aktifkan Internal API.';
+                    ? 'Sumber data sudah aktif. Gunakan Muat Ulang Data Sekarang untuk mengambil perubahan data terbaru.'
+                    : 'Simpan titik akses dan aktifkan sumber data.';
             }
             if (ui.btnRefreshInternalApi) {
                 ui.btnRefreshInternalApi.disabled = !active || syncing;
                 ui.btnRefreshInternalApi.textContent = syncing ? 'Pemuatan Ulang Sedang Berjalan...' : 'Muat Ulang Data Sekarang';
                 ui.btnRefreshInternalApi.title = active
-                    ? 'Ambil ulang dataset dari endpoint Internal API dan rebuild knowledge base.'
-                    : 'Aktifkan Internal API sebelum refresh dataset.';
+                    ? 'Ambil ulang data perusahaan dan perbarui basis pengetahuan aplikasi.'
+                    : 'Aktifkan sumber data sebelum pemuatan ulang.';
             }
         }
 
@@ -1163,10 +1224,10 @@
             try {
                 const res = await fetch('/api/internal-api/setup');
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Status Internal API belum bisa dimuat.');
+                if (!res.ok) throw new Error('Koneksi sumber data belum bisa dimuat.');
                 renderInternalApiStatus(data);
             } catch (err) {
-                ui.internalApiStatus.textContent = err.message || 'Status Internal API belum bisa dimuat.';
+                ui.internalApiStatus.textContent = err.message || 'Koneksi sumber data belum bisa dimuat.';
             }
         }
 
@@ -1368,10 +1429,10 @@
         ui.btnSaveInternalApi.addEventListener('click', async () => {
             const endpoint = ui.settingsApiUrl.value.trim();
             if (!endpoint) {
-                return alert('Masukkan endpoint API dataset terlebih dahulu.');
+                return alert('Masukkan titik akses sumber data terlebih dahulu.');
             }
             ui.btnSaveInternalApi.disabled = true;
-            ui.btnSaveInternalApi.textContent = 'Menyimpan & refresh knowledge base...';
+            ui.btnSaveInternalApi.textContent = 'Menyimpan & memuat ulang data...';
             try {
                 const res = await fetch('/api/internal-api/setup', {
                     method: 'POST',
@@ -1384,7 +1445,7 @@
                     })
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Internal API belum berhasil disimpan.');
+                if (!res.ok) throw new Error('Sumber data belum berhasil disimpan.');
                 renderInternalApiStatus({
                     config_exists: true,
                     validation: data.validation,
@@ -1397,22 +1458,23 @@
                 });
                 await loadCompanies();
                 alert(data.refresh_started
-                    ? 'API internal tersimpan. Basis pengetahuan sedang dimuat ulang di latar belakang.'
-                    : 'API internal tersimpan. Basis pengetahuan belum dimuat ulang karena ada proses berjalan atau sumber belum siap.');
+                    ? 'Sumber data tersimpan. Data pendukung sedang dimuat ulang di latar belakang.'
+                    : 'Sumber data tersimpan. Data pendukung belum dimuat ulang karena ada proses berjalan atau sumber belum siap.');
             } catch (err) {
-                alert(err.message || 'Internal API belum berhasil disimpan.');
+                alert(err.message || 'Sumber data belum berhasil disimpan.');
             } finally {
                 await loadInternalApiSetup();
+                await loadInternalEvidenceSummary();
             }
         });
 
         ui.btnRefreshInternalApi.addEventListener('click', async () => {
             ui.btnRefreshInternalApi.disabled = true;
-            ui.btnRefreshInternalApi.textContent = 'Refresh Sedang Berjalan...';
+            ui.btnRefreshInternalApi.textContent = 'Pemuatan Ulang Sedang Berjalan...';
             try {
                 const res = await fetch('/api/internal-api/refresh', { method: 'POST' });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Dataset internal belum berhasil di-refresh.');
+                if (!res.ok) throw new Error('Data internal belum berhasil dimuat ulang.');
                 renderInternalApiStatus({
                     config_exists: true,
                     api_connection_active: data.api_connection_active,
@@ -1423,17 +1485,18 @@
                     validation: {}
                 });
                 await loadCompanies();
-                alert(data.message || 'Dataset internal sedang di-refresh dari endpoint API.');
+                alert('Data internal sedang dimuat ulang.');
             } catch (err) {
-                alert(err.message || 'Dataset internal belum berhasil di-refresh.');
+                alert(err.message || 'Data internal belum berhasil dimuat ulang.');
             } finally {
                 await loadInternalApiSetup();
+                await loadInternalEvidenceSummary();
             }
         });
 
         // Re-check form completeness on relevant input changes.
         ['change', 'input'].forEach(evt => {
-            [ui.selModeProposal, ui.selProposal, ui.selProyek, ui.inpKonteks, ui.inpPermasalahan, ui.inpWaktu, ui.inpBiaya, ui.groupKebutuhan, ui.groupFramework, ui.inpFrameworkLainnya].forEach(el => {
+            [ui.selPerusahaan, ui.selModeProposal, ui.selProposal, ui.selProyek, ui.inpKonteks, ui.inpPermasalahan, ui.inpWaktu, ui.inpBiaya, ui.groupKebutuhan, ui.groupFramework, ui.inpFrameworkLainnya].forEach(el => {
                 if(el) el.addEventListener(evt, () => {
                     updateActionState();
                     schedulePrefetch();

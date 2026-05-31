@@ -3,9 +3,11 @@
 from .proposal_shared import *
 from .document_rendering import DocumentBuilder, LogoManager, StyleEngine
 from .executive_summary import ExecutiveSummaryBuilder
+from .internal_evidence_summary import build_internal_evidence_summary, document_context_lines
 from .research import Researcher
 from .proposal_support import ProposalSupportMixin
-from .proposal_quality_pipeline import EvidenceDeckBuilder, ProposalQualityGate, ScopeContractExtractor
+from .proposal_quality_pipeline import ContextIntelligenceDesk, EvidenceDeckBuilder, ProposalQualityGate, ScopeContractExtractor
+from .proposal_technique import build_proposal_technique_contract
 from .text_hygiene import naturalize_generation_text
 
 
@@ -390,12 +392,44 @@ class ProposalEngineMixin:
         supporting_context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Document, str, Dict[str, Any]]:
         supporting_context = dict(supporting_context or {})
+        try:
+            expert_bench_context = supporting_context.get("expert_bench_context")
+            if not isinstance(expert_bench_context, dict) or not expert_bench_context.get("available"):
+                expert_bench_context = self.firm_api.get_expert_bench_context(limit_products=8)
+                if expert_bench_context.get("available"):
+                    supporting_context["expert_bench_context"] = expert_bench_context
+            if isinstance(expert_bench_context, dict) and expert_bench_context.get("available"):
+                internal_evidence = supporting_context.get("internal_evidence_summary")
+                if not isinstance(internal_evidence, dict):
+                    internal_evidence = build_internal_evidence_summary(expert_bench_context)
+                    supporting_context["internal_evidence_summary"] = internal_evidence
+                evidence_lines = document_context_lines(internal_evidence)
+                if evidence_lines:
+                    supporting_context["internal_evidence_context"] = evidence_lines
+                    supporting_context["settings_context"] = "\n".join(
+                        item
+                        for item in [
+                            str(supporting_context.get("settings_context") or "").strip(),
+                            *evidence_lines,
+                        ]
+                        if item
+                    )
+        except Exception:
+            logger.exception("Internal evidence enrichment failed")
         client = naturalize_generation_text(client, field="nama_perusahaan", client_name=client)
         project = naturalize_generation_text(project, field="konteks_organisasi", client_name=client)
         project_goal = naturalize_generation_text(project_goal, field="klasifikasi_kebutuhan", client_name=client)
         timeline = naturalize_generation_text(timeline, field="estimasi_waktu", client_name=client)
         notes = naturalize_generation_text(notes, field="permasalahan", client_name=client)
         regulations = naturalize_generation_text(regulations, field="potensi_framework", client_name=client)
+        proposal_technique_contract = build_proposal_technique_contract(
+            client=client,
+            goals=project,
+            customer_notes=notes,
+            existing_condition=str(supporting_context.get("client_internal_context") or ""),
+            frameworks=regulations,
+        )
+        supporting_context["proposal_technique_contract"] = proposal_technique_contract
         selected_chapters = self._resolve_chapters(chapter_id, proposal_mode=proposal_mode)
         chapter_targets = self._chapter_word_targets(selected_chapters)
         content_word_budget = self._content_word_budget()
@@ -495,21 +529,26 @@ class ProposalEngineMixin:
         chapter_map = {chapter['id']: chapter for chapter in selected_chapters}
         chapter_prompts: Dict[str, str] = {}
         chapter_outputs: Dict[str, str] = {}
-        scope_contract: Dict[str, List[str]] = {}
-        evidence_deck = EvidenceDeckBuilder.build(
+        scope_contract: Dict[str, List[str]] = dict(proposal_technique_contract.get("scope_contract_seed") or {})
+        context_intelligence = ContextIntelligenceDesk.build(
             client=client,
             project=project,
             project_goal=project_goal,
-            timeline=timeline,
-            budget=budget,
+            notes=notes,
+            regulations=regulations,
             research_bundle=research_bundle,
             internal_context=str(supporting_context.get("client_internal_context") or ""),
             value_map=value_map,
             scope_contract=scope_contract,
+            timeline=timeline,
+            budget=budget,
         )
+        evidence_deck = context_intelligence.evidence_deck
         for chapter in selected_chapters:
             supporting_context["evidence_card_prompt"] = evidence_deck.for_chapter(chapter["id"])
+            supporting_context["context_intelligence_prompt"] = context_intelligence.for_chapter(chapter["id"])
             supporting_context["scope_contract_prompt"] = ScopeContractExtractor.to_prompt_text(scope_contract)
+            supporting_context["active_scope_contract"] = scope_contract
             chapter_chain_context = self._build_chapter_chain_context(
                 chapter=chapter,
                 selected_chapters=selected_chapters,
@@ -570,17 +609,20 @@ class ProposalEngineMixin:
                 chapter_outputs[chapter['id']] = cleaned_content
                 if chapter["id"] == "c_7":
                     scope_contract = ScopeContractExtractor.extract(cleaned_content)
-                    evidence_deck = EvidenceDeckBuilder.build(
+                    context_intelligence = ContextIntelligenceDesk.build(
                         client=client,
                         project=project,
                         project_goal=project_goal,
-                        timeline=timeline,
-                        budget=budget,
+                        notes=notes,
+                        regulations=regulations,
                         research_bundle=research_bundle,
                         internal_context=str(supporting_context.get("client_internal_context") or ""),
                         value_map=value_map,
                         scope_contract=scope_contract,
+                        timeline=timeline,
+                        budget=budget,
                     )
+                    evidence_deck = context_intelligence.evidence_deck
                 continue
             ctx = self._build_chapter_prompt(
                 chapter,
@@ -619,17 +661,20 @@ class ProposalEngineMixin:
                 )
                 if chapter["id"] == "c_7":
                     scope_contract = ScopeContractExtractor.extract(chapter_outputs[chapter["id"]])
-                    evidence_deck = EvidenceDeckBuilder.build(
+                    context_intelligence = ContextIntelligenceDesk.build(
                         client=client,
                         project=project,
                         project_goal=project_goal,
-                        timeline=timeline,
-                        budget=budget,
+                        notes=notes,
+                        regulations=regulations,
                         research_bundle=research_bundle,
                         internal_context=str(supporting_context.get("client_internal_context") or ""),
                         value_map=value_map,
                         scope_contract=scope_contract,
+                        timeline=timeline,
+                        budget=budget,
                     )
+                    evidence_deck = context_intelligence.evidence_deck
             except Exception as e:
                 logger.error(f"Generation Error for {chapter['title']}: {e}")
 

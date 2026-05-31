@@ -123,6 +123,7 @@ Contoh paling umum:
 export APP_PROFILE=demo
 export INTERNAL_DATA_SOURCE=demo
 export INTERNAL_DATA_FALLBACK=none
+export SEARCH_PROVIDER=serper
 export SERPER_API_KEY=isi_api_key
 ```
 
@@ -138,8 +139,29 @@ export FIRM_API_USERNAME=isi_username
 export FIRM_API_PASSWORD=isi_password
 export FIRM_API_URL=https://api.perusahaan-anda.com
 export FIRM_API_CONFIG_FILE=/srv/apps/proposal-gen/internal_api_config.json
+export SEARCH_PROVIDER=serper
 export SERPER_API_KEY=isi_api_key
 ```
+
+### 3a. Pilihan Provider OSINT
+
+Default aplikasi tetap memakai Serper:
+
+```bash
+export SEARCH_PROVIDER=serper
+export SERPER_API_KEY=isi_api_key
+```
+
+Jika ingin memakai Ollama web search/fetch:
+
+```bash
+export SEARCH_PROVIDER=ollama
+export OLLAMA_API_KEY=isi_ollama_api_key
+export OLLAMA_WEB_SEARCH_URL=https://ollama.com/api/web_search
+export OLLAMA_WEB_FETCH_URL=https://ollama.com/api/web_fetch
+```
+
+Catatan: model Ollama tetap menjalankan sintesis dan ekstraksi, tetapi web search/fetch membutuhkan API key Ollama karena pencarian web dilakukan melalui endpoint Ollama.
 
 Jika ingin mode production tetap bisa lanjut ketika API internal sedang bermasalah, aktifkan fallback demo secara eksplisit:
 
@@ -182,6 +204,7 @@ Dataset APIDog/Inworx yang sudah cocok dengan aplikasi saat ini:
 | --- | --- |
 | `ConsultantProjectExpertHistory` | Sumber `project_records` dan bukti relasi/riwayat proyek berbasis `project_name`, `product_name`, `expert_name`, `position_name`. |
 | `ReferenceAccount` | Fallback referensi akun/klien berbasis `company_name`, wilayah, provinsi, dan segmentasi. |
+| `EmployeeExpertise` | Sumber aktif kredensial tenaga ahli berbasis `employee_name`, `certifications`, dan `projects`; dipakai untuk memperkuat narasi kapabilitas tanpa menggantikan riwayat proyek. |
 | `ReferenceDataset` | Katalog dataset, bukan sumber proposal langsung. |
 
 Jika APIDog menyediakan contoh response JSON, mapping dapat dibantu otomatis:
