@@ -109,6 +109,41 @@ class FrameworkCatalogTest(unittest.TestCase):
         self.assertEqual(option["osint_evidence"][0]["url"], "https://www.axelos.com/itil")
         researcher.search.assert_called_once()
 
+    def test_reference_framework_parent_child_rows_are_grouped_into_versions(self) -> None:
+        from main.framework_catalog import FrameworkCatalogService
+
+        provider = Mock()
+        provider.get_framework_catalog.return_value = [
+            {
+                "parent_code": "ITIL",
+                "parent_short_name": "ITIL",
+                "parent_name": "Information Technology Infrastructure Library",
+                "parent_description": "Service management framework.",
+                "child_code": "ITILV3",
+                "child_short_name": "ITIL v3",
+                "child_name": "ITIL v3 / 2011",
+                "child_description": "Lifecycle service management.",
+            },
+            {
+                "parent_code": "ITIL",
+                "parent_short_name": "ITIL",
+                "parent_name": "Information Technology Infrastructure Library",
+                "parent_description": "Service management framework.",
+                "child_code": "ITIL4",
+                "child_short_name": "ITIL 4",
+                "child_name": "ITIL 4",
+                "child_description": "Service value system.",
+            },
+        ]
+
+        payload = FrameworkCatalogService(provider).options()
+
+        self.assertEqual(len(payload["options"]), 1)
+        option = payload["options"][0]
+        self.assertEqual(option["value"], "ITIL")
+        self.assertEqual([item["label"] for item in option["versions"]], ["ITIL v3 / 2011", "ITIL 4"])
+        self.assertEqual(option["recommended_version"], "ITIL4")
+
     def test_resolves_selected_reference_framework_version(self) -> None:
         from main.framework_catalog import FrameworkCatalogService
 

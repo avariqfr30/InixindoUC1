@@ -1044,6 +1044,22 @@ class FirmAPIClient:
                     item["category"] = record.get("parent_category")
                 if "versions" not in item and "children" in record:
                     item["versions"] = record.get("children")
+                if "versions" not in item and any(
+                    str(record.get(field) or "").strip()
+                    for field in ("child_code", "child_short_name", "child_name", "child_version")
+                ):
+                    item["versions"] = [
+                        {
+                            "child_code": record.get("child_code"),
+                            "child_short_name": record.get("child_short_name"),
+                            "child_name": record.get("child_name"),
+                            "child_version": record.get("child_version"),
+                            "child_description": record.get("child_description"),
+                            "child_issuer": record.get("child_issuer"),
+                            "child_category": record.get("child_category"),
+                            "child_is_active": record.get("child_is_active"),
+                        }
+                    ]
                 if str(item.get("value") or item.get("label") or "").strip():
                     mapped.append(item)
             return mapped

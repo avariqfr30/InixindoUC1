@@ -216,10 +216,10 @@ class FrameworkCatalogService:
     def _normalize_version_item(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         value = str(
             raw.get("value")
+            or raw.get("child_code")
             or raw.get("child_short_name")
             or raw.get("child_name")
             or raw.get("label")
-            or raw.get("child_code")
             or ""
         ).strip()
         label = str(raw.get("label") or raw.get("child_name") or raw.get("child_short_name") or value).strip()
@@ -234,23 +234,37 @@ class FrameworkCatalogService:
             "available": self._truthy_active(raw.get("available", raw.get("child_is_active", True))),
         }
 
+    def _version_items_from_raw(self, raw: Dict[str, Any]) -> List[Dict[str, Any]]:
+        raw_versions = [
+            item
+            for item in (raw.get("versions") or raw.get("children") or [])
+            if isinstance(item, dict)
+        ]
+        if any(str(raw.get(field) or "").strip() for field in ("child_code", "child_short_name", "child_name", "child_version")):
+            raw_versions.append(raw)
+        versions = [self._normalize_version_item(item) for item in raw_versions]
+        return [item for item in versions if item.get("value") and item.get("available", True)]
+
     def _normalize_options(self, raw_options: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         normalized: List[Dict[str, Any]] = []
+        entries_by_key: Dict[str, Dict[str, Any]] = {}
+        version_keys_by_parent: Dict[str, set] = {}
         for raw in raw_options:
             value = str(raw.get("value") or raw.get("parent_code") or raw.get("parent_short_name") or raw.get("label") or "").strip()
             label = str(raw.get("label") or raw.get("parent_short_name") or raw.get("parent_name") or value).strip()
-            versions = [
-                self._normalize_version_item(item)
-                for item in (raw.get("versions") or raw.get("children") or [])
-                if isinstance(item, dict)
-            ]
-            versions = [item for item in versions if item.get("value") and item.get("available", True)]
+            if not (value or label):
+                continue
+            key = _normalize_token(value or label)
+            if not key:
+                continue
+            versions = self._version_items_from_raw(raw)
             resolved = str(raw.get("resolved") or raw.get("parent_version") or "").strip()
             recommended = versions[-1]["value"] if versions else (resolved or value or label)
             aliases = self._parse_list_value(raw.get("aliases"))
             aliases.extend([value, label, raw.get("parent_name"), raw.get("parent_short_name"), raw.get("parent_code")])
-            normalized.append(
-                {
+            entry = entries_by_key.get(key)
+            if entry is None:
+                entry = {
                     "value": value or label,
                     "label": label or value,
                     "description": str(raw.get("description") or raw.get("parent_description") or "").strip(),
@@ -259,10 +273,29 @@ class FrameworkCatalogService:
                     "aliases": _dedupe([str(item or "") for item in aliases]),
                     "issuer": str(raw.get("issuer") or raw.get("parent_issuer") or "").strip(),
                     "category": str(raw.get("category") or raw.get("parent_category") or "").strip(),
-                    "versions": versions,
+                    "versions": [],
                     "available": self._truthy_active(raw.get("available", raw.get("parent_is_active", True))),
                 }
-            )
+                entries_by_key[key] = entry
+                version_keys_by_parent[key] = set()
+                normalized.append(entry)
+            else:
+                entry["aliases"] = _dedupe([*(entry.get("aliases") or []), *[str(item or "") for item in aliases]])
+                if not entry.get("description"):
+                    entry["description"] = str(raw.get("description") or raw.get("parent_description") or "").strip()
+                if not entry.get("issuer"):
+                    entry["issuer"] = str(raw.get("issuer") or raw.get("parent_issuer") or "").strip()
+                if not entry.get("category"):
+                    entry["category"] = str(raw.get("category") or raw.get("parent_category") or "").strip()
+                entry["available"] = bool(entry.get("available", True)) and self._truthy_active(raw.get("available", raw.get("parent_is_active", True)))
+            for version in versions:
+                version_key = _normalize_token(str(version.get("value") or version.get("label") or ""))
+                if not version_key or version_key in version_keys_by_parent[key]:
+                    continue
+                version_keys_by_parent[key].add(version_key)
+                entry["versions"].append(version)
+                entry["resolved"] = version["value"]
+                entry["recommended_version"] = version["value"]
         return normalized
 
     def _osint_evidence(self, item: Dict[str, Any]) -> List[Dict[str, str]]:

@@ -1,0 +1,45 @@
+@startuml
+left to right direction
+skinparam packageStyle rectangle
+actor "Pengguna Proposal" as User
+actor "Admin / Operator Data" as Admin
+actor "Internal API / APIDog" as APIDog
+actor "Provider OSINT" as OSINT
+actor "Ollama / LLM" as LLM
+rectangle "UC1 - Proposal Generator" {
+  usecase "Login dan buka
+dashboard" as UC_Login
+  usecase "Isi brief
+proposal" as UC_Brief
+  usecase "Unggah KAK/TOR" as UC_KAK
+  usecase "Pilih konteks
+internal klien" as UC_Context
+  usecase "Preview outline dan
+precheck generate" as UC_Precheck
+  usecase "Generate proposal
+DOCX" as UC_Generate
+  usecase "Pantau job dan
+unduh proposal" as UC_Download
+  usecase "Aktifkan endpoint
+data internal" as UC_API
+  usecase "Ambil konteks
+OSINT" as UC_OSINT
+  usecase "Susun narasi dan
+quality gate" as UC_AI
+}
+User --> UC_Login
+User --> UC_Brief
+User --> UC_KAK
+User --> UC_Context
+User --> UC_Precheck
+User --> UC_Generate
+User --> UC_Download
+Admin --> UC_API
+APIDog --> UC_API
+OSINT --> UC_OSINT
+LLM --> UC_AI
+UC_Generate .> UC_OSINT : <<include>>
+UC_Generate .> UC_AI : <<include>>
+UC_Context .> UC_API : <<include>>
+UC_Download .> UC_Generate : <<extend>>
+@enduml
