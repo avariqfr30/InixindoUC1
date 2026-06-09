@@ -3,302 +3,1778 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Inixindo Strategic Proposal Engine</title>
+    <title>Strategic Proposal System</title>
+    <link href="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.snow.css" rel="stylesheet">
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #f1f5f9; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; color: #334155; padding: 20px 0; }
-        .card { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); width: 800px; max-height: 90vh; overflow-y: auto;}
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; color: #334155; }
+        .card { background: white; padding: 35px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 680px; max-height: 90vh; overflow-y: auto; border: 1px solid #e2e8f0; }
         .hidden { display: none !important; }
-        h2 { color: #0f172a; margin: 0 0 5px 0; font-size: 1.8rem; }
-        p.sub { color: #64748b; margin: 0 0 25px 0; font-size: 1rem; }
-        label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; color: #1e293b; }
-        select, input, textarea, button { width: 100%; padding: 10px 12px; margin-bottom: 15px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 0.95rem; background: white; box-sizing: border-box; font-family: 'Segoe UI', sans-serif;}
-        select:focus, input:focus, textarea:focus { border-color: #3b82f6; outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
-        textarea { resize: vertical; min-height: 80px; }
-        button { background: #2563eb; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; margin-top: 10px; font-size: 1rem; padding: 14px;}
+        .header-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+        .header-actions, .modal-actions, .history-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .user-chip { display: inline-flex; align-items: center; padding: 8px 12px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 0.84rem; font-weight: 600; border: 1px solid #bfdbfe; }
+        .logout-form { margin: 0; }
+        h2 { color: #0f172a; margin: 0 0 5px 0; font-size: 1.6rem; }
+        p.sub { color: #64748b; margin: 0 0 20px 0; font-size: 0.95rem; }
+        label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; color: #475569;}
+        select, input[type="text"], input[type="url"], textarea, button { width: 100%; padding: 10px; margin-bottom: 12px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.95rem; box-sizing: border-box; }
+        .header-actions button, .modal-actions button, .history-actions button { width: auto; margin-bottom: 0; margin-top: 0; }
+        select:focus, input[type="text"]:focus, input[type="url"]:focus, textarea:focus { border-color: #3b82f6; outline: none; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1); }
+        button { background: #2563eb; color: white; border: none; font-weight: 600; cursor: pointer; transition: 0.2s; margin-top: 5px; }
         button:hover { background: #1d4ed8; }
         button:disabled { background: #94a3b8; cursor: not-allowed; }
         button.secondary { background: white; color: #475569; border: 1px solid #cbd5e1; }
-        button.secondary:hover { background: #f8fafc; }
-        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-        .section-title { font-size: 1.1rem; font-weight: 700; color: #0f172a; margin: 25px 0 15px 0; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; }
-        .checkbox-group { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
-        .checkbox-group label { display: flex; align-items: center; font-weight: normal; margin: 0; font-size: 0.95rem; cursor: pointer; }
-        .checkbox-group input[type="checkbox"] { width: auto; margin-right: 8px; margin-bottom: 0; transform: scale(1.1); cursor: pointer; }
-        
-        .summary-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 20px; font-size: 0.95rem; }
-        .summary-row { display: flex; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #cbd5e1; }
-        .summary-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-        .summary-label { width: 35%; font-weight: 600; color: #475569; }
-        .summary-value { width: 65%; color: #0f172a; font-weight: 500; word-wrap: break-word; }
+        button.secondary:hover { background: #f1f5f9; }
+        button.secondary:disabled { background: #e2e8f0; color: #94a3b8; border-color: #cbd5e1; cursor: not-allowed; }
+        button.secondary:disabled:hover { background: #e2e8f0; }
 
-        .spinner { width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; display: none; vertical-align: middle; margin-left: 10px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .checkbox-group { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+        .checkbox-group label { display: flex; align-items: center; font-weight: 400; margin: 0; font-size: 0.9rem; cursor: pointer; }
+        .checkbox-group input[type="checkbox"] { width: auto; margin-right: 6px; margin-bottom: 0; }
+        .framework-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 12px; align-items: start; }
+        .framework-options .framework-option { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #ffffff; line-height: 1.25; }
+        .framework-options .framework-option input[type="checkbox"] { flex: 0 0 auto; margin: 0; }
+        .framework-option-name { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+        .framework-version-select { flex: 1 1 150px; min-width: 140px; max-width: 100%; width: auto; margin: 0; padding: 7px 28px 7px 9px; font-size: 0.88rem; }
+
+        .finance-panel { background: #f1f5f9; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 15px; }
+        .finance-tier { display: flex; justify-content: space-between; padding: 8px; border-bottom: 1px solid #cbd5e1; cursor: pointer; transition: 0.2s; }
+        .finance-tier:hover { background: #e2e8f0; }
+        .finance-tier:last-child { border-bottom: none; }
+
+        .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; display: none; vertical-align: middle; margin-left: 8px; }
         .spinner.active { display: inline-block; }
+        textarea { resize: vertical; min-height: 60px; margin-bottom: 10px; }
+        .rich-source { display: none; }
+        .editor-shell { margin-bottom: 12px; border: 1px solid #cbd5e1; border-radius: 8px; background: #ffffff; overflow: hidden; }
+        .editor-toolbar { border-bottom: 1px solid #e2e8f0; background: #f8fafc; padding: 6px 8px; }
+        .editor-toolbar .ql-formats { margin-right: 10px; }
+        .editor-toolbar button, .editor-toolbar .ql-picker { width: auto; margin-top: 0; margin-bottom: 0; }
+        .editor-toolbar button { padding: 0; background: transparent; color: inherit; border: none; }
+        .editor-toolbar button:hover { background: transparent; }
+        .editor-toolbar button:disabled { background: transparent; }
+        .editor-shell .ql-toolbar.ql-snow { border: none; padding: 0; }
+        .editor-shell .ql-container.ql-snow { border: none; font-size: 0.95rem; }
+        .editor-content { min-height: 120px; }
+        .editor-content .ql-editor { min-height: 120px; color: #334155; line-height: 1.55; }
+        .editor-content .ql-editor.ql-blank::before { color: #94a3b8; font-style: normal; left: 12px; right: 12px; }
+        .editor-fallback-note { font-size: 0.8rem; color: #92400e; background: #fef3c7; border: 1px solid #fcd34d; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; }
+
+        .preview-panel { background: #f8fafc; border: 1px solid #dbeafe; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+        .preview-item { border-bottom: 1px dashed #cbd5e1; padding: 8px 0; }
+        .preview-item:last-child { border-bottom: none; }
+        .preview-item h4 { margin: 0 0 4px 0; font-size: 0.95rem; color: #0f172a; }
+        .preview-item p { margin: 0; font-size: 0.85rem; color: #475569; }
+        .preview-item ul { margin: 6px 0 0 16px; padding: 0; font-size: 0.82rem; color: #64748b; }
+        .modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.34); display: none; align-items: center; justify-content: center; padding: 24px; z-index: 1000; }
+        .modal-backdrop.active { display: flex; }
+        .modal { background: #ffffff; width: min(760px, 100%); max-height: 86vh; overflow-y: auto; border-radius: 14px; padding: 24px; border: 1px solid #e2e8f0; box-shadow: 0 18px 45px rgba(15, 23, 42, 0.18); }
+        .modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+        .modal-header h3 { margin: 0; color: #0f172a; }
+        .history-item { border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; margin-bottom: 12px; background: #f8fafc; }
+        .history-item h4 { margin: 0 0 6px 0; color: #0f172a; font-size: 0.98rem; }
+        .history-meta { font-size: 0.84rem; color: #64748b; margin-bottom: 10px; line-height: 1.5; }
+        .small-note { font-size: 0.82rem; color: #64748b; margin: 0 0 10px 0; }
+        .template-status { background: #f8fafc; border: 1px dashed #cbd5e1; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 0.86rem; color: #475569; }
+        .source-policy-box { background: #f8fafc; border: 1px solid #dbe3ef; border-radius: 8px; padding: 12px; margin: 8px 0 14px; color: #334155; }
+        .source-policy-box strong { display: block; font-size: 0.94rem; margin-bottom: 4px; color: #1f2937; }
+        .source-policy-box .small-note { margin: 0; }
+        .internal-evidence-card { margin-top: 10px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #ffffff; }
+        .internal-evidence-card h4 { margin: 0 0 6px; font-size: 0.9rem; color: #1f2937; }
+        .internal-evidence-card p { margin: 0; font-size: 0.82rem; line-height: 1.45; color: #475569; }
+        .internal-evidence-card ul { margin: 7px 0 0 18px; padding: 0; color: #475569; font-size: 0.82rem; line-height: 1.45; }
+        .settings-section { border-top: 1px solid #e2e8f0; padding-top: 16px; margin-top: 16px; }
+        .status-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; color: #475569; font-size: 0.84rem; line-height: 1.5; }
+        .upload-row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+        .upload-row input[type="file"] { flex: 1 1 280px; margin-bottom: 0; background: #ffffff; }
+        .upload-row button { width: auto; margin: 0; }
+        .document-list { display: grid; gap: 8px; margin-bottom: 14px; }
+        .document-item { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; background: #f8fafc; }
+        .document-item strong { display: block; color: #0f172a; font-size: 0.9rem; margin-bottom: 4px; }
+        .document-meta-note { font-size: 0.8rem; color: #64748b; line-height: 1.45; }
+        .document-item button { width: auto; margin: 0; }
+        .kak-summary-box { background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 0.86rem; line-height: 1.5; }
+        .kak-summary-box strong { color: #7c2d12; }
+        .kak-warning-list { margin: 8px 0 0 18px; padding: 0; color: #9a3412; font-size: 0.82rem; }
+        .client-context-box { background: #ecfdf5; border: 1px solid #86efac; color: #14532d; padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 0.86rem; line-height: 1.5; }
+        .client-context-box strong { color: #064e3b; }
+        .precheck-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin-bottom: 14px; }
+        .precheck-card { border: 1px solid #dbe3ef; border-radius: 8px; padding: 10px 12px; background: #f8fafc; }
+        .precheck-card strong { display: block; color: #0f172a; font-size: 0.88rem; margin-bottom: 3px; }
+        .precheck-card span { display: block; color: #475569; font-size: 0.84rem; line-height: 1.45; }
+        .precheck-section { border-top: 1px solid #e2e8f0; padding-top: 12px; margin-top: 12px; }
+        .precheck-list { margin: 8px 0 0 18px; padding: 0; color: #475569; font-size: 0.86rem; line-height: 1.5; }
+        .precheck-warning { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 0.86rem; }
+
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <div class="card">
         <div id="loader" style="text-align:center; padding: 40px;">
-            <div style="border:4px solid #e2e8f0; border-top:4px solid #3b82f6; border-radius:50%; width:40px; height:40px; animation: spin 1s linear infinite; margin: 0 auto 20px auto;"></div>
-            <p id="loader-text">Memuat Sistem &amp; Database...</p>
+            <div style="border:3px solid #e2e8f0; border-top:3px solid #3b82f6; border-radius:50%; width:30px; height:30px; animation: spin 1s linear infinite; margin: 0 auto 15px auto;"></div>
+            <p id="loader-text">Memuat Sistem...</p>
         </div>
 
         <div id="step-config" class="hidden">
-            <h2>Parameter Proposal</h2>
-            <p class="sub">Requirement & Discovery Layer</p>
-            
-            <div class="section-title">Konteks Klien</div>
+            <div class="header-bar">
+                <div>
+                    <h2>Proposal Generator</h2>
+                    <p class="sub">Engine Requirement &amp; Discovery</p>
+                </div>
+                <div class="header-actions">
+                    <span class="user-chip">Masuk sebagai {{ current_user_fullname or current_user or 'Pengguna' }}</span>
+                    <button type="button" id="btn-history" class="secondary">Riwayat</button>
+                    <button type="button" id="btn-settings" class="secondary">Pengaturan</button>
+                    <form method="POST" action="/logout" class="logout-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="secondary">Keluar</button>
+                    </form>
+                </div>
+            </div>
+
+            <div id="fallback-banner" class="hidden" style="background-color: #fef3c7; color: #92400e; border: 1px solid #fde68a; border-radius: 6px; padding: 12px 16px; margin: 16px 0; font-size: 14px; display: flex; align-items: center; gap: 8px;">
+                <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                <span><strong>Perhatian:</strong> Data internal tidak tersedia — menggunakan data demo.</span>
+            </div>
+
             <label for="select-perusahaan">Nama Perusahaan Klien</label>
-            <select id="select-perusahaan"></select>
-            
+            <input type="text" id="select-perusahaan" list="company-options" placeholder="Pilih atau ketik nama klien..." autocomplete="off">
+            <datalist id="company-options"></datalist>
+
+            <div id="client-context-panel" class="finance-panel hidden">
+                <label>Konteks Internal Klien</label>
+                <p class="small-note">Konteks akun, segmentasi, lokasi, riwayat proyek internal, dan OSINT klien dipakai otomatis sebagai bagian dari research bundle saat proposal dibuat.</p>
+                <div id="client-context-summary" class="client-context-box">Pilih klien untuk membaca konteks internal.</div>
+            </div>
+
+            <div class="finance-panel">
+                <label for="input-kak-files">Dokumen KAK / TOR</label>
+                <p class="small-note">Unggah KAK/TOR untuk membantu sistem membaca inisiatif, jenis proposal, durasi, biaya, dan framework. Hasil pembacaan ini dipakai sebagai titik awal pengisian form, sementara struktur proposal tetap mengikuti standar perusahaan.</p>
+                <div class="upload-row">
+                    <input type="file" id="input-kak-files" accept=".docx,.pdf,.txt,.md" multiple />
+                    <button type="button" id="btn-upload-kak-files" class="secondary">Unggah KAK / TOR</button>
+                </div>
+                <div id="kak-summary" class="kak-summary-box">Belum ada dokumen KAK/TOR yang dibaca.</div>
+                <div class="modal-actions" style="margin-bottom: 10px;">
+                    <button type="button" id="btn-apply-kak" class="secondary" disabled>Gunakan Hasil Pembacaan KAK</button>
+                </div>
+                <div id="kak-doc-list" class="document-list">
+                    <div class="template-status">Belum ada dokumen KAK/TOR yang diunggah.</div>
+                </div>
+            </div>
+
             <div id="container-dynamic" class="hidden">
-                <div class="section-title">Ruang Lingkup & Tujuan</div>
+                <label for="select-mode-proposal">Jenis Dokumen Proposal</label>
+                <select id="select-mode-proposal">
+                    <option value="" disabled selected>Pilih jenis dokumen proposal...</option>
+                </select>
+
                 <div class="grid-2">
                     <div>
-                        <label for="select-status-proyek">Status Inisiatif</label>
-                        <select id="select-status-proyek">
-                            <option value="Proyek Baru">Proyek Baru</option>
-                            <option value="Proyek Lanjutan">Proyek Lanjutan (Enhancement)</option>
+                        <label for="select-proposal">Jenis Layanan</label>
+                        <select id="select-proposal">
+                            <option value="" disabled selected>Pilih...</option>
+                            <option value="Training">Training</option>
+                            <option value="Konsultan">Konsultan</option>
+                            <option value="Training dan Konsultan">Training dan Konsultan</option>
                         </select>
                     </div>
                     <div>
-                        <label for="select-proyek">Jenis Layanan / Proyek</label>
+                        <label for="select-proyek">Jenis Proyek</label>
                         <select id="select-proyek">
-                            <option value="Diagnostic">Diagnostic / Audit</option>
-                            <option value="Strategic">Strategic / Masterplan</option>
-                            <option value="Implementation">Implementation / Build</option>
+                            <option value="" disabled selected>Pilih...</option>
+                            <option value="Diagnostic">Diagnostic</option>
+                            <option value="Strategic">Strategic</option>
                             <option value="Transformation">Transformation</option>
+                            <option value="Implementation">Implementation</option>
                         </select>
                     </div>
                 </div>
 
-                <label for="input-ruang-lingkup">Ruang Lingkup Pekerjaan (Scope)</label>
-                <textarea id="input-ruang-lingkup" placeholder="Detailkan modul, area kerja, atau batas pekerjaan..."></textarea>
+                <label for="input-konteks">Konteks Klien</label>
+                <textarea id="input-konteks" class="rich-editor-source" placeholder="Ringkas kondisi klien saat ini, arah ke depan, manfaat inisiatif yang diusulkan, dan praktik baik yang relevan."></textarea>
 
-                <label for="input-outcome">Output / Target Pencapaian</label>
-                <textarea id="input-outcome" placeholder="Apa dampak nyata atau target yang ingin dicapai klien?"></textarea>
+                <label for="input-permasalahan">Permasalahan Utama (Titik Masalah)</label>
+                <textarea id="input-permasalahan" class="rich-editor-source" placeholder="Sebutkan akar masalah..."></textarea>
 
-                <div class="section-title">Regulasi & Komersial</div>
-                <label>Framework / Regulasi IT Terkait</label>
-                <div class="checkbox-group" id="group-framework">
-                    <label><input type="checkbox" value="ISO 27001"> ISO 27001</label>
-                    <label><input type="checkbox" value="ITIL v4"> ITIL v4</label>
-                    <label><input type="checkbox" value="COBIT 2019"> COBIT</label>
-                    <label><input type="checkbox" value="POJK Terkait"> POJK</label>
-                    <label><input type="checkbox" value="Lainnya" id="cb-framework-lainnya"> Lainnya...</label>
+                <label>Pendekatan / Kebutuhan (Bisa pilih lebih dari satu)</label>
+                <div class="checkbox-group" id="group-kebutuhan">
+                    <label><input type="checkbox" value="Problem"> Masalah</label>
+                    <label><input type="checkbox" value="Opportunity"> Peluang</label>
+                    <label><input type="checkbox" value="Directive"> Arahan</label>
                 </div>
-                <input type="text" id="input-framework" class="hidden" placeholder="Masukkan Regulasi Spesifik..." />
 
                 <div class="grid-2">
                     <div>
-                        <label for="input-waktu">Estimasi Waktu</label>
-                        <input type="text" id="input-waktu" placeholder="Cth: 3 Bulan..." />
+                        <label for="input-waktu">Durasi Proyek</label>
+                        <input type="text" id="input-waktu" placeholder="Contoh: 3 Bulan" />
                     </div>
                     <div>
-                        <label for="input-biaya">Target Budget (Rekomendasi)</label>
-                        <input type="text" id="input-biaya" placeholder="Cth: Rp. 500.000.000" style="margin-bottom: 2px;" />
-                        <div id="budget-suggestion" style="font-size: 0.8rem; color: #2563eb; font-weight: 600; min-height: 20px;"></div>
+                        <label for="input-biaya">Estimasi Anggaran</label>
+                        <input type="text" id="input-biaya" placeholder="Masukkan harga atau pilih di bawah..." />
                     </div>
                 </div>
 
-                <label for="input-catatan">Catatan Tambahan (Opsional)</label>
-                <textarea id="input-catatan" placeholder="Catatan meeting, referensi spesifik..."></textarea>
-            </div>
-            
-            <button type="button" id="btn-review" disabled>Review Parameter Proposal</button>
-            <button type="button" id="btn-refresh" class="secondary" style="font-size:0.85rem; padding:8px;">🔄 Sinkronisasi Database</button>
-        </div>
+                <div class="finance-panel">
+                    <button type="button" id="btn-analyze" class="secondary" style="font-size: 0.85rem;" disabled>📊 Analisis Finansial Otomatis &amp; Opsi Harga</button>
+                    <div id="finance-result" class="hidden" style="margin-top: 10px; font-size: 0.85rem;">
+                        <p id="finance-summary" style="margin: 0 0 10px 0; font-style: italic; color: #475569;"></p>
+                        <div id="finance-options"></div>
+                    </div>
+                </div>
 
-        <div id="step-summary" class="hidden">
-            <h2>Konfirmasi Data</h2>
-            <p class="sub">Pastikan seluruh parameter sudah tepat sebelum proses AI Generate dimulai.</p>
-            
-            <div class="summary-box">
-                <div class="summary-row"><div class="summary-label">Perusahaan</div><div class="summary-value" id="sum-perusahaan"></div></div>
-                <div class="summary-row"><div class="summary-label">Jenis Proyek</div><div class="summary-value" id="sum-proyek"></div></div>
-                <div class="summary-row"><div class="summary-label">Target Budget</div><div class="summary-value" id="sum-budget" style="color: #16a34a; font-weight: bold;"></div></div>
-                <div class="summary-row"><div class="summary-label">Estimasi Waktu</div><div class="summary-value" id="sum-waktu"></div></div>
-                <div class="summary-row"><div class="summary-label">Framework</div><div class="summary-value" id="sum-framework"></div></div>
-                <div class="summary-row"><div class="summary-label">Scope</div><div class="summary-value" id="sum-scope"></div></div>
+                <label>Potensi Kerangka Kerja (Bisa pilih lebih dari satu)</label>
+                <div class="checkbox-group framework-options" id="group-framework">
+                    <label><input type="checkbox" value="ITIL"> ITIL</label>
+                    <label><input type="checkbox" value="TOGAF"> TOGAF</label>
+                    <label><input type="checkbox" value="COBIT"> COBIT</label>
+                    <label><input type="checkbox" value="ISO"> ISO</label>
+                    <label><input type="checkbox" value="Teori"> Teori</label>
+                    <label><input type="checkbox" value="Regulasi"> Regulasi</label>
+                    <label><input type="checkbox" value="Praktik Baik"> Praktik Baik</label>
+                    <label><input type="checkbox" id="cb-lainnya" value="Lainnya"> Lainnya..</label>
+                </div>
+                <input type="text" id="input-framework-lainnya" class="hidden" placeholder="Ketik kerangka kerja manual..." />
             </div>
 
-            <div class="grid-2">
-                <button type="button" id="btn-back" class="secondary">Kembali & Edit</button>
-                <button type="button" id="btn-confirm">Generate Proposal <span id="spinner" class="spinner"></span></button>
+            <button type="button" id="btn-preview" class="secondary">👁️ Pratinjau Struktur Proposal</button>
+            <div id="preview-panel" class="preview-panel hidden">
+                <p class="sub" style="margin-bottom:10px;">Pratinjau struktur konten berdasarkan input saat ini.</p>
+                <div id="preview-content"></div>
             </div>
+
+            <button type="button" id="btn-generate" disabled><span id="btn-generate-label">Susun Proposal Singkat & Padat</span> <span id="spinner" class="spinner"></span></button>
         </div>
 
         <div id="step-success" class="hidden" style="text-align:center; padding: 20px;">
-            <div style="font-size: 60px; margin-bottom: 20px;">✅</div>
-            <h2>Dokumen Siap!</h2>
-            <p class="sub">Proposal telah berhasil dibuat.</p>
-            <button type="button" onclick="location.reload()" class="secondary">Buat Proposal Baru</button>
+            <div style="font-size: 50px; margin-bottom: 15px;">✅</div>
+            <h2>Selesai!</h2>
+            <p id="success-message" class="sub">Dokumen berhasil disusun menggunakan format ringkas.</p>
+            <button type="button" onclick="location.reload()" class="secondary">Buat Baru</button>
         </div>
     </div>
 
+    <div id="history-modal" class="modal-backdrop">
+        <div class="modal">
+            <div class="modal-header">
+                <div>
+                    <h3>Riwayat Proposal</h3>
+                    <p class="small-note">Gunakan proposal yang pernah digenerate sebagai referensi cepat saat menyusun proposal baru.</p>
+                </div>
+                <button type="button" id="btn-close-history" class="secondary">Tutup</button>
+            </div>
+            <div id="history-list"></div>
+        </div>
+    </div>
+
+    <div id="settings-modal" class="modal-backdrop">
+        <div class="modal">
+            <div class="modal-header">
+                <div>
+                    <h3>Pengaturan Proposal</h3>
+                    <p class="small-note">Kelola sumber API internal, unggah file pendukung portofolio/sertifikasi, dan aktifkan blanko template agar proposal berikutnya memakai bukti yang dapat diaudit.</p>
+                </div>
+                <button type="button" id="btn-close-settings" class="secondary">Tutup</button>
+            </div>
+
+            <div class="source-policy-box">
+                <strong>Portofolio Internal / Pengalaman Serupa</strong>
+                <p class="small-note">Sumber portofolio tidak diisi manual. Aplikasi memakai profil/riwayat dari API internal dan file pendukung yang diunggah.</p>
+                <div id="portfolio-internal-evidence" class="internal-evidence-card">
+                    <p>Bukti pengalaman akan muncul otomatis setelah sumber internal tersedia.</p>
+                </div>
+            </div>
+            <label for="settings-portfolio-files">File Pendukung Portofolio</label>
+            <div class="upload-row">
+                <input type="file" id="settings-portfolio-files" accept=".docx,.pdf,.txt,.md" multiple />
+                <button type="button" id="btn-upload-portfolio-files" class="secondary">Upload File Portofolio</button>
+            </div>
+            <div id="portfolio-doc-list" class="document-list">
+                <div class="template-status">Belum ada file pendukung portofolio yang diunggah.</div>
+            </div>
+
+            <div class="source-policy-box">
+                <strong>Kapabilitas &amp; Sertifikasi Internal</strong>
+                <p class="small-note">Sumber kapabilitas, sertifikasi, dan tenaga ahli tidak diisi manual. Aplikasi memakai data yang terkonfirmasi dari API internal dan file pendukung yang diunggah.</p>
+                <div id="credential-internal-evidence" class="internal-evidence-card">
+                    <p>Bukti kapabilitas akan muncul otomatis setelah sumber internal tersedia.</p>
+                </div>
+            </div>
+            <label for="settings-credential-files">File Pendukung Kapabilitas & Sertifikasi</label>
+            <div class="upload-row">
+                <input type="file" id="settings-credential-files" accept=".docx,.pdf,.txt,.md" multiple />
+                <button type="button" id="btn-upload-credential-files" class="secondary">Unggah File Kapabilitas</button>
+            </div>
+            <div id="credential-doc-list" class="document-list">
+                <div class="template-status">Belum ada file pendukung kapabilitas yang diunggah.</div>
+            </div>
+
+            <label for="settings-template-file">Blanko / Template Proposal (.docx)</label>
+            <input type="file" id="settings-template-file" accept=".docx" />
+            <div id="template-status" class="template-status">Belum ada template blanko aktif.</div>
+
+            <div class="modal-actions">
+                <button type="button" id="btn-upload-template" class="secondary">Upload Blanko</button>
+                <button type="button" id="btn-clear-template" class="secondary">Hapus Blanko</button>
+            </div>
+
+            <div class="settings-section">
+                <h3>Sumber Data Internal</h3>
+                <p class="small-note">Bagian ini dipakai tim teknis untuk menghubungkan sumber data perusahaan. Pengguna proposal cukup memakai bukti yang sudah diringkas otomatis di atas.</p>
+                <label for="settings-api-url">Titik Akses API Data</label>
+                <input type="url" id="settings-api-url" placeholder="https://xxx.com/data" />
+                <div class="grid-2">
+                    <div>
+                        <label for="settings-api-auth-mode">Mode Auth</label>
+                        <select id="settings-api-auth-mode">
+                            <option value="basic">Basic Auth dari environment</option>
+                            <option value="bearer">Bearer Token dari environment</option>
+                            <option value="none">Tanpa auth</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="settings-api-body-encoding">Format Body</label>
+                        <select id="settings-api-body-encoding">
+                            <option value="form">Form</option>
+                            <option value="json">JSON</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="internal-api-status" class="status-box">Koneksi sumber data belum dimuat.</div>
+                <div class="upload-row">
+                    <button type="button" id="btn-save-internal-api" class="secondary">Simpan & Aktifkan Sumber Data</button>
+                    <button type="button" id="btn-refresh-internal-api" class="secondary" disabled>Muat Ulang Data Sekarang</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="precheck-modal" class="modal-backdrop">
+        <div class="modal">
+            <div class="modal-header">
+                <div>
+                    <h3>Cek Akhir Sebelum Generate</h3>
+                    <p class="small-note">Tinjau ekspektasi isi proposal, konteks pendukung, dan kerangka kerja yang akan dipakai sebelum dokumen disusun.</p>
+                </div>
+                <button type="button" id="btn-close-precheck" class="secondary">Tutup</button>
+            </div>
+            <div id="precheck-content" class="status-box">Cek akhir belum dimuat.</div>
+            <div class="modal-actions">
+                <button type="button" id="btn-confirm-generate">Lanjut Susun Dokumen</button>
+                <button type="button" id="btn-cancel-precheck" class="secondary">Kembali Sunting</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.min.js"></script>
     <script>
+        // Centralized fetch wrapper to inject CSRF token header for mutating requests
+        (function() {
+            const originalFetch = window.fetch;
+            window.fetch = function(input, init) {
+                init = init || {};
+                const method = (init.method || 'GET').toUpperCase();
+                if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+                    init.headers = init.headers || {};
+                    const csrfToken = document.cookie.match(/csrf_token=([^;]+)/)?.[1] || "";
+                    if (init.headers instanceof Headers) {
+                        init.headers.set('X-CSRFToken', csrfToken);
+                        init.headers.set('X-CSRF-Token', csrfToken);
+                    } else if (Array.isArray(init.headers)) {
+                        init.headers.push(['X-CSRFToken', csrfToken]);
+                        init.headers.push(['X-CSRF-Token', csrfToken]);
+                    } else {
+                        init.headers['X-CSRFToken'] = csrfToken;
+                        init.headers['X-CSRF-Token'] = csrfToken;
+                    }
+                }
+                return originalFetch(input, init);
+            };
+        })();
+
         const ui = {
             loader: document.getElementById('loader'),
-            loaderText: document.getElementById('loader-text'),
             configStep: document.getElementById('step-config'),
-            summaryStep: document.getElementById('step-summary'),
             successStep: document.getElementById('step-success'),
-            containerDynamic: document.getElementById('container-dynamic'),
-            
+            successMessage: document.getElementById('success-message'),
             selPerusahaan: document.getElementById('select-perusahaan'),
-            selStatusProyek: document.getElementById('select-status-proyek'),
+            companyOptions: document.getElementById('company-options'),
+            clientContextPanel: document.getElementById('client-context-panel'),
+            clientContextSummary: document.getElementById('client-context-summary'),
+            selModeProposal: document.getElementById('select-mode-proposal'),
+            selProposal: document.getElementById('select-proposal'),
             selProyek: document.getElementById('select-proyek'),
-            inpRuangLingkup: document.getElementById('input-ruang-lingkup'),
-            inpOutcome: document.getElementById('input-outcome'),
-            groupFramework: document.getElementById('group-framework'),
-            cbFrameworkLainnya: document.getElementById('cb-framework-lainnya'),
-            inpFramework: document.getElementById('input-framework'),
+            inpKonteks: document.getElementById('input-konteks'),
+            inpPermasalahan: document.getElementById('input-permasalahan'),
             inpWaktu: document.getElementById('input-waktu'),
             inpBiaya: document.getElementById('input-biaya'),
-            inpCatatan: document.getElementById('input-catatan'),
-            
-            suggestionBox: document.getElementById('budget-suggestion'),
-
-            sumPerusahaan: document.getElementById('sum-perusahaan'),
-            sumProyek: document.getElementById('sum-proyek'),
-            sumBudget: document.getElementById('sum-budget'),
-            sumWaktu: document.getElementById('sum-waktu'),
-            sumFramework: document.getElementById('sum-framework'),
-            sumScope: document.getElementById('sum-scope'),
-
-            btnReview: document.getElementById('btn-review'),
-            btnBack: document.getElementById('btn-back'),
-            btnConfirm: document.getElementById('btn-confirm'),
-            btnRefresh: document.getElementById('btn-refresh'),
-            spinner: document.getElementById('spinner')
+            groupKebutuhan: document.getElementById('group-kebutuhan'),
+            groupFramework: document.getElementById('group-framework'),
+            cbLainnya: document.getElementById('cb-lainnya'),
+            inpFrameworkLainnya: document.getElementById('input-framework-lainnya'),
+            containerDynamic: document.getElementById('container-dynamic'),
+            btnGenerate: document.getElementById('btn-generate'),
+            btnGenerateLabel: document.getElementById('btn-generate-label'),
+            btnAnalyze: document.getElementById('btn-analyze'),
+            btnPreview: document.getElementById('btn-preview'),
+            previewPanel: document.getElementById('preview-panel'),
+            previewContent: document.getElementById('preview-content'),
+            financeResult: document.getElementById('finance-result'),
+            financeSummary: document.getElementById('finance-summary'),
+            financeOptions: document.getElementById('finance-options'),
+            spinner: document.getElementById('spinner'),
+            btnHistory: document.getElementById('btn-history'),
+            btnSettings: document.getElementById('btn-settings'),
+            historyModal: document.getElementById('history-modal'),
+            settingsModal: document.getElementById('settings-modal'),
+            precheckModal: document.getElementById('precheck-modal'),
+            btnCloseHistory: document.getElementById('btn-close-history'),
+            btnCloseSettings: document.getElementById('btn-close-settings'),
+            btnClosePrecheck: document.getElementById('btn-close-precheck'),
+            btnCancelPrecheck: document.getElementById('btn-cancel-precheck'),
+            btnConfirmGenerate: document.getElementById('btn-confirm-generate'),
+            precheckContent: document.getElementById('precheck-content'),
+            historyList: document.getElementById('history-list'),
+            settingsPortfolioFiles: document.getElementById('settings-portfolio-files'),
+            btnUploadPortfolioFiles: document.getElementById('btn-upload-portfolio-files'),
+            portfolioDocList: document.getElementById('portfolio-doc-list'),
+            portfolioInternalEvidence: document.getElementById('portfolio-internal-evidence'),
+            settingsCredentialFiles: document.getElementById('settings-credential-files'),
+            btnUploadCredentialFiles: document.getElementById('btn-upload-credential-files'),
+            credentialDocList: document.getElementById('credential-doc-list'),
+            credentialInternalEvidence: document.getElementById('credential-internal-evidence'),
+            settingsTemplateFile: document.getElementById('settings-template-file'),
+            templateStatus: document.getElementById('template-status'),
+            btnUploadTemplate: document.getElementById('btn-upload-template'),
+            btnClearTemplate: document.getElementById('btn-clear-template'),
+            settingsApiUrl: document.getElementById('settings-api-url'),
+            settingsApiAuthMode: document.getElementById('settings-api-auth-mode'),
+            settingsApiBodyEncoding: document.getElementById('settings-api-body-encoding'),
+            internalApiStatus: document.getElementById('internal-api-status'),
+            btnSaveInternalApi: document.getElementById('btn-save-internal-api'),
+            btnRefreshInternalApi: document.getElementById('btn-refresh-internal-api'),
+            kakFiles: document.getElementById('input-kak-files'),
+            btnUploadKakFiles: document.getElementById('btn-upload-kak-files'),
+            kakDocList: document.getElementById('kak-doc-list'),
+            kakSummary: document.getElementById('kak-summary'),
+            btnApplyKak: document.getElementById('btn-apply-kak')
         };
+        let budgetAnalyzeInFlight = false;
+        let proposalJobInFlight = false;
+        let jobPollIntervalMs = 2000;
+        let prefetchTimer = null;
+        let lastPrefetchKey = '';
+        let latestKakSuggestions = null;
+        let latestClientContext = null;
+        let pendingGenerationPayload = null;
+        const richEditors = new Map();
 
-        const populateSelect = (element, items, placeholder) => {
-            element.innerHTML = `<option value="" disabled selected>${placeholder}</option>`;
-            items.forEach(item => element.add(new Option(item, item)));
-        };
-
-        const getFinalFramework = () => {
-            const checkedBoxes = Array.from(ui.groupFramework.querySelectorAll('input:checked:not(#cb-framework-lainnya)'));
-            const frameworkNames = checkedBoxes.map(cb => cb.value);
-            if (ui.cbFrameworkLainnya.checked && ui.inpFramework.value.trim()) {
-                frameworkNames.push(ui.inpFramework.value.trim());
-            }
-            return frameworkNames.join(', ');
-        };
-
-        async function initializeSystem() {
-            try {
-                const companiesRes = await fetch('/api/companies');
-                const companies = await companiesRes.json();
-                populateSelect(ui.selPerusahaan, companies, "Pilih Perusahaan...");
-                ui.loader.classList.add('hidden'); 
-                ui.configStep.classList.remove('hidden');
-            } catch (err) {
-                ui.loaderText.innerHTML = `<span class="error-text">Gagal memuat database server.</span>`;
-            }
-        }
-        initializeSystem();
-
-        ui.btnRefresh.onclick = () => {
-            ui.btnRefresh.innerText = "Refreshing..."; ui.btnRefresh.disabled = true;
-            fetch('/refresh-knowledge', {method: 'POST'}).then(() => location.reload());
-        };
-
-        ui.selPerusahaan.onchange = () => {
-            ui.containerDynamic.classList.remove('hidden');
-            checkReady();
-            
-            // Trigger API to suggest realistic budget based on financial OSINT
-            ui.suggestionBox.innerHTML = '💡 <i>Mengumpulkan data OSINT finansial...</i>';
-            
-            fetch('/api/suggest-budget', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ nama_perusahaan: ui.selPerusahaan.value })
-            })
-            .then(res => res.json())
-            .then(data => {
-                ui.suggestionBox.innerHTML = '💡 ' + data.suggestion;
-            })
-            .catch(() => {
-                ui.suggestionBox.innerHTML = '';
-            });
-        };
-
-        ui.cbFrameworkLainnya.addEventListener('change', () => {
-            ui.cbFrameworkLainnya.checked ? ui.inpFramework.classList.remove('hidden') : ui.inpFramework.classList.add('hidden');
-            checkReady();
-        });
-
-        [ui.inpRuangLingkup, ui.inpOutcome, ui.inpBiaya, ui.inpWaktu, ui.inpFramework].forEach(el => el.addEventListener('input', checkReady));
-        ui.groupFramework.addEventListener('change', checkReady);
-
-        function checkReady() {
-            const isReady = ui.selPerusahaan.value && ui.inpRuangLingkup.value.trim() && ui.inpOutcome.value.trim() && ui.inpBiaya.value.trim() && ui.inpWaktu.value.trim();
-            ui.btnReview.disabled = !isReady;
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
-        ui.btnReview.onclick = () => {
-            ui.sumPerusahaan.innerText = ui.selPerusahaan.value;
-            ui.sumProyek.innerText = `${ui.selStatusProyek.value} - ${ui.selProyek.value}`;
-            ui.sumBudget.innerText = ui.inpBiaya.value;
-            ui.sumWaktu.innerText = ui.inpWaktu.value;
-            ui.sumFramework.innerText = getFinalFramework() || "Tidak ada framework khusus";
-            
-            const scopeText = ui.inpRuangLingkup.value;
-            ui.sumScope.innerText = scopeText.length > 100 ? scopeText.substring(0, 100) + "..." : scopeText;
+        function plainTextToEditorHtml(text) {
+            const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+            const parts = [];
+            let listMode = null;
+            let listItems = [];
 
-            ui.configStep.classList.add('hidden');
-            ui.summaryStep.classList.remove('hidden');
-        };
-
-        ui.btnBack.onclick = () => {
-            ui.summaryStep.classList.add('hidden');
-            ui.configStep.classList.remove('hidden');
-        };
-
-        ui.btnConfirm.onclick = () => {
-            ui.btnConfirm.disabled = true; 
-            ui.btnBack.disabled = true;
-            ui.spinner.classList.add('active');
-            
-            const payload = {
-                nama_perusahaan: ui.selPerusahaan.value,
-                status_proyek: ui.selStatusProyek.value,
-                jenis_proyek: ui.selProyek.value,
-                ruang_lingkup: ui.inpRuangLingkup.value,
-                outcome: ui.inpOutcome.value,
-                regulasi: getFinalFramework(),
-                estimasi_waktu: ui.inpWaktu.value,
-                target_budget: ui.inpBiaya.value,
-                catatan_tambahan: ui.inpCatatan.value
+            const flushList = () => {
+                if (!listMode || !listItems.length) return;
+                const tag = listMode === 'ordered' ? 'ol' : 'ul';
+                parts.push(`<${tag}>${listItems.join('')}</${tag}>`);
+                listMode = null;
+                listItems = [];
             };
 
-            fetch('/generate', { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify(payload) 
-            })
-            .then(res => {
-                if (!res.ok) throw new Error("Server Error: Pastikan backend berjalan dengan benar.");
-                return res.blob();
-            })
-            .then(blob => {
-                let url = window.URL.createObjectURL(blob);
-                let a = document.createElement('a'); 
-                a.href = url; 
-                a.download = `Proposal_${ui.selPerusahaan.value.replace(/\s+/g, '_')}.docx`; 
-                a.click();
-                ui.summaryStep.classList.add('hidden'); 
-                ui.successStep.classList.remove('hidden');
-            }).catch((err) => {
-                alert("Gagal membuat proposal: " + err.message);
-                ui.btnConfirm.disabled = false;
-                ui.btnBack.disabled = false;
-                ui.spinner.classList.remove('active');
+            lines.forEach(rawLine => {
+                const line = rawLine.trim();
+                if (!line) {
+                    flushList();
+                    return;
+                }
+                const orderedMatch = line.match(/^(\d+)\.\s+(.*)$/);
+                const bulletMatch = line.match(/^[-*]\s+(.*)$/);
+                if (orderedMatch) {
+                    if (listMode !== 'ordered') flushList();
+                    listMode = 'ordered';
+                    listItems.push(`<li>${escapeHtml(orderedMatch[2])}</li>`);
+                    return;
+                }
+                if (bulletMatch) {
+                    if (listMode !== 'bullet') flushList();
+                    listMode = 'bullet';
+                    listItems.push(`<li>${escapeHtml(bulletMatch[1])}</li>`);
+                    return;
+                }
+                flushList();
+                parts.push(`<p>${escapeHtml(line)}</p>`);
             });
+
+            flushList();
+            return parts.join('') || '<p><br></p>';
+        }
+
+        function inlineNodeToText(node) {
+            if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
+            if (node.nodeType !== Node.ELEMENT_NODE) return '';
+            const tag = node.tagName.toLowerCase();
+            if (tag === 'br') return '\n';
+            const content = Array.from(node.childNodes).map(inlineNodeToText).join('');
+            if (tag === 'strong' || tag === 'b') return `**${content}**`;
+            if (tag === 'em' || tag === 'i') return `*${content}*`;
+            if (tag === 'u') return `_${content}_`;
+            return content;
+        }
+
+        function listNodeToLines(node, ordered = false, indent = 0) {
+            const lines = [];
+            const items = Array.from(node.children).filter(child => child.tagName && child.tagName.toLowerCase() === 'li');
+            items.forEach((item, index) => {
+                const prefix = `${'  '.repeat(indent)}${ordered ? `${index + 1}.` : '-'} `;
+                let immediateText = '';
+                const nestedLines = [];
+                Array.from(item.childNodes).forEach(child => {
+                    if (child.nodeType === Node.ELEMENT_NODE) {
+                        const tag = child.tagName.toLowerCase();
+                        if (tag === 'ul') {
+                            nestedLines.push(...listNodeToLines(child, false, indent + 1));
+                            return;
+                        }
+                        if (tag === 'ol') {
+                            nestedLines.push(...listNodeToLines(child, true, indent + 1));
+                            return;
+                        }
+                    }
+                    immediateText += inlineNodeToText(child);
+                });
+                const cleanedLine = immediateText.replace(/\s+/g, ' ').trim();
+                if (cleanedLine) lines.push(`${prefix}${cleanedLine}`);
+                lines.push(...nestedLines);
+            });
+            return lines;
+        }
+
+        function editorHtmlToStructuredText(html) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(`<div>${html || ''}</div>`, 'text/html');
+            const root = doc.body.firstElementChild;
+            if (!root) return '';
+
+            const blocks = [];
+            Array.from(root.childNodes).forEach(node => {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+                    if (text) blocks.push(text);
+                    return;
+                }
+                if (node.nodeType !== Node.ELEMENT_NODE) return;
+                const tag = node.tagName.toLowerCase();
+                if (tag === 'ul') {
+                    blocks.push(...listNodeToLines(node, false, 0));
+                    return;
+                }
+                if (tag === 'ol') {
+                    blocks.push(...listNodeToLines(node, true, 0));
+                    return;
+                }
+                const line = inlineNodeToText(node).replace(/\s+/g, ' ').trim();
+                if (line) blocks.push(line);
+            });
+
+            return blocks.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+        }
+
+        function syncRichEditorValue(textarea, quill) {
+            const normalized = quill.getText().trim() ? editorHtmlToStructuredText(quill.root.innerHTML) : '';
+            textarea.value = normalized;
+            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        function setRichEditorValue(textarea, value) {
+            textarea.value = value || '';
+            const editor = richEditors.get(textarea.id);
+            if (!editor) return;
+            editor.quill.clipboard.dangerouslyPasteHTML(plainTextToEditorHtml(value || ''));
+            syncRichEditorValue(textarea, editor.quill);
+        }
+
+        function buildEditorToolbar(toolbarId) {
+            return `
+                <div id="${toolbarId}" class="editor-toolbar">
+                    <span class="ql-formats">
+                        <button type="button" class="ql-bold" title="Tebal"></button>
+                        <button type="button" class="ql-italic" title="Miring"></button>
+                        <button type="button" class="ql-underline" title="Garis bawah"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <button type="button" class="ql-list" value="ordered" title="Penomoran"></button>
+                        <button type="button" class="ql-list" value="bullet" title="Poin"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <button type="button" class="ql-clean" title="Bersihkan format"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <button type="button" class="ql-undo" title="Urungkan">↶</button>
+                        <button type="button" class="ql-redo" title="Ulangi">↷</button>
+                    </span>
+                </div>
+            `;
+        }
+
+        function initRichEditors() {
+            const textareas = Array.from(document.querySelectorAll('textarea.rich-editor-source'));
+            if (!textareas.length) return;
+
+            if (typeof Quill === 'undefined') {
+                textareas.forEach(textarea => {
+                    const note = document.createElement('div');
+                    note.className = 'editor-fallback-note';
+                    note.textContent = 'Editor kaya teks belum termuat. Field tetap bisa dipakai dalam mode teks biasa.';
+                    textarea.parentNode.insertBefore(note, textarea);
+                });
+                return;
+            }
+
+            textareas.forEach((textarea, index) => {
+                textarea.classList.add('rich-source');
+                const shell = document.createElement('div');
+                shell.className = 'editor-shell';
+                const toolbarId = `rich-toolbar-${index + 1}`;
+                shell.innerHTML = `${buildEditorToolbar(toolbarId)}<div class="editor-content"></div>`;
+                textarea.parentNode.insertBefore(shell, textarea.nextSibling);
+                const quill = new Quill(shell.querySelector('.editor-content'), {
+                    theme: 'snow',
+                    placeholder: textarea.getAttribute('placeholder') || '',
+                    modules: {
+                        toolbar: {
+                            container: `#${toolbarId}`,
+                            handlers: {
+                                undo() { this.quill.history.undo(); },
+                                redo() { this.quill.history.redo(); }
+                            }
+                        },
+                        history: {
+                            delay: 400,
+                            maxStack: 100,
+                            userOnly: true
+                        }
+                    }
+                });
+                quill.on('text-change', () => syncRichEditorValue(textarea, quill));
+                richEditors.set(textarea.id, { quill, shell });
+                setRichEditorValue(textarea, textarea.value || '');
+            });
+        }
+
+        const showScreen = (screen) => {
+            [ui.loader, ui.configStep, ui.successStep].forEach(el => el.classList.add('hidden'));
+            if (screen === 'loader') ui.loader.classList.remove('hidden');
+            if (screen === 'config') ui.configStep.classList.remove('hidden');
+            if (screen === 'success') ui.successStep.classList.remove('hidden');
         };
+
+        function bindFrameworkOtherToggle() {
+            if (!ui.cbLainnya) return;
+            ui.cbLainnya.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    ui.inpFrameworkLainnya.classList.remove('hidden');
+                    ui.inpFrameworkLainnya.focus();
+                } else {
+                    ui.inpFrameworkLainnya.classList.add('hidden');
+                    ui.inpFrameworkLainnya.value = '';
+                }
+                updateActionState();
+            });
+        }
+        bindFrameworkOtherToggle();
+
+        // Build final framework value including custom input.
+        const getFinalFrameworks = () => {
+            const checked = Array.from(ui.groupFramework.querySelectorAll('input:checked:not(#cb-lainnya)'))
+                                 .map(cb => {
+                                     const select = ui.groupFramework.querySelector(`.framework-version-select[data-framework-version-for="${CSS.escape(cb.value)}"]`);
+                                     return select && select.value ? select.value : cb.value;
+                                 });
+            if (ui.cbLainnya.checked && ui.inpFrameworkLainnya.value.trim() !== '') {
+                checked.push(ui.inpFrameworkLainnya.value.trim());
+            }
+            return checked.join(', ');
+        };
+
+        const getChecked = (container) => Array.from(container.querySelectorAll('input:checked')).map(cb => cb.value).join(', ');
+
+        const hasAnalyzePrerequisites = () => {
+            const hasKebutuhan = ui.groupKebutuhan.querySelectorAll('input:checked').length > 0;
+            const hasFramework = getFinalFrameworks().length > 0;
+            return Boolean(
+                ui.selPerusahaan.value &&
+                ui.selModeProposal.value &&
+                ui.selProposal.value &&
+                ui.selProyek.value &&
+                ui.inpKonteks.value.trim() &&
+                ui.inpPermasalahan.value.trim() &&
+                ui.inpWaktu.value.trim() &&
+                hasKebutuhan &&
+                hasFramework
+            );
+        };
+
+        const setGenerateLabel = (text) => {
+            ui.btnGenerateLabel.textContent = text;
+        };
+
+        const updateActionState = () => {
+            const canAnalyze = hasAnalyzePrerequisites();
+            const canGenerate = canAnalyze && Boolean(ui.inpBiaya.value.trim()) && !proposalJobInFlight;
+            ui.btnAnalyze.disabled = budgetAnalyzeInFlight || proposalJobInFlight || !canAnalyze;
+            ui.btnPreview.disabled = proposalJobInFlight;
+            ui.btnGenerate.disabled = !canGenerate;
+        };
+
+        async function loadCompanies() {
+            const companyRes = await fetch('/api/companies');
+            const data = await companyRes.json();
+            const currentValue = ui.selPerusahaan.value;
+            ui.companyOptions.innerHTML = '';
+            data.forEach(d => ui.companyOptions.appendChild(new Option(d, d)));
+            ui.selPerusahaan.value = currentValue || '';
+            return data;
+        }
+
+        function renderClientContext(context = {}) {
+            latestClientContext = context || null;
+            const useCases = Array.isArray(context.use_cases) ? context.use_cases : [];
+            ui.clientContextPanel.classList.toggle('hidden', !ui.selPerusahaan.value);
+            if (!context.available) {
+                ui.clientContextSummary.textContent = context.error || 'ReferenceAccount belum menemukan konteks tambahan untuk klien ini.';
+                return;
+            }
+            const useCaseLines = useCases.slice(0, 3).map(item => [
+                item.product_name || 'Konteks proyek',
+                item.project_name || '',
+                item.position_name ? `peran ${item.position_name}` : ''
+            ].filter(Boolean).join(' · '));
+            const lines = [
+                context.account_summary,
+                context.use_case_summary,
+                ...useCaseLines,
+                context.expert_guidance ? `Arahan tenaga ahli: ${context.expert_guidance}` : '',
+                context.osint_context_note ? `OSINT: ${context.osint_context_note}` : ''
+            ].filter(Boolean);
+            ui.clientContextSummary.innerHTML = lines.length
+                ? lines.map(line => `<div>${escapeHtml(line)}</div>`).join('')
+                : 'Konteks internal tersedia, tetapi detail ringkas belum terbaca.';
+        }
+
+        async function loadClientContext(clientName) {
+            if (!clientName) {
+                latestClientContext = null;
+                ui.clientContextPanel.classList.add('hidden');
+                return;
+            }
+            ui.clientContextPanel.classList.remove('hidden');
+            ui.clientContextSummary.textContent = 'Membaca konteks internal klien...';
+            try {
+                const res = await fetch(`/api/client-context?client_name=${encodeURIComponent(clientName)}`);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Konteks internal belum bisa dibaca.');
+                renderClientContext(data);
+            } catch (err) {
+                renderClientContext({ available: false, error: err.message || 'Konteks internal belum bisa dibaca.', use_cases: [] });
+            }
+        }
+
+        async function init() {
+            try {
+                const [data, configRes] = await Promise.all([
+                    loadCompanies(),
+                    fetch('/api/config')
+                ]);
+                if (configRes.ok) {
+                    const config = await configRes.json();
+                    jobPollIntervalMs = Number(config.job_poll_interval_ms) || jobPollIntervalMs;
+                    const proposalModes = Array.isArray(config.proposal_modes) ? config.proposal_modes : [];
+                    ui.selModeProposal.innerHTML = `<option value="" disabled selected>Pilih jenis dokumen proposal...</option>`;
+                    proposalModes.forEach(item => {
+                        ui.selModeProposal.add(new Option(item.label, item.value));
+                    });
+                    renderFrameworkOptions(config);
+
+                    const banner = document.getElementById('fallback-banner');
+                    if (banner) {
+                        if (config.data_source_is_fallback) {
+                            banner.classList.remove('hidden');
+                        } else {
+                            banner.classList.add('hidden');
+                        }
+                    }
+                }
+                showScreen('config');
+                updateActionState();
+            } catch (e) {
+                document.getElementById('loader-text').innerText = "Gagal memuat database.";
+                showScreen('loader');
+            }
+        }
+        init();
+        initRichEditors();
+        loadKakContext();
+
+        const openModal = (el) => el.classList.add('active');
+        const closeModal = (el) => el.classList.remove('active');
+
+        function setCheckedValues(container, rawValue) {
+            const selected = String(rawValue || '')
+                .split(',')
+                .map(item => item.trim().toLowerCase())
+                .filter(Boolean);
+            container.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.checked = selected.includes(String(cb.value || '').trim().toLowerCase());
+            });
+        }
+
+        function renderFrameworkOptions(config) {
+            const payload = (config && config.framework_options) || {};
+            const options = Array.isArray(payload.options) ? payload.options : [];
+            if (!options.length) return;
+            const selected = getFinalFrameworks();
+            const rows = options
+                .filter(item => item && item.value && item.label && item.available !== false)
+                .map(item => {
+                    const versions = Array.isArray(item.versions) ? item.versions.filter(version => version && version.value) : [];
+                    const versionSelect = versions.length > 1
+                        ? `<select class="framework-version-select" data-framework-version-for="${escapeHtml(item.value)}" title="Pilih versi ${escapeHtml(item.label)}">
+                            ${versions.map(version => `
+                                <option value="${escapeHtml(version.value)}" ${version.value === item.recommended_version ? 'selected' : ''}>${escapeHtml(version.label || version.value)}</option>
+                            `).join('')}
+                        </select>`
+                        : '';
+                    const evidence = Array.isArray(item.osint_evidence) && item.osint_evidence.length
+                        ? ` data-osint-evidence="${escapeHtml(item.osint_evidence.map(source => source.url || source.title || '').filter(Boolean).join(' | '))}"`
+                        : '';
+                    return `
+                        <label class="framework-option" title="${escapeHtml(item.description || '')}">
+                            <input type="checkbox" value="${escapeHtml(item.value)}" data-framework-versions="${escapeHtml(JSON.stringify(versions))}"${evidence}>
+                            <span class="framework-option-name">${escapeHtml(item.label)}</span>
+                            ${versionSelect}
+                        </label>
+                    `;
+                })
+                .join('');
+            if (!rows) return;
+            ui.groupFramework.innerHTML = `${rows}<label class="framework-option"><input type="checkbox" id="cb-lainnya" value="Lainnya"><span class="framework-option-name">Lainnya..</span></label>`;
+            ui.cbLainnya = document.getElementById('cb-lainnya');
+            bindFrameworkOtherToggle();
+            applyFrameworkValue(selected);
+        }
+
+        function applyFrameworkValue(rawValue) {
+            const values = String(rawValue || '')
+                .split(',')
+                .map(item => item.trim())
+                .filter(Boolean);
+            const known = Array.from(ui.groupFramework.querySelectorAll('input:not(#cb-lainnya)')).map(cb => cb.value.toLowerCase());
+            const custom = [];
+            ui.groupFramework.querySelectorAll('input:not(#cb-lainnya)').forEach(cb => {
+                const versions = JSON.parse(cb.dataset.frameworkVersions || '[]');
+                const versionValues = versions.map(version => String(version.value || '').toLowerCase()).filter(Boolean);
+                const selectedVersion = values.find(value => versionValues.includes(value.toLowerCase()));
+                cb.checked = values.some(value => value.toLowerCase() === cb.value.toLowerCase()) || Boolean(selectedVersion);
+                const select = ui.groupFramework.querySelector(`.framework-version-select[data-framework-version-for="${CSS.escape(cb.value)}"]`);
+                if (select && selectedVersion) select.value = selectedVersion;
+            });
+            values.forEach(value => {
+                if (!known.includes(value.toLowerCase())) custom.push(value);
+            });
+            ui.cbLainnya.checked = custom.length > 0;
+            ui.inpFrameworkLainnya.classList.toggle('hidden', custom.length === 0);
+            ui.inpFrameworkLainnya.value = custom.join(', ');
+        }
+
+        function applyPayload(payload = {}) {
+            if (payload.nama_perusahaan) {
+                const exists = Array.from(ui.companyOptions.options).some(option => option.value === payload.nama_perusahaan);
+                if (!exists) {
+                    ui.companyOptions.appendChild(new Option(payload.nama_perusahaan, payload.nama_perusahaan));
+                }
+            }
+            ui.selPerusahaan.value = payload.nama_perusahaan || '';
+            ui.selModeProposal.value = payload.mode_proposal || '';
+            ui.selProposal.value = payload.jenis_proposal || '';
+            ui.selProyek.value = payload.jenis_proyek || '';
+            setRichEditorValue(ui.inpKonteks, payload.konteks_organisasi || '');
+            setRichEditorValue(ui.inpPermasalahan, payload.permasalahan || '');
+            ui.inpWaktu.value = payload.estimasi_waktu || '';
+            ui.inpBiaya.value = payload.estimasi_biaya || '';
+            ui.containerDynamic.classList.remove('hidden');
+            setCheckedValues(ui.groupKebutuhan, payload.klasifikasi_kebutuhan || '');
+            applyFrameworkValue(payload.potensi_framework || '');
+            ui.financeResult.classList.add('hidden');
+            ui.previewPanel.classList.add('hidden');
+            updateActionState();
+            if (ui.selPerusahaan.value) {
+                loadClientContext(ui.selPerusahaan.value);
+            }
+            schedulePrefetch(true);
+        }
+
+        async function loadHistory() {
+            ui.historyList.innerHTML = '<p class="small-note">Memuat riwayat proposal...</p>';
+            try {
+                const res = await fetch('/api/history');
+                const data = await res.json();
+                const items = Array.isArray(data.items) ? data.items : [];
+                if (!items.length) {
+                    ui.historyList.innerHTML = '<p class="small-note">Belum ada proposal yang tersimpan pada riwayat.</p>';
+                    return;
+                }
+                ui.historyList.innerHTML = items.map(item => `
+                    <div class="history-item">
+                        <h4>${escapeHtml(item.client)}</h4>
+                        <div class="history-meta">
+                            <div><strong>Waktu:</strong> ${escapeHtml(item.finished_at_label)}</div>
+                            <div><strong>Mode:</strong> ${escapeHtml(item.proposal_mode)} | <strong>Layanan:</strong> ${escapeHtml(item.service_type)} | <strong>Jenis Proyek:</strong> ${escapeHtml(item.project_type)}</div>
+                            <div><strong>Inisiatif:</strong> ${escapeHtml(item.project)}</div>
+                        </div>
+                        <div class="history-actions">
+                            ${item.can_reuse ? `<button type="button" class="secondary" data-history-reuse="${escapeHtml(item.id)}">Gunakan Lagi</button>` : ''}
+                            <button type="button" class="secondary" data-history-download="${escapeHtml(item.id)}">Unduh</button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                ui.historyList.innerHTML = '<p class="small-note">Riwayat proposal belum bisa dimuat.</p>';
+            }
+        }
+
+        function formatFileSize(bytes) {
+            const value = Number(bytes || 0);
+            if (!value) return 'ukuran file belum tercatat';
+            if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+            return `${Math.max(1, Math.round(value / 1024))} KB`;
+        }
+
+        function renderSupportingDocuments(target, items, emptyMessage) {
+            const docs = Array.isArray(items) ? items : [];
+            if (!docs.length) {
+                target.innerHTML = `<div class="template-status">${escapeHtml(emptyMessage)}</div>`;
+                return;
+            }
+            target.innerHTML = docs.map(item => `
+                <div class="document-item">
+                    <div>
+                        <strong>${escapeHtml(item.original_name || 'Dokumen pendukung')}</strong>
+                        ${item.is_active ? '<span class="user-chip">KAK aktif</span>' : ''}
+                        <div class="document-meta-note">
+                            Diunggah ${escapeHtml(item.uploaded_at_label || '-')} · ${escapeHtml(formatFileSize(item.byte_size))}
+                            ${item.has_text ? ' · teks berhasil dibaca' : ' · teks belum berhasil diekstrak'}
+                        </div>
+                    </div>
+                    ${item.document_type === 'kak' && !item.is_active ? `<button type="button" class="secondary" data-kak-active="${escapeHtml(item.id)}">Gunakan KAK Ini</button>` : ''}
+                    <button type="button" class="secondary" data-doc-remove="${escapeHtml(item.id)}">Hapus</button>
+                </div>
+            `).join('');
+        }
+
+        function renderKakSummary(analysis = {}) {
+            if (!analysis || !analysis.available) {
+                ui.kakSummary.textContent = analysis.summary || 'Belum ada dokumen KAK/TOR yang dibaca.';
+                latestKakSuggestions = null;
+                ui.btnApplyKak.disabled = true;
+                return;
+            }
+            const warnings = Array.isArray(analysis.warnings) ? analysis.warnings.filter(Boolean) : [];
+            const labels = {
+                nama_perusahaan: 'Klien',
+                jenis_proposal: 'Jenis layanan',
+                jenis_proyek: 'Jenis proyek',
+                konteks_organisasi: 'Inisiatif / objektif',
+                permasalahan: 'Masalah utama',
+                klasifikasi_kebutuhan: 'Klasifikasi kebutuhan',
+                estimasi_waktu: 'Durasi',
+                estimasi_biaya: 'Anggaran',
+                potensi_framework: 'Framework / acuan'
+            };
+            const suggestionLines = Object.entries(analysis.suggestions || {})
+                .filter(([, value]) => String(value || '').trim())
+                .map(([key, value]) => `<li><strong>${escapeHtml(labels[key] || key)}</strong>: ${escapeHtml(value)}</li>`)
+                .join('');
+            const timelineItems = Array.isArray(analysis.timeline_items) ? analysis.timeline_items : [];
+            const timelineLines = timelineItems.length
+                ? `<div class="small-note" style="margin-top:8px;"><strong>Timeline terbaca:</strong></div><ul class="kak-warning-list">${timelineItems.slice(0, 5).map(item => {
+                    const phase = [item.phase, item.activity, item.deliverable].filter(Boolean).join(' · ');
+                    return `<li><strong>${escapeHtml(item.period || '-')}</strong>: ${escapeHtml(phase || 'aktivitas sesuai KAK')}</li>`;
+                }).join('')}</ul>`
+                : '';
+            const warningLines = warnings.length
+                ? `<ul class="kak-warning-list">${warnings.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+                : '';
+            const suggestionList = suggestionLines
+                ? `<ul class="kak-warning-list">${suggestionLines}</ul>`
+                : '';
+            ui.kakSummary.innerHTML = `
+                <strong>${escapeHtml(analysis.source_document || 'Dokumen KAK/TOR')}</strong><br />
+                ${escapeHtml(analysis.summary || '')}
+                ${suggestionList}
+                ${timelineLines}
+                ${warningLines}
+            `;
+            latestKakSuggestions = analysis.suggestions || null;
+            ui.btnApplyKak.disabled = !latestKakSuggestions || !Object.keys(latestKakSuggestions).length;
+        }
+
+        async function loadKakContext() {
+            try {
+                const res = await fetch('/api/kak-context');
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Pembacaan KAK/TOR belum tersedia.');
+                renderSupportingDocuments(
+                    ui.kakDocList,
+                    data.documents || [],
+                    'Belum ada dokumen KAK/TOR yang diunggah.'
+                );
+                renderKakSummary(data.analysis || {});
+            } catch (err) {
+                ui.kakDocList.innerHTML = '<div class="template-status">Dokumen KAK/TOR belum bisa dimuat.</div>';
+                renderKakSummary({ available: false, summary: err.message || 'Pembacaan KAK/TOR belum tersedia.' });
+            }
+        }
+
+        function applyKakSuggestions(suggestions = {}, onlyEmpty = false) {
+            const payload = suggestions || {};
+            if (!Object.keys(payload).length) return;
+            if (payload.nama_perusahaan && (!onlyEmpty || !ui.selPerusahaan.value)) {
+                const exists = Array.from(ui.companyOptions.options).some(option => option.value === payload.nama_perusahaan);
+                if (!exists) {
+                    ui.companyOptions.appendChild(new Option(payload.nama_perusahaan, payload.nama_perusahaan));
+                }
+                ui.selPerusahaan.value = payload.nama_perusahaan;
+                loadClientContext(payload.nama_perusahaan);
+            }
+            if (payload.jenis_proposal && (!onlyEmpty || !ui.selProposal.value)) {
+                ui.selProposal.value = payload.jenis_proposal;
+            }
+            if (payload.jenis_proyek && (!onlyEmpty || !ui.selProyek.value)) {
+                ui.selProyek.value = payload.jenis_proyek;
+            }
+            if (payload.konteks_organisasi && (!onlyEmpty || !ui.inpKonteks.value.trim())) {
+                setRichEditorValue(ui.inpKonteks, payload.konteks_organisasi);
+            }
+            if (payload.permasalahan && (!onlyEmpty || !ui.inpPermasalahan.value.trim())) {
+                setRichEditorValue(ui.inpPermasalahan, payload.permasalahan);
+            }
+            if (payload.klasifikasi_kebutuhan && (!onlyEmpty || !getChecked(ui.groupKebutuhan))) {
+                setCheckedValues(ui.groupKebutuhan, payload.klasifikasi_kebutuhan);
+            }
+            if (payload.estimasi_waktu && (!onlyEmpty || !ui.inpWaktu.value.trim())) {
+                ui.inpWaktu.value = payload.estimasi_waktu;
+            }
+            if (payload.estimasi_biaya && (!onlyEmpty || !ui.inpBiaya.value.trim())) {
+                ui.inpBiaya.value = payload.estimasi_biaya;
+            }
+            if (payload.potensi_framework && (!onlyEmpty || !getFinalFrameworks())) {
+                applyFrameworkValue(payload.potensi_framework);
+            }
+            ui.containerDynamic.classList.remove('hidden');
+            ui.financeResult.classList.add('hidden');
+            ui.previewPanel.classList.add('hidden');
+            updateActionState();
+            schedulePrefetch(true);
+        }
+
+        async function loadSettings() {
+            try {
+                const res = await fetch('/api/settings');
+                const data = await res.json();
+                renderSupportingDocuments(
+                    ui.portfolioDocList,
+                    data.portfolio_documents || [],
+                    'Belum ada file pendukung portofolio yang diunggah.'
+                );
+                renderSupportingDocuments(
+                    ui.credentialDocList,
+                    data.credential_documents || [],
+                    'Belum ada file pendukung kapabilitas yang diunggah.'
+                );
+                renderSupportingDocuments(
+                    ui.kakDocList,
+                    data.kak_documents || [],
+                    'Belum ada dokumen KAK/TOR yang diunggah.'
+                );
+                ui.templateStatus.textContent = data.has_active_template
+                    ? `Template aktif: ${data.active_template_name || 'blanko proposal'}`
+                    : 'Belum ada template blanko aktif.';
+                await loadInternalEvidenceSummary();
+                await loadInternalApiSetup();
+            } catch (_) {
+                ui.portfolioDocList.innerHTML = '<div class="template-status">File pendukung portofolio belum bisa dimuat.</div>';
+                ui.credentialDocList.innerHTML = '<div class="template-status">File pendukung kapabilitas belum bisa dimuat.</div>';
+                ui.kakDocList.innerHTML = '<div class="template-status">Dokumen KAK/TOR belum bisa dimuat.</div>';
+                ui.templateStatus.textContent = 'Pengaturan belum bisa dimuat.';
+            }
+        }
+
+        function renderInternalEvidenceSection(target, section, fallback) {
+            if (!target) return;
+            const data = section || {};
+            const title = data.title || 'Bukti internal';
+            const summary = data.summary || fallback;
+            const bullets = Array.isArray(data.bullets) ? data.bullets.filter(Boolean) : [];
+            target.innerHTML = `
+                <h4>${escapeHtml(title)}</h4>
+                <p>${escapeHtml(summary)}</p>
+                ${bullets.length ? `<ul>${bullets.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : ''}
+            `;
+        }
+
+        async function loadInternalEvidenceSummary() {
+            try {
+                const res = await fetch('/api/settings/internal-evidence');
+                const data = await res.json();
+                if (!res.ok) throw new Error('Bukti internal belum bisa dimuat.');
+                renderInternalEvidenceSection(
+                    ui.portfolioInternalEvidence,
+                    data.portfolio,
+                    'Bukti pengalaman akan muncul otomatis setelah sumber internal tersedia.'
+                );
+                renderInternalEvidenceSection(
+                    ui.credentialInternalEvidence,
+                    data.credentials,
+                    'Bukti kapabilitas akan muncul otomatis setelah sumber internal tersedia.'
+                );
+            } catch (_) {
+                renderInternalEvidenceSection(
+                    ui.portfolioInternalEvidence,
+                    {},
+                    'Bukti pengalaman belum bisa dimuat saat ini.'
+                );
+                renderInternalEvidenceSection(
+                    ui.credentialInternalEvidence,
+                    {},
+                    'Bukti kapabilitas belum bisa dimuat saat ini.'
+                );
+            }
+        }
+
+        function renderInternalApiStatus(data) {
+            const validation = (data && data.validation) || {};
+            const resources = validation.resources || {};
+            const firstResource = Object.values(resources)[0] || {};
+            if (!ui.settingsApiUrl.value && firstResource.path && /^https?:\/\//i.test(firstResource.path)) {
+                ui.settingsApiUrl.value = firstResource.path;
+            }
+            if (validation.auth_mode && ui.settingsApiAuthMode) {
+                ui.settingsApiAuthMode.value = validation.auth_mode;
+            }
+            const connectionClass = data.api_connection_active ? 'status-active' : 'status-inactive';
+            const connectionLabel = data.api_connection_active ? 'Sumber data internal sudah terhubung' : 'Sumber data internal belum terhubung';
+            const refreshState = data.sync_in_progress ? 'pemutakhiran sedang berjalan' : (data.can_refresh_dataset ? 'dapat dimuat ulang oleh tim teknis' : 'menunggu konfigurasi teknis');
+            ui.internalApiStatus.innerHTML = `
+                <div><strong class="${connectionClass}">${escapeHtml(connectionLabel)}</strong></div>
+                <div>Pembaruan data: <strong>${escapeHtml(refreshState)}</strong></div>
+                ${data.last_refresh_error ? '<div>Tim teknis perlu mengecek koneksi sumber data.</div>' : ''}
+            `;
+            setInternalApiConnectionState(data);
+        }
+
+        function setInternalApiConnectionState(data) {
+            const active = Boolean(data && data.api_connection_active);
+            const syncing = Boolean(data && data.sync_in_progress);
+            if (ui.btnSaveInternalApi) {
+                ui.btnSaveInternalApi.disabled = active;
+                ui.btnSaveInternalApi.textContent = active ? 'Sumber Data Sudah Aktif' : 'Simpan & Aktifkan Sumber Data';
+                ui.btnSaveInternalApi.title = active
+                    ? 'Sumber data sudah aktif. Gunakan Muat Ulang Data Sekarang untuk mengambil perubahan data terbaru.'
+                    : 'Simpan titik akses dan aktifkan sumber data.';
+            }
+            if (ui.btnRefreshInternalApi) {
+                ui.btnRefreshInternalApi.disabled = !active || syncing;
+                ui.btnRefreshInternalApi.textContent = syncing ? 'Pemuatan Ulang Sedang Berjalan...' : 'Muat Ulang Data Sekarang';
+                ui.btnRefreshInternalApi.title = active
+                    ? 'Ambil ulang data perusahaan dan perbarui basis pengetahuan aplikasi.'
+                    : 'Aktifkan sumber data sebelum pemuatan ulang.';
+            }
+        }
+
+        async function loadInternalApiSetup() {
+            try {
+                const res = await fetch('/api/internal-api/setup');
+                const data = await res.json();
+                if (!res.ok) throw new Error('Koneksi sumber data belum bisa dimuat.');
+                renderInternalApiStatus(data);
+            } catch (err) {
+                ui.internalApiStatus.textContent = err.message || 'Koneksi sumber data belum bisa dimuat.';
+            }
+        }
+
+        async function uploadSupportingDocuments(documentType, inputEl) {
+            const files = Array.from((inputEl && inputEl.files) || []);
+            if (!files.length) {
+                return alert('Pilih minimal satu file pendukung terlebih dahulu.');
+            }
+            const formData = new FormData();
+            formData.append('document_type', documentType);
+            files.forEach(file => formData.append('files', file));
+            try {
+                const res = await fetch('/api/settings/documents', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'File pendukung belum berhasil diunggah.');
+                inputEl.value = '';
+                await loadSettings();
+                alert('File pendukung berhasil diunggah.');
+            } catch (err) {
+                alert(err.message || 'File pendukung belum berhasil diunggah.');
+            }
+        }
+
+        async function removeSupportingDocument(documentId) {
+            try {
+                const res = await fetch(`/api/settings/documents/${encodeURIComponent(documentId)}`, {
+                    method: 'DELETE'
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'File pendukung belum berhasil dihapus.');
+                await loadSettings();
+                await loadKakContext();
+            } catch (err) {
+                alert(err.message || 'File pendukung belum berhasil dihapus.');
+            }
+        }
+
+        async function reuseHistory(entryId) {
+            try {
+                const res = await fetch(`/api/history/${encodeURIComponent(entryId)}/reuse`);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Riwayat tidak bisa dipakai ulang.');
+                applyPayload(data.payload || {});
+                closeModal(ui.historyModal);
+            } catch (err) {
+                alert(err.message || 'Riwayat tidak bisa dipakai ulang.');
+            }
+        }
+
+        function downloadHistory(entryId) {
+            window.location.href = `/api/history/${encodeURIComponent(entryId)}/download`;
+        }
+
+        window.reuseHistory = reuseHistory;
+        window.downloadHistory = downloadHistory;
+        window.removeSupportingDocument = removeSupportingDocument;
+
+        ui.historyList.addEventListener('click', (event) => {
+            const reuseButton = event.target.closest('[data-history-reuse]');
+            if (reuseButton) {
+                reuseHistory(reuseButton.dataset.historyReuse);
+                return;
+            }
+            const downloadButton = event.target.closest('[data-history-download]');
+            if (downloadButton) {
+                downloadHistory(downloadButton.dataset.historyDownload);
+            }
+        });
+
+        function handleSupportingDocumentClick(event) {
+            const activeButton = event.target.closest('[data-kak-active]');
+            if (activeButton) {
+                setActiveKakDocument(activeButton.dataset.kakActive);
+                return;
+            }
+            const removeButton = event.target.closest('[data-doc-remove]');
+            if (!removeButton) return;
+            removeSupportingDocument(removeButton.dataset.docRemove);
+        }
+
+        async function setActiveKakDocument(documentId) {
+            try {
+                const res = await fetch('/api/kak-context/active', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ document_id: documentId })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'KAK aktif belum berhasil diganti.');
+                await loadSettings();
+                await loadKakContext();
+                if (latestKakSuggestions) {
+                    applyKakSuggestions(latestKakSuggestions, true);
+                    alert('KAK aktif berhasil diganti. Saran yang cocok sudah diterapkan ke field yang masih kosong.');
+                } else {
+                    alert('KAK aktif berhasil diganti.');
+                }
+            } catch (err) {
+                alert(err.message || 'KAK aktif belum berhasil diganti.');
+            }
+        }
+
+        ui.portfolioDocList.addEventListener('click', handleSupportingDocumentClick);
+        ui.credentialDocList.addEventListener('click', handleSupportingDocumentClick);
+        ui.kakDocList.addEventListener('click', handleSupportingDocumentClick);
+
+        ui.selPerusahaan.addEventListener('change', () => {
+            ui.containerDynamic.classList.remove('hidden');
+            ui.financeResult.classList.add('hidden');
+            loadClientContext(ui.selPerusahaan.value);
+            updateActionState();
+            schedulePrefetch(true);
+        });
+
+        ui.btnHistory.addEventListener('click', async () => {
+            await loadHistory();
+            openModal(ui.historyModal);
+        });
+
+        ui.btnSettings.addEventListener('click', async () => {
+            await loadSettings();
+            openModal(ui.settingsModal);
+        });
+
+        ui.btnCloseHistory.addEventListener('click', () => closeModal(ui.historyModal));
+        ui.btnCloseSettings.addEventListener('click', () => closeModal(ui.settingsModal));
+        ui.btnClosePrecheck.addEventListener('click', () => closeModal(ui.precheckModal));
+        ui.btnCancelPrecheck.addEventListener('click', () => closeModal(ui.precheckModal));
+        ui.historyModal.addEventListener('click', (e) => { if (e.target === ui.historyModal) closeModal(ui.historyModal); });
+        ui.settingsModal.addEventListener('click', (e) => { if (e.target === ui.settingsModal) closeModal(ui.settingsModal); });
+        ui.precheckModal.addEventListener('click', (e) => { if (e.target === ui.precheckModal) closeModal(ui.precheckModal); });
+
+        ui.btnUploadPortfolioFiles.addEventListener('click', async () => {
+            await uploadSupportingDocuments('portfolio', ui.settingsPortfolioFiles);
+        });
+
+        ui.btnUploadCredentialFiles.addEventListener('click', async () => {
+            await uploadSupportingDocuments('credentials', ui.settingsCredentialFiles);
+        });
+
+        ui.btnUploadKakFiles.addEventListener('click', async () => {
+            await uploadSupportingDocuments('kak', ui.kakFiles);
+            await loadKakContext();
+            if (latestKakSuggestions) {
+                applyKakSuggestions(latestKakSuggestions, true);
+            }
+        });
+
+        ui.btnApplyKak.addEventListener('click', () => {
+            if (!latestKakSuggestions) {
+                alert('Belum ada hasil pembacaan KAK/TOR yang bisa dipakai.');
+                return;
+            }
+            applyKakSuggestions(latestKakSuggestions, false);
+            alert('Hasil pembacaan KAK/TOR sudah diterapkan ke form.');
+        });
+
+        ui.btnUploadTemplate.addEventListener('click', async () => {
+            const file = ui.settingsTemplateFile.files[0];
+            if (!file) return alert('Pilih file blanko .docx terlebih dahulu.');
+            const formData = new FormData();
+            formData.append('template', file);
+            try {
+                const res = await fetch('/api/settings/template', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Template belum berhasil diunggah.');
+                ui.templateStatus.textContent = data.has_active_template
+                    ? `Template aktif: ${data.active_template_name || 'blanko proposal'}`
+                    : 'Belum ada template blanko aktif.';
+                ui.settingsTemplateFile.value = '';
+                alert('Blanko proposal berhasil diunggah.');
+            } catch (err) {
+                alert(err.message || 'Template belum berhasil diunggah.');
+            }
+        });
+
+        ui.btnClearTemplate.addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/settings/template', { method: 'DELETE' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Blanko belum berhasil dihapus.');
+                ui.templateStatus.textContent = data.has_active_template
+                    ? `Template aktif: ${data.active_template_name || 'blanko proposal'}`
+                    : 'Belum ada template blanko aktif.';
+                alert('Blanko proposal berhasil dihapus.');
+            } catch (err) {
+                alert(err.message || 'Blanko belum berhasil dihapus.');
+            }
+        });
+
+        ui.btnSaveInternalApi.addEventListener('click', async () => {
+            const endpoint = ui.settingsApiUrl.value.trim();
+            if (!endpoint) {
+                return alert('Masukkan titik akses sumber data terlebih dahulu.');
+            }
+            ui.btnSaveInternalApi.disabled = true;
+            ui.btnSaveInternalApi.textContent = 'Menyimpan & memuat ulang data...';
+            try {
+                const res = await fetch('/api/internal-api/setup', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        url: endpoint,
+                        auth_mode: ui.settingsApiAuthMode.value,
+                        body_encoding: ui.settingsApiBodyEncoding.value,
+                        activate_now: true
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error('Sumber data belum berhasil disimpan.');
+                renderInternalApiStatus({
+                    config_exists: true,
+                    validation: data.validation,
+                    readiness: data.readiness,
+                    api_connection_active: data.api_connection_active,
+                    can_refresh_dataset: data.can_refresh_dataset,
+                    sync_in_progress: data.sync_in_progress,
+                    last_refresh_error: data.last_refresh_error,
+                    connection_label: data.connection_label
+                });
+                await loadCompanies();
+                alert(data.refresh_started
+                    ? 'Sumber data tersimpan. Data pendukung sedang dimuat ulang di latar belakang.'
+                    : 'Sumber data tersimpan. Data pendukung belum dimuat ulang karena ada proses berjalan atau sumber belum siap.');
+            } catch (err) {
+                alert(err.message || 'Sumber data belum berhasil disimpan.');
+            } finally {
+                await loadInternalApiSetup();
+                await loadInternalEvidenceSummary();
+            }
+        });
+
+        ui.btnRefreshInternalApi.addEventListener('click', async () => {
+            ui.btnRefreshInternalApi.disabled = true;
+            ui.btnRefreshInternalApi.textContent = 'Pemuatan Ulang Sedang Berjalan...';
+            try {
+                const res = await fetch('/api/internal-api/refresh', { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error('Data internal belum berhasil dimuat ulang.');
+                renderInternalApiStatus({
+                    config_exists: true,
+                    api_connection_active: data.api_connection_active,
+                    can_refresh_dataset: data.can_refresh_dataset,
+                    sync_in_progress: data.sync_in_progress,
+                    last_refresh_error: data.last_refresh_error,
+                    connection_label: data.connection_label,
+                    validation: {}
+                });
+                await loadCompanies();
+                alert('Data internal sedang dimuat ulang.');
+            } catch (err) {
+                alert(err.message || 'Data internal belum berhasil dimuat ulang.');
+            } finally {
+                await loadInternalApiSetup();
+                await loadInternalEvidenceSummary();
+            }
+        });
+
+        // Re-check form completeness on relevant input changes.
+        ['change', 'input'].forEach(evt => {
+            [ui.selPerusahaan, ui.selModeProposal, ui.selProposal, ui.selProyek, ui.inpKonteks, ui.inpPermasalahan, ui.inpWaktu, ui.inpBiaya, ui.groupKebutuhan, ui.groupFramework, ui.inpFrameworkLainnya].forEach(el => {
+                if(el) el.addEventListener(evt, () => {
+                    updateActionState();
+                    schedulePrefetch();
+                });
+            });
+        });
+
+        // Fetch budget suggestions from the backend.
+        ui.btnAnalyze.addEventListener('click', async () => {
+            if (!hasAnalyzePrerequisites()) {
+                return alert("Lengkapi semua field sebelum Auto-Analisis Finansial dijalankan.");
+            }
+            const payload = getPayload();
+
+            ui.btnAnalyze.innerText = "Menganalisis OSINT...";
+            budgetAnalyzeInFlight = true;
+            updateActionState();
+
+            try {
+                const res = await fetch('/api/suggest-budget', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || "Gagal menganalisa data finansial.");
+                }
+                if (!data || !Array.isArray(data.options) || !data.analysis) {
+                    throw new Error("Respons analisis finansial tidak valid.");
+                }
+
+                ui.financeSummary.innerText = data.analysis;
+                ui.financeOptions.innerHTML = data.options.map(opt => `
+                    <div class="finance-tier" data-price="${escapeHtml(opt.price)}">
+                        <strong>${escapeHtml(opt.tier)}</strong>
+                        <span>${escapeHtml(opt.price)}</span>
+                    </div>
+                `).join('');
+
+                ui.financeResult.classList.remove('hidden');
+            } catch (err) {
+                alert(err.message || "Gagal menganalisa data finansial.");
+            } finally {
+                ui.btnAnalyze.innerText = "📊 Auto-Analisis Finansial & Opsi Harga";
+                budgetAnalyzeInFlight = false;
+                updateActionState();
+            }
+        });
+
+        const getPayload = () => ({
+            nama_perusahaan: ui.selPerusahaan.value,
+            mode_proposal: ui.selModeProposal.value,
+            jenis_proposal: ui.selProposal.value,
+            jenis_proyek: ui.selProyek.value,
+            konteks_organisasi: ui.inpKonteks.value,
+            permasalahan: ui.inpPermasalahan.value,
+            klasifikasi_kebutuhan: getChecked(ui.groupKebutuhan),
+            estimasi_waktu: ui.inpWaktu.value,
+            estimasi_biaya: ui.inpBiaya.value,
+            potensi_framework: getFinalFrameworks()
+        });
+
+        async function prefetchContext(force = false) {
+            const payload = getPayload();
+            const key = `${payload.nama_perusahaan}||${payload.mode_proposal}||${payload.potensi_framework}`;
+            if (!payload.nama_perusahaan || !payload.potensi_framework) return;
+            if (!force && key === lastPrefetchKey) return;
+            lastPrefetchKey = key;
+            try {
+                await fetch('/api/prefetch-context', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+            } catch (_) {}
+        }
+
+        function schedulePrefetch(force = false) {
+            clearTimeout(prefetchTimer);
+            prefetchTimer = setTimeout(() => prefetchContext(force), 350);
+        }
+
+        ui.financeOptions.addEventListener('click', (event) => {
+            const tier = event.target.closest('[data-price]');
+            if (!tier) return;
+            ui.inpBiaya.value = tier.dataset.price || '';
+            ui.inpBiaya.dispatchEvent(new Event('input'));
+        });
+
+        const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        async function downloadFinishedJob(jobId, payload) {
+            const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/download`);
+            if (!res.ok) {
+                let message = "Dokumen selesai dibuat, tetapi gagal diunduh.";
+                try {
+                    const data = await res.json();
+                    if (data && data.error) message = data.error;
+                } catch (_) {}
+                throw new Error(message);
+            }
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Proposal_Ringkas_${payload.nama_perusahaan.replace(/\s+/g, '_')}.docx`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        async function waitForGeneration(jobId, payload) {
+            while (true) {
+                const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+                let data = null;
+                try {
+                    data = await res.json();
+                } catch (_) {}
+                if (!res.ok) {
+                    throw new Error((data && data.error) || "Status generate proposal tidak bisa dibaca.");
+                }
+
+                if (data.status === 'queued') {
+                    setGenerateLabel(`Masuk Antrean (#${data.queue_position || 1})`);
+                    await wait(jobPollIntervalMs);
+                    continue;
+                }
+
+                if (data.status === 'running') {
+                    setGenerateLabel('Menyusun Proposal...');
+                    await wait(jobPollIntervalMs);
+                    continue;
+                }
+
+                if (data.status === 'done') {
+                    setGenerateLabel('Mengunduh Proposal...');
+                    await downloadFinishedJob(jobId, payload);
+                    return data;
+                }
+
+                throw new Error(data.error || data.message || "Penyusunan proposal gagal.");
+            }
+        }
+
+        function renderGenerationPrecheck(data) {
+            const summary = (data && data.summary) || {};
+            const evidenceSources = Array.isArray(data.evidence_sources) ? data.evidence_sources : [];
+            const writingExpectation = Array.isArray(data.writing_expectation) ? data.writing_expectation : [];
+            const missingFields = Array.isArray(data.missing_fields) ? data.missing_fields : [];
+            const missingBlock = missingFields.length
+                ? `<div class="precheck-warning"><strong>Isian belum lengkap:</strong> ${missingFields.map(item => escapeHtml(item.label || item.field)).join(', ')}</div>`
+                : '';
+            const summaryCards = [
+                ['Klien', summary.client],
+                ['Jenis proposal', [summary.proposal_mode, summary.service_type, summary.project_type].filter(Boolean).join(' · ')],
+                ['Kebutuhan', summary.need_type],
+                ['Durasi & anggaran', [summary.timeline, summary.budget].filter(Boolean).join(' · ')],
+                ['Kerangka dipilih', summary.framework_original],
+                ['Kerangka final', summary.framework_resolved],
+            ].filter(([, value]) => String(value || '').trim());
+            const evidenceRows = evidenceSources.map(item => `
+                <div class="precheck-card">
+                    <strong>${escapeHtml(item.label || 'Sumber pendukung')}</strong>
+                    <span>${escapeHtml(item.status || 'Dicek')}</span>
+                    <span>${escapeHtml(item.detail || '')}</span>
+                </div>
+            `).join('');
+            ui.precheckContent.innerHTML = `
+                ${missingBlock}
+                <div class="precheck-grid">
+                    ${summaryCards.map(([label, value]) => `
+                        <div class="precheck-card">
+                            <strong>${escapeHtml(label)}</strong>
+                            <span>${escapeHtml(value)}</span>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="precheck-section">
+                    <strong>Ekspektasi isi proposal</strong>
+                    <ul class="precheck-list">${writingExpectation.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>
+                </div>
+                <div class="precheck-section">
+                    <strong>Sumber konteks yang akan dipakai</strong>
+                    <div class="precheck-grid" style="margin-top:8px;">${evidenceRows || '<div class="precheck-card"><strong>Sumber pendukung</strong><span>Belum ada sumber tambahan yang terbaca.</span></div>'}</div>
+                </div>
+            `;
+            ui.btnConfirmGenerate.disabled = !data.can_generate;
+        }
+
+        async function openGenerationPrecheck(payload) {
+            ui.precheckContent.textContent = 'Menyusun cek akhir...';
+            ui.btnConfirmGenerate.disabled = true;
+            openModal(ui.precheckModal);
+            const res = await fetch('/api/generation-precheck', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || 'Cek akhir belum bisa dimuat.');
+            }
+            renderGenerationPrecheck(data);
+            return data;
+        }
+
+        async function submitGenerationJob(payload) {
+            const res = await fetch('/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) {
+                let message = "Gagal generate dokumen.";
+                try {
+                    const errData = await res.json();
+                    if (errData && errData.error) message = errData.error;
+                } catch (_) {}
+                throw new Error(message);
+            }
+
+            const job = await res.json();
+            const finalStatus = await waitForGeneration(job.job_id, payload);
+
+            ui.successMessage.innerText = finalStatus.message || `Proposal untuk ${payload.nama_perusahaan} selesai dibuat dan siap diunduh.`;
+            showScreen('success');
+        }
+
+        ui.btnPreview.addEventListener('click', async () => {
+            const payload = getPayload();
+            if (!payload.nama_perusahaan || !payload.konteks_organisasi || !payload.permasalahan) {
+                return alert('Lengkapi minimal nama klien, tujuan proyek, dan permasalahan sebelum preview.');
+            }
+            ui.btnPreview.disabled = true;
+            ui.btnPreview.innerText = 'Menyusun Pratinjau...';
+            try {
+                const res = await fetch('/api/preview-outline', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error();
+                const data = await res.json();
+                ui.previewContent.innerHTML = data.outline.map(ch => `
+                    <div class="preview-item">
+                        <h4>${escapeHtml(ch.title)}</h4>
+                        <p>${escapeHtml(ch.preview)}</p>
+                        <ul>${ch.subsections.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ul>
+                    </div>
+                `).join('');
+                ui.previewPanel.classList.remove('hidden');
+            } catch (e) {
+                alert('Gagal memuat preview struktur proposal.');
+            } finally {
+                ui.btnPreview.disabled = false;
+                ui.btnPreview.innerText = '👁️ Pratinjau Struktur Proposal';
+            }
+        });
+
+        ui.btnGenerate.addEventListener('click', async () => {
+            if (proposalJobInFlight) return;
+            const payload = getPayload();
+
+            try {
+                setGenerateLabel('Menyiapkan Cek Akhir...');
+                ui.btnGenerate.disabled = true;
+                const precheck = await openGenerationPrecheck(payload);
+                pendingGenerationPayload = precheck.can_generate ? payload : null;
+            } catch (e) {
+                alert(e.message || "Cek akhir belum bisa dimuat.");
+            } finally {
+                setGenerateLabel('Susun Proposal Singkat & Padat');
+                updateActionState();
+            }
+        });
+
+        ui.btnConfirmGenerate.addEventListener('click', async () => {
+            if (proposalJobInFlight || !pendingGenerationPayload) return;
+            proposalJobInFlight = true;
+            ui.spinner.classList.add('active');
+            ui.btnConfirmGenerate.disabled = true;
+            closeModal(ui.precheckModal);
+            setGenerateLabel('Mengirim Permintaan...');
+            updateActionState();
+            try {
+                await submitGenerationJob(pendingGenerationPayload);
+            } catch (e) {
+                alert(e.message || "Gagal generate dokumen. Periksa console/log server.");
+                showScreen('config');
+            } finally {
+                pendingGenerationPayload = null;
+                proposalJobInFlight = false;
+                ui.spinner.classList.remove('active');
+                setGenerateLabel('Susun Proposal Singkat & Padat');
+                updateActionState();
+            }
+        });
     </script>
 </body>
 </html>

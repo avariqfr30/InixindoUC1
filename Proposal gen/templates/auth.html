@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akses Proposal Generator</title>
+    <style>
+        :root {
+            --bg-a: #fff8f7;
+            --bg-b: #fff3f1;
+            --card: #fffdfd;
+            --line: #ecd8d4;
+            --text: #1f2937;
+            --muted: #667085;
+            --hero-a: #a12b20;
+            --hero-b: #d13b2c;
+            --hero-c: #e86b54;
+            --action: #cc301f;
+            --action-hover: #b92818;
+            --soft: #f6f7fb;
+            --soft-line: #dbe1ea;
+            --error-bg: #fff1f2;
+            --error-line: #fecdd3;
+            --error-text: #b42318;
+            --success-bg: #ecfdf3;
+            --success-line: #abefc6;
+            --success-text: #067647;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 28px;
+            background:
+                radial-gradient(circle at top left, rgba(255, 255, 255, 0.98) 0%, rgba(255, 247, 245, 0.95) 38%, rgba(255, 239, 236, 0.92) 100%),
+                linear-gradient(135deg, var(--bg-a) 0%, var(--bg-b) 100%);
+            color: var(--text);
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .auth-shell {
+            width: min(980px, 100%);
+            display: grid;
+            grid-template-columns: 0.92fr 1fr;
+            border-radius: 28px;
+            overflow: hidden;
+            background: var(--card);
+            border: 1px solid rgba(236, 216, 212, 0.9);
+            box-shadow: 0 28px 70px rgba(158, 62, 46, 0.12);
+        }
+
+        .auth-hero {
+            padding: 40px 30px 34px 30px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 560px;
+            background:
+                radial-gradient(circle at bottom center, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0) 50%),
+                linear-gradient(180deg, var(--hero-a) 0%, var(--hero-b) 58%, var(--hero-c) 100%);
+            color: #fff8f6;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            width: fit-content;
+            padding: 9px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.1);
+            font-size: 0.84rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+
+        .auth-hero h1 {
+            margin: 18px 0 0 0;
+            font-size: 2.3rem;
+            line-height: 1.08;
+            letter-spacing: -0.03em;
+            max-width: 320px;
+        }
+
+        .hero-copy {
+            max-width: 320px;
+            font-size: 1rem;
+            line-height: 1.6;
+            color: rgba(255, 248, 246, 0.96);
+        }
+
+        .hero-copy p {
+            margin: 0 0 12px 0;
+        }
+
+        .auth-panel {
+            padding: 34px 30px;
+            background: rgba(255, 255, 255, 0.94);
+        }
+
+        .tab-switcher {
+            display: inline-flex;
+            padding: 5px;
+            border-radius: 999px;
+            border: 1px solid var(--soft-line);
+            background: var(--soft);
+            margin-bottom: 22px;
+        }
+
+        .tab-button {
+            border: none;
+            background: transparent;
+            color: #475467;
+            font-weight: 700;
+            padding: 10px 18px;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: 0.18s ease;
+            font-size: 0.94rem;
+        }
+
+        .tab-button.active {
+            background: var(--action);
+            color: #ffffff;
+            box-shadow: 0 10px 22px rgba(204, 48, 31, 0.18);
+        }
+
+        .panel-title {
+            margin: 0 0 6px 0;
+            font-size: 2rem;
+            line-height: 1.05;
+            letter-spacing: -0.03em;
+            color: #101828;
+        }
+
+        .panel-subtitle {
+            margin: 0 0 18px 0;
+            color: var(--muted);
+            font-size: 1rem;
+            line-height: 1.5;
+            max-width: 390px;
+        }
+
+        .notice {
+            margin: 0 0 14px 0;
+            padding: 11px 13px;
+            border-radius: 14px;
+            font-size: 0.9rem;
+            line-height: 1.45;
+            border: 1px solid transparent;
+        }
+
+        .notice.error {
+            background: var(--error-bg);
+            color: var(--error-text);
+            border-color: var(--error-line);
+        }
+
+        .notice.success {
+            background: var(--success-bg);
+            color: var(--success-text);
+            border-color: var(--success-line);
+        }
+
+        .auth-warning-popup {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 30;
+            width: min(360px, calc(100vw - 32px));
+            padding: 14px 16px;
+            border-radius: 16px;
+            border: 1px solid var(--error-line);
+            background: #fffafa;
+            color: var(--error-text);
+            box-shadow: 0 22px 52px rgba(180, 35, 24, 0.16);
+            font-size: 0.92rem;
+            font-weight: 700;
+            line-height: 1.45;
+            opacity: 0;
+            transform: translateY(-8px);
+            transition: opacity 0.18s ease, transform 0.18s ease;
+        }
+
+        .auth-warning-popup.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .auth-warning-popup[hidden] {
+            display: none;
+        }
+
+        .auth-form {
+            display: none;
+        }
+
+        .auth-form.active {
+            display: block;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 7px;
+            font-size: 0.92rem;
+            font-weight: 700;
+            color: #344054;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px 14px;
+            margin-bottom: 9px;
+            border-radius: 14px;
+            border: 1px solid #d0d5dd;
+            background: #ffffff;
+            color: #101828;
+            font-size: 0.96rem;
+            transition: border-color 0.16s ease, box-shadow 0.16s ease;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #d74632;
+            box-shadow: 0 0 0 4px rgba(215, 70, 50, 0.11);
+        }
+
+        .field-note {
+            margin: -2px 0 14px 0;
+            color: #667085;
+            font-size: 0.83rem;
+            line-height: 1.35;
+        }
+
+        .submit-button {
+            width: 100%;
+            margin-top: 6px;
+            border: none;
+            border-radius: 14px;
+            padding: 13px 16px;
+            background: var(--action);
+            color: #ffffff;
+            font-size: 0.98rem;
+            font-weight: 800;
+            cursor: pointer;
+            transition: background 0.18s ease, transform 0.18s ease;
+        }
+
+        .submit-button:hover {
+            background: var(--action-hover);
+            transform: translateY(-1px);
+        }
+
+        .switch-note {
+            margin: 14px 0 0 0;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .switch-link {
+            border: none;
+            background: transparent;
+            color: var(--action);
+            font-weight: 800;
+            cursor: pointer;
+            padding: 0;
+            font-size: inherit;
+        }
+
+        .switch-link:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 860px) {
+            .auth-shell {
+                grid-template-columns: 1fr;
+            }
+
+            .auth-hero {
+                min-height: auto;
+                gap: 28px;
+            }
+
+            .auth-hero h1,
+            .hero-copy {
+                max-width: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-shell">
+        <section class="auth-hero">
+            <div>
+                <div class="hero-badge">Akses Internal</div>
+                <h1>Intelijen Proposal Inixindo</h1>
+            </div>
+
+            <div class="hero-copy">
+                <p>Gunakan akun internal sederhana untuk membuka dasbor proposal, meninjau riwayat pekerjaan, dan menjalankan alur penyusunan dokumen.</p>
+                <p>Lapisan akses ini sengaja dibuat ringan untuk pengamanan dasar. Kata sandi tetap disimpan sebagai hash, bukan teks biasa.</p>
+            </div>
+        </section>
+
+        <section class="auth-panel" data-initial-mode="{{ mode }}" data-signup-domain="{{ signup_email_domain }}">
+            {% if mode == 'login' or mode == 'signup' %}
+                {% if allow_signup %}
+                <div class="tab-switcher" role="tablist" aria-label="Pilihan akses">
+                    <button type="button" class="tab-button {% if mode == 'login' %}active{% endif %}" id="tab-login" role="tab" onclick="location.href='/auth?mode=login'">Masuk</button>
+                    <button type="button" class="tab-button {% if mode == 'signup' %}active{% endif %}" id="tab-signup" role="tab" onclick="location.href='/auth?mode=signup'">Daftar</button>
+                </div>
+                {% endif %}
+            {% endif %}
+
+            <h2 class="panel-title">
+                {% if mode == 'signup' %}
+                    Buat Akun
+                {% elif mode == 'verify_signup' %}
+                    Verifikasi Pendaftaran
+                {% else %}
+                    Selamat Datang Kembali
+                {% endif %}
+            </h2>
+            <p class="panel-subtitle">
+                {% if mode == 'signup' %}
+                    Daftarkan email internal untuk membuat akun baru.
+                {% elif mode == 'verify_signup' %}
+                    Masukkan token verifikasi yang dikirim melalui webhook untuk mengaktifkan akun.
+                {% else %}
+                    Masuk dengan email yang sudah terdaftar untuk melanjutkan.
+                {% endif %}
+            </p>
+
+            {% if error %}
+            <div class="notice error">{{ error }}</div>
+            {% endif %}
+            {% if notice %}
+            <div class="notice success" style="background: var(--success-bg); color: var(--success-text); border: 1px solid var(--success-line);">{{ notice|safe }}</div>
+            {% endif %}
+
+            {% if mode == 'signup' %}
+            <form method="POST" action="/signup" id="signup-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="next" value="{{ next_target }}">
+
+                <label for="signup-username">Email Internal</label>
+                <input id="signup-username" name="username" type="email" autocomplete="email" value="{{ username or '' }}" required>
+                <p class="field-note">Email harus cocok persis dengan data ReferenceInternalAccount.</p>
+
+                <button type="submit" class="submit-button">Buat Akun</button>
+
+                <p class="switch-note">
+                    Sudah punya akun?
+                    <button type="button" class="switch-link" onclick="location.href='/auth?mode=login'">Masuk di sini.</button>
+                </p>
+            </form>
+            {% elif mode == 'verify_signup' %}
+            <form method="POST" action="/verify-otp" id="verify-signup-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="next" value="{{ next_target }}">
+
+                <label for="verify-username">Email Kerja</label>
+                <input id="verify-username" name="username" type="email" value="{{ username }}" readonly required style="background: #f1f5f9; cursor: not-allowed;">
+
+                <label for="verify-token">Token Verifikasi</label>
+                <input id="verify-token" name="verification_token" type="text" placeholder="Masukkan token verifikasi" required autofocus>
+
+                <button type="submit" class="submit-button">Verifikasi & Aktifkan</button>
+            </form>
+            {% else %}
+            <form method="POST" action="/login" id="login-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="next" value="{{ next_target }}">
+
+                <label for="login-username">Email</label>
+                <input id="login-username" name="username" type="text" autocomplete="username" value="{{ username or '' }}" required>
+
+                <label for="login-password">Kata Sandi</label>
+                <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+
+                <button type="submit" class="submit-button">Masuk ke Sistem</button>
+
+                {% if allow_signup %}
+                    <p class="switch-note">
+                        Belum punya akun?
+                        <button type="button" class="switch-link" onclick="location.href='/auth?mode=signup'">Daftar di sini.</button>
+                    </p>
+                {% else %}
+                    <p class="switch-note">Pendaftaran mandiri dinonaktifkan. Hubungi admin internal untuk akses akun.</p>
+                {% endif %}
+            </form>
+            {% endif %}
+        </section>
+    </div>
+    <div id="signup-domain-warning" class="auth-warning-popup" role="alert" hidden></div>
+
+    <script>
+        (function () {
+            const signupEmailInput = document.getElementById('signup-username');
+            const signupWarning = document.getElementById('signup-domain-warning');
+            const signupForm = document.getElementById('signup-form');
+            const signupDomain = "{{ signup_email_domain }}".toLowerCase();
+            let signupWarningTimer = null;
+
+            function hideSignupWarning() {
+                if (!signupWarning) return;
+                signupWarning.classList.remove('visible');
+                if (signupWarningTimer) {
+                    window.clearTimeout(signupWarningTimer);
+                    signupWarningTimer = null;
+                }
+                window.setTimeout(() => {
+                    if (!signupWarning.classList.contains('visible')) {
+                        signupWarning.hidden = true;
+                    }
+                }, 180);
+            }
+
+            function showSignupWarning(message) {
+                if (!signupWarning) return;
+                signupWarning.textContent = message;
+                signupWarning.hidden = false;
+                window.requestAnimationFrame(() => signupWarning.classList.add('visible'));
+                if (signupWarningTimer) window.clearTimeout(signupWarningTimer);
+                signupWarningTimer = window.setTimeout(hideSignupWarning, 6000);
+            }
+
+            function signupEmailDomainError(value) {
+                const email = String(value || '').trim().toLowerCase();
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                    return `Gunakan format email internal yang valid.`;
+                }
+                return '';
+            }
+
+            if (signupForm) {
+                signupForm.addEventListener('submit', (event) => {
+                    const message = signupEmailDomainError(signupEmailInput?.value || '');
+                    if (!message) return;
+                    event.preventDefault();
+                    showSignupWarning(message);
+                    signupEmailInput?.focus();
+                });
+            }
+
+            signupEmailInput?.addEventListener('input', () => {
+                if (!signupEmailDomainError(signupEmailInput.value)) {
+                    hideSignupWarning();
+                }
+            });
+        })();
+    </script>
+</body>
+</html>

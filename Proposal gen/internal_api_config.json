@@ -1,0 +1,144 @@
+{
+  "mode": "generic",
+  "auth_mode": "basic",
+  "request_defaults": {
+    "url": "https://inworx.inixindojogja.co.id/api/Resource/dataset",
+    "method": "POST",
+    "body_encoding": "form",
+    "params": {},
+    "headers": {
+      "User-Agent": "Apidog/1.0.0 (https://apidog.com)",
+      "Accept": "*/*"
+    }
+  },
+  "resources": {
+    "firm_profile": {
+      "request": {
+        "body": {
+          "dataset": "ReferenceAccount",
+          "dataset_cache": "enabled"
+        }
+      },
+      "response_path": "data.dataset_result.0",
+      "field_mapping": {
+        "office_address": "company_address",
+        "email": "official_email",
+        "phone": "telephone",
+        "whatsapp": "whatsapp",
+        "website": "website_url",
+        "legal_name": "legal_name",
+        "operating_hours": "operating_hours",
+        "profile_summary": "profile_summary",
+        "credential_highlights": "credential_highlights",
+        "portfolio_highlights": "portfolio_highlights"
+      }
+    },
+    "project_standards": {
+      "request": {
+        "body": {
+          "dataset": "ProjectStandards",
+          "dataset_cache": "enabled"
+        }
+      },
+      "response_path": "data.dataset_result",
+      "record_filters": {
+        "project_type": "{project_type}"
+      },
+      "field_mapping": {
+        "methodology": "delivery_methodology",
+        "team": "team_composition",
+        "commercial": "commercial_terms"
+      }
+    },
+    "client_relationship": {
+      "request": {
+        "body": {
+          "dataset": "ConsultantProjectExpertHistory",
+          "dataset_cache": "enabled"
+        }
+      },
+      "response_path": "data.dataset_result",
+      "record_filters": {
+        "project_name__icontains": "{client_name}"
+      },
+      "field_mapping": {
+        "summary": "project_name",
+        "project_name": "project_name",
+        "product_name": "product_name",
+        "expert_name": "expert_name",
+        "position_name": "position_name"
+      }
+    },
+    "project_records": {
+      "request": {
+        "body": {
+          "dataset": "ConsultantProjectExpertHistory",
+          "dataset_cache": "enabled"
+        }
+      },
+      "response_path": "data.dataset_result",
+      "field_mapping": {
+        "entity": "project_name",
+        "topic": "product_name",
+        "project_name": "project_name",
+        "expert_name": "expert_name",
+        "position_name": "position_name"
+      }
+    },
+    "account_records": {
+      "request": {
+        "body": {
+          "dataset": "ReferenceAccount",
+          "dataset_cache": "enabled"
+        }
+      },
+      "response_path": "data.dataset_result",
+      "record_filters": {
+        "company_name__icontains": "{client_name}"
+      },
+      "field_mapping": {
+        "company_name": "company_name",
+        "company_region_name": "company_region_name",
+        "company_province_name": "company_province_name",
+        "company_segment": "company_segment",
+        "company_sub_segment": "company_sub_segment",
+        "company_category_name": "company_category_name",
+        "company_category_desc": "company_category_desc"
+      }
+    },
+    "employee_expertise": {
+      "request": {
+        "body": {
+          "dataset": "EmployeeExpertise"
+        }
+      },
+      "response_path": "data.dataset_result",
+      "field_mapping": {
+        "employee_id": "employee_id",
+        "employee_name": "employee_name",
+        "certifications": "certifications",
+        "projects": "projects"
+      }
+    },
+    "framework_catalog": {
+      "request": {
+        "body": {
+          "dataset": "ReferenceFramework"
+        }
+      },
+      "response_path": "data.dataset_result",
+      "field_mapping": {
+        "value": "framework_code",
+        "label": "framework_name",
+        "description": "proposal_use_guidance",
+        "resolved": "framework_version",
+        "aliases": "aliases",
+        "issuer": "issuer",
+        "category": "category",
+        "versions": "children",
+        "available": "capability_status"
+      },
+      "optional": true
+    }
+  }
+}
