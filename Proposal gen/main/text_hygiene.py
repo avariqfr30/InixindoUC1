@@ -69,6 +69,14 @@ def clean_markup_artifacts(value: Any) -> str:
     text = re.sub(r"(?i)\s*\|\s*(?:sumber|url|sitasi_apa)\s*=\s*[^|\n]+", "", text)
     text = re.sub(r"(?im)^\s*(?:sumber|url|sitasi_apa)\s*=\s*.+$", "", text)
     text = re.sub(r"(?i)\bSumber\s+eksternal\s*\d*\b\s*:?", "", text)
+    text = re.sub(r"[ \t](?:-{3,}[ \t]+){2,}", " ", text)
+    text = re.sub(r"(?m)^\s*(?:-{3,}\s*){2,}$", "", text)
+    text = "\n".join(
+        re.sub(r"(?<!\S)-{3,}[.,;:]?(?!\S)", " ", line)
+        if "|" not in line
+        else line
+        for line in text.splitlines()
+    )
     text = re.sub(r"\s+\.", ".", text)
     text = normalize_spacing(text)
     text = re.sub(r"(?<=\d)\.\s+(?=\d)", ".", text)

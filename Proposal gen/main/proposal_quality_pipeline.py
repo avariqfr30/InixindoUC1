@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
+from .editorial_intelligence import assess_proposal_style, evaluate_proposal_document_spine, proposal_voice_rules
 from .reader_facing_hygiene import sanitize_reader_facing_sources
 
 
@@ -25,6 +26,14 @@ RAW_HELPER_PATTERNS = [
     r"\bPembahasan pada Pembahasan ini\b",
     r"\bPembahasan pada bagian ini perlu menjelaskan\b",
     r"\bFokus utama harus tetap pada apa yang perlu dipertegas\b",
+    r"\bKPI\s+(?:outcome\s+)?hasil bisnis utama\b",
+    r"\bpeluang nilai bisnis yang bisa dikejar\b",
+    r"\barahan prioritas yang perlu dipatuhi\b",
+    r"\bon-ruang lingkup\b",
+    r"\bon-scope\b",
+    r"\bPSA\b",
+    r"\bProblem-Solution-Action\b",
+    r"\bSlide Core\b",
 ]
 
 
@@ -45,13 +54,23 @@ class EvidenceCard:
     source_type: str
     confidence: str = "medium"
     allowed_usage: str = "Gunakan sebagai konteks pendukung, bukan sebagai kutipan sumber."
+    implication: str = ""
+    recommended_angle: str = ""
 
     def to_prompt_line(self) -> str:
         claim = _clean_text(self.claim, max_words=36)
         usage = _clean_text(self.allowed_usage, max_words=20)
+        implication = _clean_text(self.implication, max_words=28)
+        angle = _clean_text(self.recommended_angle, max_words=28)
         if not claim:
             return ""
-        return f"- {claim} ({self.source_type}; keyakinan {self.confidence}; {usage})"
+        parts = [f"- Fakta: {claim}"]
+        if implication:
+            parts.append(f"Makna: {implication}")
+        if angle:
+            parts.append(f"Arah tulisan: {angle}")
+        parts.append(f"Sumber: {self.source_type}; keyakinan {self.confidence}; {usage}")
+        return ". ".join(parts)
 
 
 class EvidenceDeck:
@@ -69,7 +88,10 @@ class EvidenceDeck:
                 break
         if not selected:
             return ""
-        return "Evidence cards terkurasi untuk bab ini:\n" + "\n".join(selected)
+        return (
+            "Evidence cards terkurasi untuk bab ini. Pakai sebagai bahan berpikir, bukan sebagai teks mentah:\n"
+            + "\n".join(selected)
+        )
 
 
 class EvidenceDeckBuilder:
@@ -89,12 +111,40 @@ class EvidenceDeckBuilder:
         value_map = value_map or {}
         scope_contract = scope_contract or {}
         cards: List[EvidenceCard] = [
-            EvidenceCard(("c_1", "c_2", "all"), f"{client} menjadi pihak penerima proposal untuk {project}.", "input_pengguna", "high"),
-            EvidenceCard(("c_2", "c_3", "c_4"), f"Kebutuhan awal diposisikan sebagai {project_goal or 'prioritas yang perlu dipertegas'}.", "input_pengguna", "medium"),
-            EvidenceCard(("c_8", "c_12"), f"Durasi acuan adalah {timeline or 'jadwal yang disepakati'} dan estimasi komersial adalah {budget or 'menyesuaikan ruang lingkup final'}.", "input_pengguna", "medium"),
+            EvidenceCard(
+                ("c_1", "c_2", "all"),
+                f"{client} menjadi pihak penerima proposal untuk {project}.",
+                "input_pengguna",
+                "high",
+                implication="proposal harus terasa ditulis untuk pembaca spesifik, bukan proposal generik",
+                recommended_angle="hubungkan setiap manfaat dengan keputusan yang perlu diambil pembaca",
+            ),
+            EvidenceCard(
+                ("c_2", "c_3", "c_4"),
+                f"Kebutuhan awal diposisikan sebagai {project_goal or 'prioritas yang perlu dipertegas'}.",
+                "input_pengguna",
+                "medium",
+                implication="masalah perlu diterjemahkan menjadi risiko, keputusan, dan dampak operasional",
+                recommended_angle="buat pembaca paham mengapa pekerjaan ini perlu dimulai sekarang",
+            ),
+            EvidenceCard(
+                ("c_8", "c_12"),
+                f"Durasi acuan adalah {timeline or 'jadwal yang disepakati'} dan estimasi komersial adalah {budget or 'menyesuaikan ruang lingkup final'}.",
+                "input_pengguna",
+                "medium",
+                implication="jadwal dan biaya perlu dibaca sebagai batas keputusan, bukan angka administratif",
+                recommended_angle="jelaskan hubungan scope, effort, risiko, dan nilai yang dikejar",
+            ),
         ]
         if value_map.get("value_statement"):
-            cards.append(EvidenceCard(("all",), value_map["value_statement"], "sintesis_nilai", "high"))
+            cards.append(EvidenceCard(
+                ("all",),
+                value_map["value_statement"],
+                "sintesis_nilai",
+                "high",
+                implication="nilai utama harus menjadi benang merah dokumen",
+                recommended_angle="pakai nilai ini sebagai tesis proposal dan variasikan cara menjelaskannya per bab",
+            ))
         for key, chapters in {
             "profile": ("c_1", "c_2"),
             "news": ("c_1", "c_2", "c_3"),
@@ -103,13 +153,41 @@ class EvidenceDeckBuilder:
             "collaboration": ("c_10", "c_11", "c_closing"),
         }.items():
             if research_bundle.get(key):
-                cards.append(EvidenceCard(chapters, research_bundle[key], f"osint_{key}", "medium"))
+                cards.append(EvidenceCard(
+                    chapters,
+                    research_bundle[key],
+                    f"osint_{key}",
+                    "medium",
+                    implication="sinyal publik membantu menjelaskan tekanan eksternal atau konteks institusional",
+                    recommended_angle="ubah OSINT menjadi alasan relevansi dan momentum, bukan paragraf latar belakang panjang",
+                ))
         if internal_context:
-            cards.append(EvidenceCard(("c_1", "c_10", "c_11"), internal_context, "data_internal_tersintesis", "medium"))
+            cards.append(EvidenceCard(
+                ("c_1", "c_10", "c_11"),
+                internal_context,
+                "data_internal_tersintesis",
+                "medium",
+                implication="bukti internal menunjukkan kecocokan pengalaman dan kapabilitas pelaksana",
+                recommended_angle="jadikan pengalaman sebagai alasan kelayakan, bukan daftar portofolio",
+            ))
         if scope_contract.get("in_scope"):
-            cards.append(EvidenceCard(("c_4", "c_5", "c_6", "c_8", "c_9", "c_12"), "Ruang lingkup mencakup " + "; ".join(scope_contract["in_scope"][:4]), "kontrak_ruang_lingkup", "high"))
+            cards.append(EvidenceCard(
+                ("c_4", "c_5", "c_6", "c_8", "c_9", "c_12"),
+                "Ruang lingkup mencakup " + "; ".join(scope_contract["in_scope"][:4]),
+                "kontrak_ruang_lingkup",
+                "high",
+                implication="scope menjadi pagar agar rekomendasi tetap realistis",
+                recommended_angle="bedakan komitmen pekerjaan, asumsi, dan opsi pengembangan lanjutan",
+            ))
         if scope_contract.get("out_of_scope"):
-            cards.append(EvidenceCard(("c_4", "c_5", "c_6", "c_8", "c_9", "c_12"), "Hal di luar cakupan: " + "; ".join(scope_contract["out_of_scope"][:4]), "kontrak_ruang_lingkup", "high"))
+            cards.append(EvidenceCard(
+                ("c_4", "c_5", "c_6", "c_8", "c_9", "c_12"),
+                "Hal di luar cakupan: " + "; ".join(scope_contract["out_of_scope"][:4]),
+                "kontrak_ruang_lingkup",
+                "high",
+                implication="batasan perlu mencegah ekspektasi berlebihan",
+                recommended_angle="tulis batasan dengan bahasa tenang dan tetap membantu pembaca membuat keputusan",
+            ))
         return EvidenceDeck(cards)
 
 
@@ -126,6 +204,152 @@ class ContextDeskPacket:
         if not cleaned:
             return ""
         return "\n".join(f"- {item}" for item in cleaned)
+
+
+class KakTorContractExtractor:
+    """Extracts KAK/TOR requirements into a hidden proposal-planning contract."""
+
+    SECTION_LABELS = {
+        "problems": ["latar belakang", "permasalahan", "isu utama", "tantangan", "kondisi eksisting"],
+        "objectives": ["maksud dan tujuan", "tujuan", "objective", "sasaran"],
+        "in_scope": ["ruang lingkup", "lingkup pekerjaan", "scope of work", "cakupan pekerjaan"],
+        "deliverables": ["keluaran", "deliverable", "hasil kerja", "output pekerjaan"],
+        "staffing_requirements": ["tenaga ahli", "personil", "personel", "komposisi tim", "struktur tim"],
+        "out_of_scope": ["di luar cakupan", "di luar lingkup", "tidak termasuk", "batasan pekerjaan"],
+        "acceptance_criteria": ["acceptance", "kriteria penerimaan", "quality gate", "persetujuan hasil"],
+    }
+
+    STOP_LABELS = [
+        "latar belakang", "permasalahan", "isu utama", "tantangan", "kondisi eksisting",
+        "maksud dan tujuan", "tujuan", "objective", "sasaran",
+        "ruang lingkup", "lingkup pekerjaan", "scope of work", "cakupan pekerjaan",
+        "keluaran", "deliverable", "hasil kerja", "output pekerjaan",
+        "tenaga ahli", "personil", "personel", "komposisi tim", "struktur tim",
+        "jadwal", "jangka waktu", "durasi", "waktu pelaksanaan",
+        "di luar cakupan", "di luar lingkup", "tidak termasuk", "batasan pekerjaan",
+        "acceptance", "kriteria penerimaan", "quality gate", "persetujuan hasil",
+    ]
+
+    @classmethod
+    def extract(
+        cls,
+        text: str,
+        source_document: str = "",
+        timeline_items: Optional[List[Dict[str, str]]] = None,
+        frameworks: Optional[List[str]] = None,
+        suggestions: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        source = str(text or "").strip()
+        suggestions = suggestions or {}
+        if not source:
+            return {
+                "available": False,
+                "source_document": source_document,
+                "problems": [],
+                "objectives": [],
+                "scope_contract": {"in_scope": [], "out_of_scope": [], "assumptions": [], "dependencies": [], "deliverables": []},
+                "deliverables": [],
+                "staffing_requirements": [],
+                "timeline_items": timeline_items or [],
+                "frameworks": frameworks or [],
+                "acceptance_criteria": [],
+            }
+
+        problems = cls._section_items(source, cls.SECTION_LABELS["problems"], max_items=4)
+        objectives = cls._section_items(source, cls.SECTION_LABELS["objectives"], max_items=4)
+        in_scope = cls._section_items(source, cls.SECTION_LABELS["in_scope"], max_items=8)
+        deliverables = cls._section_items(source, cls.SECTION_LABELS["deliverables"], max_items=8)
+        staffing = cls._section_items(source, cls.SECTION_LABELS["staffing_requirements"], max_items=8)
+        out_of_scope = cls._section_items(source, cls.SECTION_LABELS["out_of_scope"], max_items=5)
+        acceptance = cls._section_items(source, cls.SECTION_LABELS["acceptance_criteria"], max_items=5)
+
+        if suggestions.get("permasalahan"):
+            problems.insert(0, str(suggestions["permasalahan"]))
+        if suggestions.get("konteks_organisasi"):
+            objectives.insert(0, str(suggestions["konteks_organisasi"]))
+
+        inferred_contract = ScopeContractExtractor.extract(source)
+        scope_contract = {
+            "in_scope": cls._dedupe([*in_scope, *inferred_contract.get("in_scope", [])], limit=8),
+            "out_of_scope": cls._dedupe([*out_of_scope, *inferred_contract.get("out_of_scope", [])], limit=6),
+            "assumptions": cls._dedupe(inferred_contract.get("assumptions", []), limit=6),
+            "dependencies": cls._dedupe(inferred_contract.get("dependencies", []), limit=6),
+            "deliverables": cls._dedupe([*deliverables, *inferred_contract.get("deliverables", [])], limit=8),
+        }
+        deliverables = cls._dedupe([*deliverables, *scope_contract["deliverables"]], limit=8)
+
+        return {
+            "available": True,
+            "source_document": source_document,
+            "problems": cls._dedupe(problems, limit=6),
+            "objectives": cls._dedupe(objectives, limit=6),
+            "scope_contract": scope_contract,
+            "deliverables": deliverables,
+            "staffing_requirements": cls._dedupe(staffing, limit=8),
+            "timeline_items": [item for item in (timeline_items or []) if isinstance(item, dict)][:8],
+            "frameworks": cls._dedupe([str(item) for item in (frameworks or []) if str(item or "").strip()], limit=8),
+            "acceptance_criteria": cls._dedupe(acceptance, limit=6),
+        }
+
+    @classmethod
+    def _section_items(cls, text: str, labels: List[str], max_items: int = 6) -> List[str]:
+        section = cls._section_text(text, labels)
+        if not section:
+            return []
+        items: List[str] = []
+        for raw_line in section.splitlines():
+            line = re.sub(r"\s+", " ", raw_line).strip(" -•\t|")
+            line = re.sub(r"^\d+[\).\s-]+", "", line).strip()
+            if not line or re.fullmatch(r"[-|:\s]+", line):
+                continue
+            cells = [cell.strip(" -") for cell in line.split("|") if cell.strip(" -")]
+            candidate = " ".join(cells) if len(cells) > 1 else line
+            if len(candidate.split()) < 2:
+                continue
+            items.append(_clean_text(candidate, max_words=28))
+        if len(items) <= 1:
+            items = [
+                _clean_text(item, max_words=28)
+                for item in re.split(r"(?<=[.;])\s+", section)
+                if len(str(item).split()) >= 3
+            ]
+        return cls._dedupe(items, limit=max_items)
+
+    @classmethod
+    def _section_text(cls, text: str, labels: List[str]) -> str:
+        source = str(text or "")
+        start_pattern = "|".join(re.escape(item) for item in labels if item)
+        stop_pattern = "|".join(re.escape(item) for item in cls.STOP_LABELS if item)
+        if not start_pattern:
+            return ""
+        match = re.search(rf"(?:^|\n)\s*(?:{start_pattern})\s*[:\-]?\s*(.*)", source, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            return ""
+        remainder = str(match.group(1) or "")
+        stop_match = re.search(rf"\n\s*(?:\d+[\).\s-]+)?(?:{stop_pattern})\s*[:\-]?", remainder, flags=re.IGNORECASE)
+        if stop_match:
+            remainder = remainder[:stop_match.start()]
+        lines = []
+        for raw_line in remainder.splitlines()[:14]:
+            if re.search(r"^\s*(?:bab|pasal)\s+\w+", raw_line, flags=re.IGNORECASE):
+                break
+            lines.append(raw_line)
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _dedupe(items: List[str], limit: int = 6) -> List[str]:
+        result: List[str] = []
+        seen = set()
+        for item in items:
+            cleaned = re.sub(r"\s+", " ", str(item or "")).strip(" -;:.")
+            key = cleaned.lower()
+            if not cleaned or key in seen:
+                continue
+            seen.add(key)
+            result.append(cleaned)
+            if len(result) >= limit:
+                break
+        return result
 
 
 class ContextIntelligenceDesk:
@@ -161,10 +385,15 @@ class ContextIntelligenceDesk:
         scope_contract: Optional[Dict[str, List[str]]] = None,
         timeline: str = "",
         budget: str = "",
+        proposal_technique_contract: Optional[Dict[str, Any]] = None,
     ) -> ContextDeskPacket:
         research_bundle = research_bundle or {}
         value_map = value_map or {}
         scope_contract = scope_contract or {}
+        proposal_technique_contract = proposal_technique_contract or {}
+        story_core = proposal_technique_contract.get("psa_itmp_core") if isinstance(proposal_technique_contract, dict) else {}
+        if not isinstance(story_core, dict):
+            story_core = {}
         source_text = " ".join(
             str(item or "")
             for item in [
@@ -198,6 +427,8 @@ class ContextIntelligenceDesk:
                 cues.append(scope_text)
             if chapter_id in {"c_4", "c_5"} and regulations:
                 cues.append(f"Acuan yang relevan: {regulations}")
+            if story_core:
+                cues.append(cls._story_guidance_for_chapter(chapter_id, story_core))
             if chapter_id in {"c_10", "c_11"} and internal_context:
                 cues.append("pakai data kemampuan internal sebagai bukti kecocokan peran, bukan sebagai daftar mentah")
             chapter_guidance[chapter_id] = _clean_text(". ".join(cues), max_words=64)
@@ -216,8 +447,48 @@ class ContextIntelligenceDesk:
         risk_notes = [
             "Jangan menampilkan nama dataset, endpoint, source path, atau label workflow internal.",
             "Jangan mengubah metadata akun menjadi pain point, KPI, atau scope jika tidak didukung konteks.",
+            "Aturan suara proposal: " + "; ".join(proposal_voice_rules()),
         ]
         return ContextDeskPacket(context_brief=context_brief, chapter_guidance=chapter_guidance, risk_notes=risk_notes, evidence_deck=evidence_deck)
+
+    @staticmethod
+    def _story_guidance_for_chapter(chapter_id: str, story_core: Dict[str, Any]) -> str:
+        need_domains = "; ".join((story_core.get("need_domains") or [])[:3])
+        solution_domains = ", ".join(
+            str(item.get("name") or "").strip()
+            for item in (story_core.get("solution_domains") or [])[:4]
+            if isinstance(item, dict) and str(item.get("name") or "").strip()
+        )
+        risk_items = "; ".join(
+            str(item.get("risk") or "").strip()
+            for item in (story_core.get("risk_model") or [])[:3]
+            if isinstance(item, dict) and str(item.get("risk") or "").strip()
+        )
+        success_items = "; ".join(
+            str(item.get("category") or "").strip()
+            for item in (story_core.get("success_criteria") or [])[:3]
+            if isinstance(item, dict) and str(item.get("category") or "").strip()
+        )
+        commercial_items = "; ".join(
+            str(item.get("driver") or "").strip()
+            for item in (story_core.get("commercial_drivers") or [])[:4]
+            if isinstance(item, dict) and str(item.get("driver") or "").strip()
+        )
+        mapping = {
+            "c_1": f"buka dari konteks masalah dan domain kebutuhan: {need_domains}",
+            "c_2": f"rumuskan masalah, risiko bila tidak ditangani, dan kebutuhan solusi: {need_domains}",
+            "c_7": f"jadikan ruang lingkup sebagai anchor sebelum framework dan metodologi: {story_core.get('scope_anchor', '')}",
+            "c_3": f"klasifikasikan kebutuhan menjadi domain keputusan: {need_domains}",
+            "c_4": f"jelaskan framework sebagai pilihan pendekatan yang diturunkan dari scope: {story_core.get('framework_rationale', '')}",
+            "c_5": f"turunkan framework menjadi metodologi, fase, output, dan acceptance: {story_core.get('methodology_logic', '')}",
+            "c_6": f"ubah metodologi menjadi solution design dan domain solusi: {solution_domains}",
+            "c_8": f"timeline mengikuti fase metodologi dan deliverable domain solusi: {solution_domains}",
+            "c_9": f"tata kelola harus memuat risiko pengerjaan dan kriteria keberhasilan: risiko {risk_items}; kriteria keberhasilan {success_items}",
+            "c_11": f"struktur tim perlu mengikuti tanggung jawab framework, metodologi, dan domain solusi: {solution_domains}",
+            "c_12": f"model biaya berbasis domain solusi, kompleksitas, durasi, dan asumsi scope: {commercial_items}",
+            "c_closing": "tutup dengan manfaat keputusan, komitmen tindak lanjut, dan penerimaan hasil",
+        }
+        return mapping.get(chapter_id, "")
 
     @staticmethod
     def _synthesize_need(text: str) -> str:
@@ -293,9 +564,43 @@ class ScopeContractExtractor:
 
 
 class ProposalQualityGate:
+    VISIBLE_REASONING_LABEL_PATTERNS = [
+        r"\bProblem\s*,\s*Opportunity\s*,\s*Directive\b",
+        r"\bProblem\s*-\s*Solution\s*-\s*Action\b",
+        r"(?-i:\bPSA\b)",
+        r"(?-i:\bPAS\b)",
+        r"\b(?:adalah|kebutuhan|menuju|dasar|menjawab)\s+Problem\b",
+        r"\b(?:sebagai|kategori|posisi)\s+(?:Opportunity|Directive)\b",
+    ]
+    REPETITION_MIN_WORDS = 4
+    REPETITION_MAX_SENTENCE_WORDS = 18
+
     @staticmethod
     def _has_raw_helper(text: str) -> bool:
         return any(re.search(pattern, str(text or ""), flags=re.IGNORECASE) for pattern in RAW_HELPER_PATTERNS)
+
+    @classmethod
+    def _has_visible_reasoning_label(cls, text: str) -> bool:
+        return any(
+            re.search(pattern, str(text or ""), flags=re.IGNORECASE)
+            for pattern in cls.VISIBLE_REASONING_LABEL_PATTERNS
+        )
+
+    @classmethod
+    def _has_repetitive_sentence(cls, text: str) -> bool:
+        counts: Dict[str, int] = {}
+        for sentence in re.split(r"(?<=[.!?])\s+", str(text or "")):
+            normalized = re.sub(r"[^A-Za-zÀ-ÿ0-9\s]", "", sentence).lower()
+            normalized = re.sub(r"\s+", " ", normalized).strip()
+            words = normalized.split()
+            if not (
+                cls.REPETITION_MIN_WORDS <= len(words) <= cls.REPETITION_MAX_SENTENCE_WORDS
+            ):
+                continue
+            counts[normalized] = counts.get(normalized, 0) + 1
+            if counts[normalized] >= 3:
+                return True
+        return False
 
     @classmethod
     def evaluate(
@@ -304,6 +609,8 @@ class ProposalQualityGate:
         selected_chapters: List[Dict[str, Any]],
         scope_contract: Optional[Dict[str, List[str]]] = None,
         executive_summary: str = "",
+        deliberation_contract: Optional[Dict[str, Any]] = None,
+        appendix_content: str = "",
     ) -> Dict[str, Any]:
         categories = set()
         findings = []
@@ -317,6 +624,22 @@ class ProposalQualityGate:
             if cls._has_raw_helper(content):
                 categories.add("raw_helper_text")
                 findings.append(f"{title} masih memuat label sumber/internal mentah.")
+            if cls._has_visible_reasoning_label(content):
+                categories.add("visible_reasoning_label")
+                findings.append(f"{title} masih memuat label kerangka berpikir internal.")
+            if cls._has_repetitive_sentence(content):
+                categories.add("narrative_repetition")
+                findings.append(f"{title} masih memuat kalimat berulang yang terasa mekanis.")
+            style_result = assess_proposal_style(content)
+            if not style_result["passed"]:
+                categories.add("editorial_style")
+                findings.append(
+                    f"{title} masih terasa kaku atau berpola: {', '.join(style_result['findings'])}."
+                )
+        spine_result = evaluate_proposal_document_spine(chapter_outputs, selected_chapters)
+        if not spine_result["passes"]:
+            categories.update(spine_result["categories"])
+            findings.extend(spine_result["findings"])
         out_scope_items = [item.lower() for item in (scope_contract or {}).get("out_of_scope", [])]
         if out_scope_items:
             combined_later = " ".join(
@@ -335,4 +658,49 @@ class ProposalQualityGate:
         if cls._has_raw_helper(executive_summary):
             categories.add("raw_helper_text")
             findings.append("Ringkasan eksekutif masih memuat label sumber/internal mentah.")
+        if cls._has_visible_reasoning_label(executive_summary):
+            categories.add("visible_reasoning_label")
+            findings.append("Ringkasan eksekutif masih memuat label kerangka berpikir internal.")
+        if cls._has_repetitive_sentence(executive_summary):
+            categories.add("narrative_repetition")
+            findings.append("Ringkasan eksekutif masih memuat kalimat berulang yang terasa mekanis.")
+        summary_style = assess_proposal_style(executive_summary)
+        if executive_summary and not summary_style["passed"]:
+            categories.add("editorial_style")
+            findings.append(
+                "Ringkasan eksekutif masih terasa kaku atau berpola: "
+                + ", ".join(summary_style["findings"])
+                + "."
+            )
+        contract = deliberation_contract or {}
+        required_contract_keys = {
+            "evidence_dossier", "research_plan", "document_thesis", "chapter_contracts",
+            "claim_ledger", "data_gap_register", "editorial_contract", "appendix_manifest",
+        }
+        if deliberation_contract is not None and not required_contract_keys.issubset(contract):
+            categories.add("missing_deliberation_contract")
+            findings.append("Kontrak deliberasi dokumen belum lengkap pada finalisasi proposal.")
+        elif deliberation_contract is not None and len(contract.get("chapter_contracts") or []) < len(selected_chapters or []):
+            categories.add("missing_deliberation_contract")
+            findings.append("Kontrak deliberasi belum mencakup seluruh bab yang dirender.")
+        appendix = str(appendix_content or "")
+        if contract and (
+            "## A. Matriks Ketertelusuran" not in appendix
+            or "## C. Keterbatasan Bukti" not in appendix
+        ):
+            categories.add("missing_traceability_appendix")
+            findings.append("Lampiran ketertelusuran dan keterbatasan bukti belum lengkap.")
+        if appendix and cls._has_visible_reasoning_label(appendix):
+            categories.add("visible_reasoning_label")
+            findings.append("Lampiran masih memuat label kerangka berpikir internal.")
+        if re.search(r"\b(?:input_pengguna|kontrak_ruang_lingkup|SECTION_PLAN_JSON|DOCUMENT_DELIBERATION)\b", appendix):
+            categories.add("raw_helper_text")
+            findings.append("Lampiran masih memuat label perencanaan atau sumber internal mentah.")
+        missing_claims = [
+            item.get("claim_id") for item in contract.get("claim_ledger", [])
+            if item.get("claim_id") and item.get("claim_id") not in appendix
+        ]
+        if appendix and missing_claims:
+            categories.add("missing_traceability_appendix")
+            findings.append("Lampiran belum memuat seluruh klaim yang diterima dalam ledger.")
         return {"passes": not categories, "categories": sorted(categories), "findings": findings}

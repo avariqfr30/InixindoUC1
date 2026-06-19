@@ -5,6 +5,7 @@ from .proposal_shared import *
 from .research import Researcher
 from .text_hygiene import clean_markup_artifacts
 from .reader_facing_hygiene import sanitize_reader_facing_sources
+from .editorial_intelligence import compact_markdown_table_rows, compact_table_cell
 
 class LogoManager:
     BLOCKED_LOGO_HOSTS = {
@@ -897,9 +898,9 @@ class DocumentBuilder:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
                     paragraph.paragraph_format.space_before = Pt(0)
-                    paragraph.paragraph_format.space_after = Pt(3)
+                    paragraph.paragraph_format.space_after = Pt(4)
                     paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
-                    paragraph.paragraph_format.line_spacing = 1.05
+                    paragraph.paragraph_format.line_spacing = 1.08
                     for run in paragraph.runs:
                         DocumentBuilder._set_run_format(
                             run,
@@ -1409,9 +1410,23 @@ class DocumentBuilder:
                         bold=True,
                     )
             elif element.name == 'p':
+                if len(element.contents) == 1 and getattr(element.contents[0], "name", None) == "code":
+                    code_text = element.contents[0].get_text("\n", strip=False)
+                    if DocumentBuilder._is_visual_code_block(code_text):
+                        DocumentBuilder._render_visual_code_block(doc, code_text)
+                        continue
                 p = doc.add_paragraph()
                 DocumentBuilder._format_plain_paragraph(p)
                 DocumentBuilder._process_inline_html(p, element)
+            elif element.name == 'pre':
+                code_element = element.find('code')
+                code_text = code_element.get_text("\n", strip=False) if code_element is not None else element.get_text("\n", strip=False)
+                if DocumentBuilder._is_visual_code_block(code_text):
+                    DocumentBuilder._render_visual_code_block(doc, code_text)
+                    continue
+                p = doc.add_paragraph()
+                DocumentBuilder._format_plain_paragraph(p)
+                p.add_run(code_text)
             elif element.name in ['ul', 'ol']:
                 DocumentBuilder._render_html_list(doc, element, level=0)
             elif element.name == 'table':
@@ -1426,6 +1441,11 @@ class DocumentBuilder:
                             cell = table.cell(i, j)
                             cell._element.clear_content()
                             p = cell.add_paragraph()
+                            if col.name == 'td':
+                                col.string = compact_table_cell(
+                                    col.get_text(" ", strip=True),
+                                    max_words=22 if max_cols >= 4 else 30,
+                                )
                             DocumentBuilder._process_inline_html(p, col)
                             if col.name == 'th' or i == 0:
                                 for run in p.runs:
@@ -1447,6 +1467,86 @@ class DocumentBuilder:
                 DocumentBuilder._append_text_run(paragraph, clean_markup_artifacts(str(child)))
             else:
                 DocumentBuilder._process_inline_html(paragraph, child, skip_nested_lists=skip_nested_lists)
+
+    @staticmethod
+    def _is_visual_code_block(text: str) -> bool:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return False
+        if re.search(r"[█▓▒░▇▆▅▄▃▂▁■□▰▱]", cleaned):
+            return True
+        return bool(re.search(r"\b(visual|proyeksi|roadmap|jadwal|alokasi|anggaran|week|minggu)\b", cleaned, re.IGNORECASE))
+
+    @staticmethod
+    def _summarize_visual_bar(value: str) -> str:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        if not text:
+            return ""
+
+        bar_chars = "█▓▒░▇▆▅▄▃▂▁■□▰▱"
+        filtered = [char for char in text if not char.isspace()]
+        if filtered and all(char in bar_chars for char in filtered):
+            total = len(filtered)
+            filled = sum(1 for char in filtered if char in "█▓▒▇▆▅▄▃▂▁■▰")
+            if total > 0:
+                return f"{round((filled / total) * 100):.0f}% selesai"
+
+        remaining = re.sub(r"[█▓▒░▇▆▅▄▃▂▁■□▰▱]+", " ", text)
+        remaining = re.sub(r"\s+", " ", remaining).strip(" -;,:")
+        if remaining:
+            return remaining
+        return text
+
+    @staticmethod
+    def _render_visual_code_block(doc: Document, raw_text: str) -> bool:
+        lines = [re.sub(r"\s+", " ", line).strip() for line in (raw_text or "").splitlines()]
+        lines = [line for line in lines if line]
+        if not lines:
+            return False
+
+        title = lines[0]
+        body_lines = lines[1:]
+        if not body_lines and ":" not in title:
+            paragraph = doc.add_paragraph()
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            paragraph.paragraph_format.space_after = Pt(6)
+            run = paragraph.add_run(title)
+            DocumentBuilder._set_run_format(run, size=11, bold=True)
+            return True
+
+        if title:
+            title_paragraph = doc.add_paragraph()
+            title_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            title_paragraph.paragraph_format.space_after = Pt(4)
+            title_run = title_paragraph.add_run(title)
+            DocumentBuilder._set_run_format(title_run, size=11, bold=True)
+
+        rows: List[Tuple[str, str]] = []
+        plain_lines: List[str] = []
+        for line in body_lines:
+            if ":" in line:
+                label, value = line.split(":", 1)
+                rows.append((label.strip(), DocumentBuilder._summarize_visual_bar(value)))
+            else:
+                plain_lines.append(line)
+
+        for line in plain_lines:
+            paragraph = doc.add_paragraph()
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            paragraph.paragraph_format.space_after = Pt(3)
+            run = paragraph.add_run(line)
+            DocumentBuilder._set_run_format(run, size=StyleEngine.BODY_FONT_SIZE)
+
+        if rows:
+            table = doc.add_table(rows=1, cols=2)
+            DocumentBuilder._set_cell_text(table.rows[0].cells[0], "Bagian", bold=True)
+            DocumentBuilder._set_cell_text(table.rows[0].cells[1], "Detail", bold=True)
+            for label, value in rows:
+                cells = table.add_row().cells
+                DocumentBuilder._set_cell_text(cells[0], label, bold=True)
+                DocumentBuilder._set_cell_text(cells[1], value)
+            DocumentBuilder._format_table(table)
+        return True
 
     @staticmethod
     def _markdown_table_cells(line: str) -> List[str]:
@@ -1483,13 +1583,17 @@ class DocumentBuilder:
             if DocumentBuilder._is_valid_markdown_table_block(pending):
                 output.extend(DocumentBuilder._dedupe_markdown_table_rows(pending))
             else:
-                for row in pending:
-                    if DocumentBuilder._is_markdown_table_separator(row):
-                        continue
-                    cells = [cell for cell in DocumentBuilder._markdown_table_cells(row) if cell]
-                    demoted = "; ".join(cells).strip()
-                    if demoted:
-                        output.append(demoted)
+                repaired = DocumentBuilder._repair_markdown_table_block(pending)
+                if repaired:
+                    output.extend(DocumentBuilder._dedupe_markdown_table_rows(repaired))
+                else:
+                    for row in pending:
+                        if DocumentBuilder._is_markdown_table_separator(row):
+                            continue
+                        cells = [cell for cell in DocumentBuilder._markdown_table_cells(row) if cell]
+                        demoted = "; ".join(cells).strip()
+                        if demoted:
+                            output.append(demoted)
             pending = []
 
         for raw_line in (raw_text or "").splitlines():
@@ -1503,18 +1607,48 @@ class DocumentBuilder:
         return "\n".join(output).strip()
 
     @staticmethod
+    def _repair_markdown_table_block(lines: List[str]) -> List[str]:
+        if len(lines) < 3 or not DocumentBuilder._is_markdown_table_separator(lines[1]):
+            return []
+        header = DocumentBuilder._markdown_table_cells(lines[0])
+        body_rows = [DocumentBuilder._markdown_table_cells(line) for line in lines[2:]]
+        if len(header) < 2 or not body_rows:
+            return []
+        body_lengths = [len(row) for row in body_rows if any(cell for cell in row)]
+        if not body_lengths:
+            return []
+        max_len = max(body_lengths)
+        if max_len <= len(header) or max_len > 8:
+            return []
+        expanded_header = [*header, *[f"Detail Tambahan {idx}" for idx in range(1, max_len - len(header) + 1)]]
+        repaired = [
+            "| " + " | ".join(expanded_header) + " |",
+            "| " + " | ".join(["---"] * max_len) + " |",
+        ]
+        for row in body_rows:
+            if not any(cell for cell in row):
+                continue
+            padded = [*row[:max_len], *([""] * max(0, max_len - len(row)))]
+            repaired.append("| " + " | ".join(padded) + " |")
+        return repaired
+
+    @staticmethod
     def _dedupe_markdown_table_rows(lines: List[str]) -> List[str]:
         if len(lines) < 3:
             return lines
         output = lines[:2]
         seen = set()
-        for row in lines[2:]:
-            cells = DocumentBuilder._markdown_table_cells(row)
+        header = DocumentBuilder._markdown_table_cells(lines[0])
+        compact_body = compact_markdown_table_rows(
+            [DocumentBuilder._markdown_table_cells(row) for row in lines[2:]],
+            max_cell_words=20 if len(header) >= 4 else 26,
+        )
+        for cells in compact_body:
             signature = tuple(re.sub(r"\s+", " ", cell).strip().lower() for cell in cells)
             if signature in seen:
                 continue
             seen.add(signature)
-            output.append(row)
+            output.append("| " + " | ".join(cells) + " |")
         return output
 
     @staticmethod

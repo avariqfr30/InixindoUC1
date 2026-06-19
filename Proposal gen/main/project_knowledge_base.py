@@ -181,7 +181,15 @@ class KnowledgeBase:
             return True
 
         try:
-            existing_ids = set(self.collection.get(include=[])["ids"])
+            existing_payload = self.collection.get(include=["metadatas"])
+            existing_ids_list = existing_payload.get("ids") or []
+            existing_metas_list = existing_payload.get("metadatas") or []
+            existing_ids = set(existing_ids_list)
+            existing_meta_by_id = {
+                str(item_id): dict(existing_metas_list[index] or {})
+                for index, item_id in enumerate(existing_ids_list)
+                if index < len(existing_metas_list)
+            }
             new_ids_map = {str(idx): row for idx, row in self.df.iterrows()}
             new_ids_set = set(new_ids_map.keys())
 
@@ -189,15 +197,19 @@ class KnowledgeBase:
             if ids_to_delete:
                 self.collection.delete(ids=ids_to_delete)
 
-            all_ids = list(new_ids_set)
-            if all_ids:
+            ids_to_upsert = [
+                item_id
+                for item_id in sorted(new_ids_set, key=lambda value: int(value) if str(value).isdigit() else str(value))
+                if existing_meta_by_id.get(item_id) != self._row_to_meta(new_ids_map[item_id])
+            ]
+            if ids_to_upsert:
                 batch_size = KB_UPSERT_BATCH_SIZE
-                for i in range(0, len(all_ids), batch_size):
-                    batch_ids = all_ids[i:i + batch_size]
+                for i in range(0, len(ids_to_upsert), batch_size):
+                    batch_ids = ids_to_upsert[i:i + batch_size]
                     docs = [self._row_to_text(new_ids_map[b]) for b in batch_ids]
                     metas = [self._row_to_meta(new_ids_map[b]) for b in batch_ids]
                     self.collection.upsert(documents=docs, metadatas=metas, ids=batch_ids)
-            self._write_sync_state(signature, len(all_ids))
+            self._write_sync_state(signature, len(new_ids_set))
         except Exception as exc:
             self.vector_ready = False
             self.last_refresh_error = str(exc)
@@ -291,11 +303,59 @@ class KnowledgeBase:
         except Exception:
             return ""
 
+    @staticmethod
+    def _rerank_documents(
+        query_text: str,
+        documents: List[str],
+        metadatas: Optional[List[Dict[str, Any]]] = None,
+        distances: Optional[List[float]] = None,
+        limit: int = 2,
+        enabled: Optional[bool] = None,
+    ) -> List[str]:
+        if enabled is None:
+            enabled = os.getenv("EVIDENCE_QUALITY_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+        if not enabled:
+            return list(documents[:limit])
+        try:
+            from .evidence_quality import rerank
+            candidates = []
+            for index, document in enumerate(documents):
+                metadata = metadatas[index] if metadatas and index < len(metadatas) else {}
+                distance = distances[index] if distances and index < len(distances) else 1.0
+                try:
+                    semantic_score = 1.0 / (1.0 + max(0.0, float(distance)))
+                except (TypeError, ValueError):
+                    semantic_score = 0.0
+                normalized_meta = dict(metadata or {})
+                normalized_meta.setdefault("client", normalized_meta.get("entity", ""))
+                normalized_meta.setdefault("project", normalized_meta.get("topic", ""))
+                candidates.append({"id": str(index), "text": str(document or ""), "semantic_score": semantic_score, "metadata": normalized_meta})
+            retrieval_intent = {
+                "goal": "find proposal evidence from internal account, project history, expertise, and framework context",
+                "preferred_datasets": [
+                    "ReferenceAccount",
+                    "ConsultantProjectExpertHistory",
+                    "EmployeeExpertise",
+                    "ReferenceFramework",
+                ],
+                "exclude": ["FinanceInvoice", "ProjectStandards"],
+                "preferred_terms": [query_text],
+            }
+            ranked = rerank("proposal", query_text, candidates, limit=limit, retrieval_intent=retrieval_intent)
+            ordered = [str(item.get("text") or "") for item in ranked if isinstance(item, dict)]
+            return ordered or list(documents[:limit])
+        except Exception:
+            return list(documents[:limit])
+
     def query(self, client: str, project: str, context_keywords: str = "") -> str:
         try:
-            res = self.collection.query(query_texts=[f"{project} for {client} {context_keywords}"], n_results=2)
-            if res['documents'] and len(res['documents'][0]) > 0:
-                return "\n".join(res['documents'][0])
-            return ""
+            query_text = f"{project} for {client} {context_keywords}".strip()
+            res = self.collection.query(query_texts=[query_text], n_results=8, include=["documents", "metadatas", "distances"])
+            documents = (res.get("documents") or [[]])[0]
+            if not documents:
+                return ""
+            metadatas = (res.get("metadatas") or [[]])[0]
+            distances = (res.get("distances") or [[]])[0]
+            return "\n".join(self._rerank_documents(query_text, documents, metadatas, distances, limit=2))
         except Exception:
             return ""

@@ -10,9 +10,8 @@ READINESS_LABELS: Dict[str, tuple[str, str]] = {
     "project_records": ("Riwayat proyek & tenaga ahli", "Portofolio, produk, peran, dan tenaga ahli"),
     "client_relationship": ("Konteks relasi klien", "Riwayat proyek yang relevan dengan klien"),
     "firm_profile": ("Profil perusahaan penyusun", "Kontak, kredensial, dan portofolio resmi"),
-    "project_standards": ("Standar delivery", "Metodologi, struktur tim, dan ketentuan komersial"),
 }
-READINESS_ORDER = ["account_records", "project_records", "client_relationship", "firm_profile", "project_standards"]
+READINESS_ORDER = ["account_records", "project_records", "client_relationship", "firm_profile"]
 
 
 def internal_api_has_runtime_resources(api_client: Any) -> bool:

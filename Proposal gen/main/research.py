@@ -703,6 +703,106 @@ class Researcher:
             lines.append(f"Bukti eksternal {i}: {snippet} {citation}")
         return "\n".join(lines) if lines else f"{fallback} (sumber daring, n.d.)"
 
+    @staticmethod
+    def _source_quality_label(url: str) -> str:
+        host = Researcher._source_name(url)
+        if host.endswith(".go.id") or host in {"ojk.go.id", "bi.go.id", "bssn.go.id", "kominfo.go.id", "iso.org"}:
+            return "high"
+        if any(host.endswith(domain) for domain in ("bisnis.com", "kontan.co.id", "katadata.co.id", "cnbcindonesia.com", "kompas.com")):
+            return "medium"
+        return "medium" if host and host != "sumber daring" else "low"
+
+    @staticmethod
+    def _dossier_lane_from_field(field: str) -> str:
+        return {
+            "profile": "client_profile",
+            "news": "market_pressure",
+            "track_record": "client_profile",
+            "collaboration": "partnership_context",
+            "regulations": "regulatory_context",
+            "ai_posture": "technology_context",
+        }.get(str(field or "").strip(), "market_pressure")
+
+    @staticmethod
+    def _extract_dossier_sources(bundle: Dict[str, Any], field: str, max_items: int = 3) -> List[Dict[str, str]]:
+        structured = bundle.get("structured_sources") if isinstance(bundle, dict) else {}
+        if isinstance(structured, dict):
+            items = structured.get(field) or []
+            cleaned = [
+                {
+                    "fact": str(item.get("fact", "") or "").strip(),
+                    "title": str(item.get("title", "") or "").strip(),
+                    "url": str(item.get("url", "") or "").strip(),
+                    "citation": str(item.get("citation", "") or "").strip(),
+                }
+                for item in items
+                if isinstance(item, dict) and str(item.get("fact", "") or "").strip()
+            ]
+            if cleaned:
+                return cleaned[:max_items]
+        text = str((bundle or {}).get(field, "") or "")
+        if not text.strip():
+            return []
+        rows: List[Dict[str, str]] = []
+        for line in re.split(r"\n+", text):
+            cleaned = Researcher._clean_osint_fact(line)
+            if not cleaned or "terbatas" in cleaned.lower():
+                continue
+            citation_match = re.search(r"\(([^(),]+),\s*([^)]+)\)\s*$", line)
+            source = citation_match.group(1).strip() if citation_match else Researcher._source_name("")
+            year = citation_match.group(2).strip() if citation_match else "n.d."
+            fact = re.sub(r"^Bukti eksternal\s+\d+\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+            fact = re.sub(r"\s*\([^(),]+,\s*[^)]+\)\s*$", "", fact).strip()
+            if fact:
+                rows.append({"fact": fact, "title": source, "url": "", "citation": f"({source}, {year})"})
+            if len(rows) >= max_items:
+                break
+        return rows
+
+    @staticmethod
+    def build_osint_dossier(use_case: str, internal_anchor: Dict[str, Any], bundle: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert OSINT bundle text into compact evidence cards matched to internal context."""
+        anchor = {str(k): v for k, v in dict(internal_anchor or {}).items() if str(v or "").strip()}
+        lanes: Dict[str, List[Dict[str, Any]]] = {
+            "client_profile": [],
+            "market_pressure": [],
+            "regulatory_context": [],
+            "partnership_context": [],
+            "technology_context": [],
+        }
+        cards: List[Dict[str, Any]] = []
+        for field in ("profile", "news", "track_record", "collaboration", "regulations", "ai_posture"):
+            lane = Researcher._dossier_lane_from_field(field)
+            for source in Researcher._extract_dossier_sources(bundle or {}, field, max_items=3):
+                fact = Researcher._summarize_osint_fact(source.get("fact", ""), max_words=32)
+                if not fact:
+                    continue
+                url = source.get("url", "")
+                card = {
+                    "claim": fact,
+                    "why_it_matters": f"Memperkuat konteks {lane.replace('_', ' ')} untuk keputusan dan narasi {use_case}.",
+                    "source_title": source.get("title") or Researcher._source_name(url),
+                    "source_domain": Researcher._source_name(url) if url else (source.get("title") or "sumber daring"),
+                    "source_year": Researcher._citation_year({"snippet": source.get("citation", ""), "title": source.get("title", "")}),
+                    "confidence": Researcher._source_quality_label(url),
+                    "allowed_use": "citeable" if field in {"profile", "news", "regulations", "track_record"} else "context_only",
+                    "matched_internal_fact": "; ".join(f"{key}={value}" for key, value in list(anchor.items())[:4]) or "internal context unavailable",
+                    "lane": lane,
+                }
+                lanes.setdefault(lane, []).append(card)
+                cards.append(card)
+        return {
+            "use_case": str(use_case or "proposal"),
+            "internal_anchor": anchor,
+            "lanes": lanes,
+            "evidence_cards": cards[:12],
+            "quality": {
+                "card_count": len(cards[:12]),
+                "citeable_count": sum(1 for card in cards[:12] if card.get("allowed_use") == "citeable"),
+                "lane_count": sum(1 for values in lanes.values() if values),
+            },
+        }
+
     # =========================================================
     # UPGRADED OSINT METHODS: USING DEEP SCRAPING + PYDANTIC
     # =========================================================

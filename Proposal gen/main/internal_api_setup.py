@@ -20,11 +20,6 @@ RESOURCE_ALIASES: Dict[str, Dict[str, List[str]]] = {
         "credential_highlights": ["credential_highlights", "credentials", "capabilities", "certification"],
         "portfolio_highlights": ["portfolio_highlights", "portfolio", "experience", "case_study"],
     },
-    "project_standards": {
-        "methodology": ["methodology", "metodologi", "delivery_methodology", "approach", "framework", "metode_kerja"],
-        "team": ["team", "team_structure", "delivery_team", "resource_plan", "staffing", "struktur_tim"],
-        "commercial": ["commercial", "commercial_terms", "pricing_terms", "payment_terms", "scope_terms"],
-    },
     "client_relationship": {
         "summary": ["summary", "relationship_summary", "description", "notes", "history", "engagement_history"],
         "mode": ["mode", "status", "relationship_status", "client_status", "engagement_status", "has_relationship"],
@@ -63,7 +58,6 @@ RESOURCE_ALIASES: Dict[str, Dict[str, List[str]]] = {
 
 DEFAULT_DATASETS = {
     "firm_profile": "ReferenceAccount",
-    "project_standards": "ProjectStandards",
     "client_relationship": "ConsultantProjectExpertHistory",
     "project_records": "ConsultantProjectExpertHistory",
     "account_records": "ReferenceAccount",
@@ -74,7 +68,6 @@ DEFAULT_DATASETS = {
 
 DEFAULT_RESPONSE_PATHS = {
     "firm_profile": "data.dataset_result.0",
-    "project_standards": "data.dataset_result",
     "client_relationship": "data.dataset_result",
     "project_records": "data.dataset_result",
     "account_records": "data.dataset_result",
@@ -133,16 +126,6 @@ def build_internal_api_config(data: Dict[str, Any]) -> Dict[str, Any]:
                 "profile_summary": "profile_summary",
                 "credential_highlights": "credential_highlights",
                 "portfolio_highlights": "portfolio_highlights",
-            },
-        },
-        "project_standards": {
-            "request": {"body": {"dataset": str(datasets.get("project_standards") or DEFAULT_DATASETS["project_standards"])}},
-            "response_path": str(paths.get("project_standards") or DEFAULT_RESPONSE_PATHS["project_standards"]),
-            "record_filters": {"project_type": "{project_type}"},
-            "field_mapping": {
-                "methodology": "delivery_methodology",
-                "team": "team_composition",
-                "commercial": "commercial_terms",
             },
         },
         "client_relationship": {

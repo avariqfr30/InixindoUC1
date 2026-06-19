@@ -50,7 +50,6 @@ class GenericFirmProfileSchema(BaseModel):
 class FirmAPIClient:
     REQUIRED_RESOURCE_FIELDS: Dict[str, Tuple[str, ...]] = {
         "firm_profile": ("office_address", "email", "phone", "website"),
-        "project_standards": ("methodology", "team", "commercial"),
         "client_relationship": ("summary",),
         "project_records": ("entity", "topic"),
         "framework_catalog": ("value", "label"),
@@ -243,7 +242,7 @@ class FirmAPIClient:
     def validate_config(self, sample_payload: Optional[Any] = None) -> Dict[str, Any]:
         resources: Dict[str, Any] = {}
         configured_resources = self.resource_config or {}
-        resource_names = ["firm_profile", "project_standards", "client_relationship"]
+        resource_names = ["firm_profile", "client_relationship"]
         if "account_records" in configured_resources:
             resource_names.append("account_records")
         if PROJECT_DATA_SOURCE == "api" or "project_records" in configured_resources:
@@ -1068,16 +1067,8 @@ class FirmAPIClient:
             return []
 
     def get_project_standards(self, project_type: str) -> Dict[str, str]:
-        if self.demo_mode:
-            logger.info("Using demo standards for project type: %s", project_type)
-            demo_standards = MOCK_FIRM_STANDARDS.get(project_type, MOCK_FIRM_STANDARDS.get("Implementation"))
-            return self._normalize_project_standards(demo_standards)
-        try:
-            payload = self._resolve_resource_payload("project_standards", project_type=project_type)
-            return GenericProjectStandardsSchema.model_validate(payload).model_dump()
-        except Exception as e:
-            logger.error(f"Internal API Error: {e}")
-            return self._normalize_project_standards({})
+        local_standards = MOCK_FIRM_STANDARDS.get(project_type, MOCK_FIRM_STANDARDS.get("Implementation"))
+        return self._normalize_project_standards(local_standards)
 
     @classmethod
     def _default_firm_profile(cls) -> Dict[str, str]:
@@ -1501,6 +1492,11 @@ class InternalDataClient:
             return self.demo_provider.get_project_standards(project_type)
         return normalized
 
+    def get_delivery_guidance(self, project_type: str) -> Dict[str, str]:
+        """Compatibility surface for proposal generation's delivery guidance contract."""
+
+        return self.get_project_standards(project_type)
+
     def get_firm_profile(self) -> Dict[str, str]:
         if self.internal_data_source == "demo":
             return self.demo_provider.get_firm_profile()
@@ -1587,20 +1583,6 @@ class InternalDataClient:
             }
         except Exception as exc:
             snapshot["resources"]["firm_profile"] = {"ok": False, "error": str(exc)}
-
-        try:
-            standards = self.get_project_standards(project_type)
-            snapshot["resources"]["project_standards"] = {
-                "ok": not FirmAPIClient._is_weak_project_standards(standards),
-                "fields": {
-                    "methodology": bool(str(standards.get("methodology") or "").strip()),
-                    "team": bool(str(standards.get("team") or "").strip()),
-                    "commercial": bool(str(standards.get("commercial") or "").strip()),
-                },
-                "project_type": project_type,
-            }
-        except Exception as exc:
-            snapshot["resources"]["project_standards"] = {"ok": False, "project_type": project_type, "error": str(exc)}
 
         try:
             relationship = self.get_client_relationship(client_name)

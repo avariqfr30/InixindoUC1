@@ -771,7 +771,7 @@ UNIVERSAL_STRUCTURE = [
     },
     {
         "id": "c_4", "title": "BAB V – PENDEKATAN",
-        "subs": ["5.1 Acuan Prinsip/Kerangka/Teori/Regulasi", "5.2 Standar Penyelesaian Masalah"],
+        "subs": ["5.1 Kerangka Prinsip, Teori, dan Regulasi", "5.2 Standar Penyelesaian Masalah"],
         "keywords": "approach framework principle theory regulation standard",
         "length_intent": "Tentukan acuan dan prinsip yang digunakan (framework/teori/regulasi/standar) sebagai landasan menyelesaikan masalah klien, lalu jelaskan mengapa acuan tersebut tepat untuk kebutuhan yang sudah diklasifikasikan. (Target: 700 words)."
     },
@@ -779,7 +779,7 @@ UNIVERSAL_STRUCTURE = [
         "id": "c_5", "title": "BAB VI – METODOLOGI",
         "subs": [
             "6.1 Alasan Pemilihan Metodologi",
-            "6.2 Langkah Kerja dengan Kerangka Acuan Terpilih",
+            "6.2 Langkah Kerja dengan Kerangka Terpilih",
         ],
         "keywords": "methodology rationale implementation steps framework",
         "length_intent": "Jelaskan mengapa metodologi tersebut dipilih dan bagaimana langkah kerja menggunakan framework tersebut agar pendekatan dapat berubah menjadi proses kerja yang dapat dijalankan. (Target: 850 words).",

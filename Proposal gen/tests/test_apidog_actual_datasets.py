@@ -735,6 +735,122 @@ class ApidogActualDatasetTest(unittest.TestCase):
         self.assertFalse(any(row["peran"].startswith("Project Manager -") for row in rows))
         self.assertFalse(any(row["peran"].startswith("Tenaga Ahli -") for row in rows))
 
+    def test_individual_expert_rows_are_complete_and_reader_safe_when_source_data_is_partial(self) -> None:
+        from main.proposal_support import ProposalSupportMixin
+
+        bench_context = {
+            "source": "internal_api",
+            "name_policy": {
+                "allow_named_specialists": True,
+                "allowed_use": "team_chapter_only",
+                "source": "ConsultantProjectExpertHistory",
+            },
+            "employee_expertise_rows": [
+                {
+                    "employee_name": "Julizar Handi Wijaya",
+                    "projects": [
+                        "Aristektur Data SPBE Provinsi Lampung",
+                        "Arsitektur Aplikasi Kab Banjarnegara",
+                    ],
+                    "certifications": [],
+                },
+                {
+                    "employee_name": "Mustofa",
+                    "projects": ["25, Arsitektur Aplikasi (Kab. Demak)", "Project Manager"],
+                    "certifications": [
+                        "109, Cisco Certified Network Associate (CCNA)",
+                        "110",
+                    ],
+                },
+            ],
+        }
+
+        rows = ProposalSupportMixin._individual_expert_capability_rows(
+            bench_context,
+            client="BMKG",
+            project_type="Transformasi Digital",
+            service_type="Konsultan SPBE",
+            regulations="SPBE",
+            team_points=[],
+        )
+
+        self.assertGreaterEqual(len(rows), 2)
+        for row in rows:
+            for key in ("nama", "posisi", "kapabilitas", "pengalaman", "sertifikasi", "pemanfaatan"):
+                self.assertTrue(row[key], f"{row['nama']} has blank {key}")
+            joined = " ".join(row.values())
+            self.assertNotRegex(joined, r"\b(?:25|109|110),?\b")
+
+    def test_framework_function_copy_names_the_actual_framework_instead_of_generic_acuan(self) -> None:
+        from main.proposal_support import ProposalSupportMixin
+
+        generic_data_copy = ProposalSupportMixin._framework_tldr("Data Governance", ai_mode=False)
+        generic_framework_copy = ProposalSupportMixin._framework_tldr("Framework internal delivery", ai_mode=False)
+
+        self.assertIn("Data Governance", generic_data_copy)
+        self.assertNotIn("Acuan ini", generic_data_copy)
+        self.assertIn("Framework internal delivery", generic_framework_copy)
+        self.assertNotIn("Acuan ini", generic_framework_copy)
+
+    def test_framework_relevance_cells_do_not_repeat_dipilih_karena_opening(self) -> None:
+        from main.proposal_support import ProposalSupportMixin
+
+        rows = ProposalSupportMixin._framework_reference_rows(
+            "COBIT2019, ISO27001, Data Governance, Manajemen Risiko",
+            "Implementasi",
+            context_hint="Transformasi Digital dan Tata Kelola Data",
+        )
+
+        openings = [" ".join(row["relevansi"].split()[:2]).lower() for row in rows]
+        self.assertFalse(any(row["relevansi"].lower().startswith("dipilih karena") for row in rows))
+        self.assertGreaterEqual(len(set(openings)), 3)
+
+    def test_team_structure_chapter_surfaces_multiple_roles_in_visible_section(self) -> None:
+        from docx import Document
+        from main.document_rendering import DocumentBuilder
+        from main.proposal_support import ProposalSupportMixin
+
+        class Renderer(ProposalSupportMixin):
+            pass
+
+        content = Renderer()._render_structured_chapter(
+            chapter={
+                "id": "c_11",
+                "title": "BAB X – STRUKTUR & TEAM PROYEK",
+                "subs": ["10.1 Struktur Tim Proyek", "10.2 Kapabilitas Konsultan, Pengalaman, dan Sertifikasi"],
+            },
+            client="BMKG",
+            project="Transformasi Digital",
+            budget="",
+            service_type="Konsultan SPBE",
+            project_goal="Menyusun tata kelola dan roadmap digital",
+            project_type="Transformasi Digital",
+            timeline="12 minggu",
+            notes="",
+            regulations="SPBE",
+            firm_data={"team": "Project Director, Project Manager, Tenaga Ahli SPBE"},
+            firm_profile={},
+            research_bundle={},
+            personalization_pack={"terminology": ["SPBE", "tata kelola"]},
+            value_map={},
+            proposal_mode="canvassing",
+        )
+
+        doc = Document()
+        DocumentBuilder.process_content(doc, content, (0, 51, 102), "BAB X")
+        rendered = "\n".join(
+            [paragraph.text for paragraph in doc.paragraphs]
+            + [cell.text for table in doc.tables for row in table.rows for cell in row.cells]
+        )
+        for role in [
+            "Engagement Director",
+            "Project Manager",
+            "Lead Arsitektur",
+            "Lead Peta Jalan",
+            "Governance & Quality",
+        ]:
+            self.assertIn(role, rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

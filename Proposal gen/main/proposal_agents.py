@@ -21,25 +21,25 @@ class ProposalAgentWorkflow:
         },
         "internal_data": {
             "role": "internal data agent",
-            "api_lanes": ["account_records", "client_relationship", "project_records", "expert_bench_context", "project_standards"],
+            "api_lanes": ["account_records", "client_relationship", "project_records", "expert_bench_context"],
             "osint_lanes": [],
             "focus": "APIDog/internal dataset facts, record counts, source paths, gaps, and confidence without public-web assumptions",
         },
         "commercial_strategy": {
             "role": "commercial strategy agent",
-            "api_lanes": ["client_relationship", "project_standards"],
+            "api_lanes": ["client_relationship"],
             "osint_lanes": ["profile", "news", "collaboration"],
             "focus": "pain, value, urgency, business case, implementation logic, and client-specific positioning",
         },
         "technical_solution": {
             "role": "technical solution agent",
-            "api_lanes": ["project_records", "expert_bench_context", "project_standards"],
+            "api_lanes": ["project_records", "expert_bench_context"],
             "osint_lanes": ["regulations", "ai_posture"],
             "focus": "architecture, scope, assumptions, constraints, delivery dependencies, and feasibility after the business argument is clear",
         },
         "risk_compliance": {
             "role": "risk and compliance agent",
-            "api_lanes": ["account_records", "project_records", "project_standards"],
+            "api_lanes": ["account_records", "project_records"],
             "osint_lanes": ["regulations", "news"],
             "focus": "unsupported claims, missing caveats, data gaps, fake specificity, weak assumptions, and rejected claims",
         },
@@ -63,19 +63,19 @@ class ProposalAgentWorkflow:
         },
         "framework_regulatory": {
             "role": "framework and regulatory agent",
-            "api_lanes": ["project_standards"],
+            "api_lanes": [],
             "osint_lanes": ["regulations"],
             "focus": "framework fit, compliance logic, controls, standards, and how each framework changes delivery choices",
         },
         "commercial_delivery": {
             "role": "delivery and commercial agent",
-            "api_lanes": ["project_standards", "finance_invoice"],
+            "api_lanes": ["client_relationship"],
             "osint_lanes": ["collaboration"],
             "focus": "scope, workplan, governance rhythm, timeline, pricing assumptions, terms, and delivery risk",
         },
         "ai_readiness": {
             "role": "AI readiness and responsible-adoption agent",
-            "api_lanes": ["project_records", "project_standards"],
+            "api_lanes": ["project_records"],
             "osint_lanes": ["ai_posture"],
             "focus": "AI business value, readiness, governance, feasibility, human oversight, and adoption risk",
         },
@@ -252,6 +252,23 @@ class ProposalAgentWorkflow:
             4,
             "serta",
         )
+        dossier = bundle.get("osint_dossier") if isinstance(bundle.get("osint_dossier"), dict) else {}
+        dossier_cards = []
+        for card in (dossier.get("evidence_cards") or [])[:5]:
+            if not isinstance(card, dict):
+                continue
+            claim = compact(card.get("claim"), max_words=22)
+            lane = compact(card.get("lane"), max_words=6)
+            allowed = compact(card.get("allowed_use"), max_words=4)
+            match = compact(card.get("matched_internal_fact"), max_words=14)
+            if claim:
+                dossier_cards.append(f"{claim} | lane={lane} | allowed={allowed} | internal={match}")
+        osint_dossier_brief = joiner(
+            dossier_cards,
+            "gunakan kartu OSINT terstruktur hanya sebagai penguat konteks internal",
+            5,
+            "serta",
+        )
 
         if isinstance(expert_bench_context, dict):
             expert_text = (
@@ -335,6 +352,7 @@ class ProposalAgentWorkflow:
             f"Target bab: {chapter_title} untuk {client} pada pekerjaan {project}. "
             f"Sub-bab yang harus didukung riset: {subs_brief}. "
             f"Bahan OSINT yang dipakai sebagai grounding: {osint_brief}. "
+            f"Kartu OSINT terstruktur yang sudah dicocokkan ke konteks internal: {osint_dossier_brief}. "
             f"Konteks internal klien sebagai latar: {internal_brief}. "
             f"Basis kapabilitas internal/tenaga ahli: {expert_brief}. "
             f"Profil personalisasi klien: {profile_brief or 'sesuaikan dengan konteks klien yang tersedia'}. "

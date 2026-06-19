@@ -9,6 +9,8 @@ from .proposal_support import ProposalSupportMixin
 from .proposal_quality_pipeline import ContextIntelligenceDesk, EvidenceDeckBuilder, ProposalQualityGate, ScopeContractExtractor
 from .proposal_technique import build_proposal_technique_contract
 from .text_hygiene import naturalize_generation_text
+from .editorial_intelligence import assess_proposal_style, repair_proposal_document_spine
+from .proposal_deliberation import ProposalDeliberationBuilder
 
 
 class ProposalEngineMixin:
@@ -123,6 +125,67 @@ class ProposalEngineMixin:
     ) -> Dict[str, str]:
         return chapter_outputs
 
+    @staticmethod
+    def _protected_rewrite_values(content: str, client: str) -> List[str]:
+        values = {str(client or "").strip()}
+        patterns = (
+            r"(?i)\b(?:Rp\s*)?\d[\d.,]*(?:\s*(?:juta|miliar|triliun|%|hari|bulan|tahun))?",
+            r"\b\d{4}\b",
+            r"\b[A-Z]{2,}[A-Z0-9._/-]*\b",
+        )
+        for pattern in patterns:
+            values.update(match.strip() for match in re.findall(pattern, content or "") if match.strip())
+        return sorted(value for value in values if value and len(value) >= 2)[:80]
+
+    @staticmethod
+    def _shared_writing_quality(content: str, protected_values: Optional[List[str]] = None) -> Dict[str, Any]:
+        def local_issues(text: str) -> List[str]:
+            issues: List[str] = []
+            sentences = [
+                re.sub(r"\s+", " ", item).strip()
+                for item in re.split(r"(?<=[.!?])\s+", str(text or ""))
+                if len(item.split()) >= 4
+            ]
+            starts: Dict[str, int] = {}
+            for sentence in sentences:
+                key = " ".join(re.findall(r"\w+", sentence.lower())[:4])
+                if key:
+                    starts[key] = starts.get(key, 0) + 1
+            if any(count >= 3 for count in starts.values()):
+                issues.append("repeated_opening")
+            stock_terms = re.findall(
+                r"(?i)\b(perlu|dapat|konteks|fokus|secara strategis|menjadi penting|dalam hal ini|"
+                r"perlu diperkuat|perlu dipastikan|dapat menjadi)\b",
+                str(text or ""),
+            )
+            if len(stock_terms) >= max(12, len(sentences) // 4):
+                issues.append("stock_business_phrase_density")
+            if re.search(r"(?i)\b(masalah yang perlu ditangani|manfaat keputusan yang perlu dibuktikan|prioritas mana yang paling langsung)\b", str(text or "")):
+                issues.append("internal_planner_leakage")
+            return sorted(set(issues + assess_proposal_style(text).get("findings", [])))
+
+        if os.getenv("EVIDENCE_QUALITY_WRITING_ENABLED", "true").strip().lower() not in {"1", "true", "yes", "on"}:
+            return {"issues": local_issues(content), "protected_missing": []}
+        try:
+            from .evidence_quality import quality_check
+            result = quality_check(content, protected_values=protected_values or [])
+        except Exception:
+            result = {"issues": [], "protected_missing": []}
+        result["issues"] = sorted(set(list(result.get("issues", [])) + local_issues(content)))
+        return result
+
+    @staticmethod
+    def _rewrite_quality_acceptable(result: Dict[str, Any]) -> bool:
+        if result.get("protected_missing"):
+            return False
+        blocked = {
+            "repeated_sentence", "repeated_paragraph", "filler_phrase", "unnecessary_english",
+                "long_sentence", "repeated_opening", "stock_transition", "unexplained_technical_term",
+                "stock_business_phrase_density", "internal_planner_leakage", "template_language",
+                "repeated_openings",
+        }
+        return not any(issue in blocked for issue in result.get("issues", []))
+
     def _draft_chapter(
         self,
         chapter: Dict[str, Any],
@@ -161,10 +224,22 @@ class ProposalEngineMixin:
             allowed_external_citations=allowed,
             personalization_pack=personalization_pack
         )
+        writing_quality = self._shared_writing_quality(content)
+        writing_issues = [
+            issue for issue in writing_quality.get("issues", [])
+            if issue in {
+                "repeated_sentence", "repeated_paragraph", "filler_phrase", "unnecessary_english",
+                "long_sentence", "repeated_opening", "repeated_openings", "stock_transition",
+                "unexplained_technical_term", "template_language", "stock_business_phrase_density",
+                "internal_planner_leakage",
+            }
+        ]
+        report["issues"].extend(issue for issue in writing_issues if issue not in report["issues"])
         hard_check_keys = {
             "missing_h2", "too_short", "too_long",
             "list_structure", "missing_visual", "citation_policy", "missing_personalization"
         }
+        hard_check_keys.update(writing_issues)
         if self._throughput_mode():
             hard_check_keys.discard("too_long")
             hard_check_keys.discard("list_structure")
@@ -191,9 +266,12 @@ class ProposalEngineMixin:
             f"Missing H2: {', '.join(report['missing_h2']) if report['missing_h2'] else '-'}\n"
             f"{citation_policy_note}"
             f"{personalization_note}"
+            "Perbaiki Bahasa Indonesia agar ringkas, alami, konsisten, dan tidak repetitif. "
+            "Jangan mengubah nama, angka, persentase, tanggal, nilai uang, kode, atau klaim faktual. "
             "Pertahankan fakta dan konteks. Keluarkan versi final saja.\n\n"
             f"DRAFT:\n{content}"
         )
+        protected_rewrite_values = self._protected_rewrite_values(content, client)
         try:
             retry = self.ollama.chat(
                 model=LLM_MODEL,
@@ -204,7 +282,8 @@ class ProposalEngineMixin:
                 options=self._chapter_generation_options(target_words, purpose="retry")
             )
             improved = (retry.get('message', {}).get('content', '') or '').strip()
-            if improved:
+            improved_quality = self._shared_writing_quality(improved, protected_rewrite_values) if improved else {}
+            if improved and self._rewrite_quality_acceptable(improved_quality):
                 content = self._apply_draft_repairs(
                     chapter=chapter,
                     content=improved,
@@ -422,12 +501,22 @@ class ProposalEngineMixin:
         timeline = naturalize_generation_text(timeline, field="estimasi_waktu", client_name=client)
         notes = naturalize_generation_text(notes, field="permasalahan", client_name=client)
         regulations = naturalize_generation_text(regulations, field="potensi_framework", client_name=client)
+        framework_context = supporting_context.get("framework_context") or supporting_context.get("framework_options")
+        if not framework_context:
+            try:
+                framework_context = self.firm_api.get_framework_catalog()
+            except Exception:
+                framework_context = None
         proposal_technique_contract = build_proposal_technique_contract(
             client=client,
             goals=project,
             customer_notes=notes,
             existing_condition=str(supporting_context.get("client_internal_context") or ""),
             frameworks=regulations,
+            framework_context=framework_context,
+            client_use_cases=supporting_context.get("use_cases"),
+            osint_facts=supporting_context.get("osint_facts"),
+            kak_contract=supporting_context.get("kak_contract"),
         )
         supporting_context["proposal_technique_contract"] = proposal_technique_contract
         selected_chapters = self._resolve_chapters(chapter_id, proposal_mode=proposal_mode)
@@ -436,7 +525,7 @@ class ProposalEngineMixin:
 
         use_demo_logic = self.firm_api.uses_demo_logic()
         app_state_store = getattr(self, "app_state_store", None)
-        firm_data = self.firm_api.get_project_standards(project_type)
+        firm_data = self.firm_api.get_delivery_guidance(project_type)
         firm_profile = self.firm_api.get_firm_profile()
         if app_state_store:
             firm_profile = app_state_store.enrich_firm_profile(firm_profile)
@@ -468,6 +557,19 @@ class ProposalEngineMixin:
         if not use_demo_logic:
             research_bundle = dict(research_bundle)
             research_bundle["collaboration"] = relationship_context.get("summary", "")
+        research_bundle = dict(research_bundle or {})
+        research_bundle["osint_dossier"] = Researcher.build_osint_dossier(
+            "proposal",
+            {
+                "client": client,
+                "project": project,
+                "project_goal": project_goal,
+                "project_type": project_type,
+                "service_type": service_type,
+                "proposal_mode": proposal_mode,
+            },
+            research_bundle,
+        )
         personalization_pack = self._build_personalization_pack(
             client=client,
             project=project,
@@ -477,7 +579,8 @@ class ProposalEngineMixin:
             notes=notes,
             regulations=regulations,
             research_bundle=research_bundle,
-            relationship_context=relationship_context
+            relationship_context=relationship_context,
+            client_internal_context=str(supporting_context.get("client_internal_context") or ""),
         )
         value_map = self._build_value_map(
             client=client,
@@ -542,11 +645,46 @@ class ProposalEngineMixin:
             scope_contract=scope_contract,
             timeline=timeline,
             budget=budget,
+            proposal_technique_contract=proposal_technique_contract,
         )
         evidence_deck = context_intelligence.evidence_deck
+        deliberation_builder = ProposalDeliberationBuilder()
+
+        def build_deliberation_contract() -> Dict[str, Any]:
+            evidence_cards = [
+                {
+                    "chapter_ids": list(card.chapter_ids),
+                    "claim": card.claim,
+                    "source_type": card.source_type,
+                    "confidence": card.confidence,
+                    "implication": card.implication,
+                }
+                for card in evidence_deck.cards
+            ]
+            return deliberation_builder.build(
+                client=client,
+                project=project,
+                chapters=selected_chapters,
+                evidence_cards=evidence_cards,
+                scope_contract=scope_contract,
+                kak_contract=supporting_context.get("kak_contract") or {},
+                data_version=str(supporting_context.get("data_version") or ""),
+            )
+
+        document_deliberation = build_deliberation_contract()
+        supporting_context["document_deliberation_contract"] = document_deliberation
         for chapter in selected_chapters:
+            checker = supporting_context.get("cancellation_checker")
+            if checker:
+                checker()
             supporting_context["evidence_card_prompt"] = evidence_deck.for_chapter(chapter["id"])
-            supporting_context["context_intelligence_prompt"] = context_intelligence.for_chapter(chapter["id"])
+            supporting_context["context_intelligence_prompt"] = "\n".join(
+                item for item in (
+                    context_intelligence.for_chapter(chapter["id"]),
+                    deliberation_builder.for_chapter(document_deliberation, chapter["id"]),
+                )
+                if item
+            )
             supporting_context["scope_contract_prompt"] = ScopeContractExtractor.to_prompt_text(scope_contract)
             supporting_context["active_scope_contract"] = scope_contract
             chapter_chain_context = self._build_chapter_chain_context(
@@ -621,8 +759,11 @@ class ProposalEngineMixin:
                         scope_contract=scope_contract,
                         timeline=timeline,
                         budget=budget,
+                        proposal_technique_contract=proposal_technique_contract,
                     )
                     evidence_deck = context_intelligence.evidence_deck
+                    document_deliberation = build_deliberation_contract()
+                    supporting_context["document_deliberation_contract"] = document_deliberation
                 continue
             ctx = self._build_chapter_prompt(
                 chapter,
@@ -673,8 +814,11 @@ class ProposalEngineMixin:
                         scope_contract=scope_contract,
                         timeline=timeline,
                         budget=budget,
+                        proposal_technique_contract=proposal_technique_contract,
                     )
                     evidence_deck = context_intelligence.evidence_deck
+                    document_deliberation = build_deliberation_contract()
+                    supporting_context["document_deliberation_contract"] = document_deliberation
             except Exception as e:
                 logger.error(f"Generation Error for {chapter['title']}: {e}")
 
@@ -725,11 +869,13 @@ class ProposalEngineMixin:
             )
         generated_words = sum(self._word_count(t) for t in chapter_outputs.values() if t)
         estimated_pages = self._estimated_pages(generated_words)
-        if estimated_pages > MAX_PROPOSAL_PAGES:
+        for compression_multiplier in (0.94, 0.88, 0.82):
+            if estimated_pages <= MAX_PROPOSAL_PAGES:
+                break
             logger.warning(
-                f"Estimated page count is above limit ({estimated_pages}>{MAX_PROPOSAL_PAGES}); applying one more compacting pass."
+                f"Estimated page count is above limit ({estimated_pages}>{MAX_PROPOSAL_PAGES}); applying compacting pass."
             )
-            tighter_budget = max(int(content_word_budget * 0.94), 4000)
+            tighter_budget = max(int(content_word_budget * compression_multiplier), 4000)
             chapter_outputs = self._fit_into_word_budget(
                 chapter_outputs=chapter_outputs,
                 chapter_prompts=chapter_prompts,
@@ -738,6 +884,8 @@ class ProposalEngineMixin:
                 max_words=tighter_budget,
                 allowed_external_citations=allowed_external_citations
             )
+            generated_words = sum(self._word_count(t) for t in chapter_outputs.values() if t)
+            estimated_pages = self._estimated_pages(generated_words)
 
         if chapter_outputs.get("c_closing"):
             chapter_outputs["c_closing"] = self._inject_verified_firm_contact(
@@ -752,6 +900,8 @@ class ProposalEngineMixin:
                 )
             except Exception as e:
                 logger.warning(f"Could not enhance closing with OSINT firm information: {e}")
+
+        chapter_outputs = repair_proposal_document_spine(chapter_outputs, selected_chapters)
 
         acceptance_report = self._evaluate_proposal_acceptance(
             chapter_outputs=chapter_outputs,
@@ -821,7 +971,9 @@ class ProposalEngineMixin:
                         )
                     except Exception as e:
                         logger.warning(f"Could not enhance closing with OSINT firm information: {e}")
-                acceptance_report = self._evaluate_proposal_acceptance(
+                chapter_outputs = repair_proposal_document_spine(chapter_outputs, selected_chapters)
+
+        acceptance_report = self._evaluate_proposal_acceptance(
                     chapter_outputs=chapter_outputs,
                     selected_chapters=selected_chapters,
                     chapter_targets=chapter_targets,
@@ -883,6 +1035,64 @@ class ProposalEngineMixin:
             chapter_id: self._postprocess_chapter_content(chapter_map.get(chapter_id), content, client)
             for chapter_id, content in chapter_outputs.items()
         }
+        chapter_outputs = repair_proposal_document_spine(chapter_outputs, selected_chapters, compact=True)
+        final_words = sum(self._word_count(t) for t in chapter_outputs.values() if t)
+        final_pages = self._estimated_pages(final_words)
+        for compression_multiplier in (0.94, 0.88, 0.82, 0.76):
+            if final_pages <= MAX_PROPOSAL_PAGES:
+                break
+            logger.warning(
+                f"Final proposal page estimate is above limit ({final_pages}>{MAX_PROPOSAL_PAGES}); applying final compacting pass."
+            )
+            tighter_budget = max(int(content_word_budget * compression_multiplier), 4000)
+            chapter_outputs = self._fit_into_word_budget(
+                chapter_outputs=chapter_outputs,
+                chapter_prompts=chapter_prompts,
+                chapter_map=chapter_map,
+                chapter_targets=chapter_targets,
+                max_words=tighter_budget,
+                allowed_external_citations=allowed_external_citations,
+            )
+            chapter_outputs = repair_proposal_document_spine(chapter_outputs, selected_chapters, compact=True)
+            final_words = sum(self._word_count(t) for t in chapter_outputs.values() if t)
+            final_pages = self._estimated_pages(final_words)
+
+        for chapter in selected_chapters:
+            chapter_id = chapter.get("id")
+            if not chapter_id or not chapter_outputs.get(chapter_id):
+                continue
+            quality = self._evaluate_chapter_quality(
+                chapter=chapter,
+                content=chapter_outputs[chapter_id],
+                client=client,
+                target_words=chapter_targets.get(chapter_id),
+                allowed_external_citations=allowed_external_citations,
+                personalization_pack=personalization_pack,
+            )
+            if "too_short" not in quality.get("issues", []):
+                continue
+            chapter_outputs[chapter_id] = self._ensure_minimum_substance(
+                chapter=chapter,
+                content=chapter_outputs[chapter_id],
+                client=client,
+                target_words=chapter_targets.get(chapter_id),
+                personalization_pack=personalization_pack,
+                timeline=timeline,
+            )
+        chapter_outputs = repair_proposal_document_spine(chapter_outputs, selected_chapters, compact=True)
+
+        acceptance_report = self._evaluate_proposal_acceptance(
+            chapter_outputs=chapter_outputs,
+            selected_chapters=selected_chapters,
+            chapter_targets=chapter_targets,
+            client=client,
+            project=project,
+            notes=notes,
+            firm_profile=firm_profile,
+            allowed_external_citations=allowed_external_citations,
+            personalization_pack=personalization_pack,
+            value_map=value_map,
+        )
 
         logger.info(
             "Proposal acceptance passed | score=%s | categories=%s | ai_adoption_fit=%s | estimated_pages=%s",
@@ -926,11 +1136,15 @@ class ProposalEngineMixin:
             selected_chapters=selected_chapters,
             chapter_outputs=chapter_outputs,
         )
+        document_deliberation = build_deliberation_contract()
+        appendix_content = deliberation_builder.build_appendix_markdown(document_deliberation)
         final_quality_gate = ProposalQualityGate.evaluate(
             chapter_outputs=chapter_outputs,
             selected_chapters=selected_chapters,
             scope_contract=scope_contract,
             executive_summary=executive_summary,
+            deliberation_contract=document_deliberation,
+            appendix_content=appendix_content,
         )
         if not final_quality_gate["passes"]:
             logger.warning(
@@ -942,7 +1156,7 @@ class ProposalEngineMixin:
         doc.add_page_break()
         DocumentBuilder.add_table_of_contents(
             doc,
-            ["Ringkasan Eksekutif"] + [chapter["title"] for chapter in selected_chapters],
+            ["Ringkasan Eksekutif"] + [chapter["title"] for chapter in selected_chapters] + ["Lampiran Bukti, Asumsi, dan Kesenjangan Data"],
         )
 
         rendered_any = False
@@ -1007,12 +1221,26 @@ class ProposalEngineMixin:
 
         if not rendered_any:
             doc.add_paragraph("Konten proposal belum berhasil digenerate. Mohon ulangi proses.")
+        if appendix_content:
+            doc.add_page_break()
+            DocumentBuilder.process_content(
+                doc,
+                appendix_content,
+                theme_color,
+                "Lampiran Bukti, Asumsi, dan Kesenjangan Data",
+            )
         DocumentBuilder.compact_layout(doc)
 
         base_name = f"Proposal_{client}_{project}"
         if len(selected_chapters) == 1:
             chapter_slug = re.sub(r'[^A-Za-z0-9]+', '_', selected_chapters[0]['title']).strip('_')
             base_name = f"{base_name}_{chapter_slug}"
+
+        try:
+            research_stats = self._research_bundle_signal_score(research_bundle)
+            research_signal_score = research_stats.get("score")
+        except Exception:
+            research_signal_score = None
 
         metadata = {
             "acceptance_report": acceptance_report,
@@ -1022,6 +1250,13 @@ class ProposalEngineMixin:
             "proposal_mode": proposal_mode,
             "final_quality_gate": final_quality_gate,
             "scope_contract": scope_contract,
+            "research_signal_score": research_signal_score,
+            "document_deliberation": {
+                "cache_key": document_deliberation.get("cache_key"),
+                "accepted_claim_count": len(document_deliberation.get("claim_ledger") or []),
+                "data_gap_count": len(document_deliberation.get("data_gap_register") or []),
+                "appendix_sections": list((document_deliberation.get("appendix_manifest") or {}).keys()),
+            },
         }
         return doc, base_name.replace(" ", "_"), metadata
 

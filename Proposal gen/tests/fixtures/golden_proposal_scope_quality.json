@@ -11,6 +11,15 @@
   "expected": {
     "required_scope_terms": ["asesmen", "roadmap", "tata kelola"],
     "forbidden_reader_terms": ["ReferenceAccount", "APIDog", "source=", "dataset_code"],
-    "executive_summary_max_words": 520
+    "executive_summary_max_words": 520,
+    "max_repeated_nontrivial_cell_count": 2,
+    "max_table_cell_words": 22,
+    "human_rubric_minimums": {
+      "naturalness": 4,
+      "clarity": 4,
+      "usefulness": 4,
+      "factual_confidence": 4,
+      "proposal_voice": 4
+    }
   }
 }

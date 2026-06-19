@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import unittest
 from pathlib import Path
 
 
@@ -42,6 +43,43 @@ def test_scope_seed_excludes_account_metadata_from_commitments() -> None:
     joined_scope = " ".join(contract["scope_contract_seed"]["in_scope"]).lower()
     assert "quality gate" in joined_scope
     assert "yogyakarta" not in joined_scope
+
+
+class ProposalTechniqueContractCompatibilityTests(unittest.TestCase):
+    def test_contract_accepts_generation_context_hints_from_engine(self) -> None:
+        from main.proposal_technique import build_proposal_technique_contract
+
+        contract = build_proposal_technique_contract(
+            client="BMKG",
+            goals="Memperkuat tata kelola data dan kesiapan analitik.",
+            customer_notes="Koordinasi lintas unit perlu lebih konsisten.",
+            frameworks="COBIT2019",
+            framework_context=[
+                {
+                    "label": "COBIT 2019",
+                    "description": "kerangka tata kelola dan kontrol layanan digital",
+                    "use_cases": ["governance roadmap", "risk control"],
+                }
+            ],
+            client_use_cases=[
+                {"project_name": "Roadmap Data Governance", "topic": "analitik layanan publik"}
+            ],
+            osint_facts=[
+                {"fact": "kebutuhan peringatan dini membutuhkan koordinasi data lintas wilayah"}
+            ],
+            kak_contract={"objectives": ["roadmap prioritas dan pengendalian mutu"]},
+        )
+
+        combined = " ".join(
+            [
+                contract["scope_basis"],
+                contract["framework_basis"],
+                contract["methodology_basis"],
+            ]
+        ).lower()
+        self.assertIn("cobit 2019", combined)
+        self.assertIn("analitik layanan publik", combined)
+        self.assertIn("roadmap prioritas", combined)
 
 
 def test_framework_rows_include_scope_basis_when_scope_contract_is_available() -> None:

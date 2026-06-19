@@ -85,6 +85,23 @@ class DocumentRenderingHygieneTest(unittest.TestCase):
         self.assertIn("Untuk Ajinomoto Indonesia", rendered_text)
         self.assertIn("KPI acuan", rendered_text)
 
+    def test_flattened_markdown_separator_tokens_do_not_render_as_prose(self) -> None:
+        from main.document_rendering import DocumentBuilder
+
+        doc = Document()
+        raw = (
+            "Masalah utama: Risiko Utama Dampak Bisnis Dampak Operasional Respon yang Diperlukan "
+            "--- --- --- --- Prioritas berubah-ubah membuat sponsor sulit membaca keputusan. "
+            "Kapabilitas pelaksana Nama Posisi Utama Kapabilitas ---."
+        )
+
+        DocumentBuilder.process_content(doc, raw, (0, 51, 102), "BAB II")
+        rendered_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+
+        self.assertIn("Masalah utama", rendered_text)
+        self.assertIn("Prioritas berubah-ubah", rendered_text)
+        self.assertNotIn("---", rendered_text)
+
     def test_writer_profile_summarizes_public_approach_and_certifications(self) -> None:
         from main.document_rendering import DocumentBuilder
 
