@@ -675,7 +675,7 @@ class ProposalQualityGate:
         contract = deliberation_contract or {}
         required_contract_keys = {
             "evidence_dossier", "research_plan", "document_thesis", "chapter_contracts",
-            "claim_ledger", "data_gap_register", "editorial_contract", "appendix_manifest",
+            "claim_ledger", "data_gap_register", "editorial_contract", "commitment_map", "appendix_manifest",
         }
         if deliberation_contract is not None and not required_contract_keys.issubset(contract):
             categories.add("missing_deliberation_contract")

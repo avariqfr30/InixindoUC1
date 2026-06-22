@@ -7,7 +7,11 @@ import json
 import re
 from typing import Any
 
-from .proposal_exemplar_profile import build_uc1_exemplar_profile
+from .proposal_exemplar_profile import (
+    build_uc1_exemplar_profile,
+    scope_uc1_exemplar_profile,
+    select_uc1_proposal_profile,
+)
 
 
 def _clean(value: Any, max_words: int = 36) -> str:
@@ -26,7 +30,7 @@ def _digest(value: Any) -> str:
 class ProposalDeliberationBuilder:
     """Build reusable planning artifacts without adding model or source calls."""
 
-    CACHE_VERSION = "proposal-deliberation-v1"
+    CACHE_VERSION = "proposal-deliberation-v2"
     _cache: dict[str, dict[str, Any]] = {}
     _stats = {"hits": 0, "misses": 0}
     _source_labels = {
@@ -34,6 +38,21 @@ class ProposalDeliberationBuilder:
         "kontrak_ruang_lingkup": "Ruang lingkup yang disepakati",
         "sintesis_nilai": "Sintesis nilai proposal",
         "data_internal_tersintesis": "Bukti kapabilitas internal",
+    }
+    _chapter_commitment_keys = {
+        "c_1": ["dependencies"],
+        "c_2": ["scope", "dependencies"],
+        "c_3": ["scope"],
+        "c_4": ["scope", "deliverables"],
+        "c_5": ["scope", "deliverables", "acceptance_criteria"],
+        "c_6": ["scope", "deliverables", "acceptance_criteria"],
+        "c_7": ["scope", "deliverables", "assumptions", "dependencies"],
+        "c_8": ["timeline", "deliverables", "dependencies"],
+        "c_9": ["dependencies", "acceptance_criteria"],
+        "c_10": ["dependencies"],
+        "c_11": ["dependencies"],
+        "c_12": ["commercial", "scope", "deliverables", "acceptance_criteria"],
+        "c_closing": ["deliverables", "acceptance_criteria"],
     }
 
     @classmethod
@@ -61,12 +80,24 @@ class ProposalDeliberationBuilder:
         evidence_cards: list[dict[str, Any]] | None = None,
         scope_contract: dict[str, Any] | None = None,
         kak_contract: dict[str, Any] | None = None,
+        proposal_mode: str = "",
+        service_type: str = "",
+        project_type: str = "",
+        client_context: str = "",
+        timeline: str = "",
+        budget: str = "",
         data_version: str = "",
     ) -> dict[str, Any]:
         cards = [dict(card) for card in (evidence_cards or []) if _clean(card.get("claim"))]
         scope = dict(scope_contract or {})
         kak = dict(kak_contract or {})
         exemplar_profile = build_uc1_exemplar_profile()
+        exemplar_profile["selected_profile"] = select_uc1_proposal_profile(
+            proposal_mode=proposal_mode,
+            service_type=service_type,
+            project_type=project_type,
+            client_context=client_context,
+        )
         cache_key = _digest({
             "version": cls.CACHE_VERSION,
             "exemplar_version": exemplar_profile.get("version"),
@@ -76,6 +107,12 @@ class ProposalDeliberationBuilder:
             "cards": cards,
             "scope": scope,
             "kak": kak,
+            "proposal_mode": proposal_mode,
+            "service_type": service_type,
+            "project_type": project_type,
+            "client_context": client_context,
+            "timeline": timeline,
+            "budget": budget,
             "data_version": data_version,
         })
         if cache_key in cls._cache:
@@ -111,6 +148,7 @@ class ProposalDeliberationBuilder:
                 "depends_on": chapter_ids[index - 1] if index else "",
                 "hands_off_to": chapter_ids[index + 1] if index + 1 < len(chapter_ids) else "",
                 "required_claim_ids": relevant,
+                "commitment_keys": list(cls._chapter_commitment_keys.get(section_id, [])),
                 "closing_obligation": "Simpulkan konsekuensi bab ini dan siapkan keputusan yang dibutuhkan bagian berikutnya.",
             })
 
@@ -133,9 +171,39 @@ class ProposalDeliberationBuilder:
                         "handling": "Konfirmasi bersama klien sebelum menjadi komitmen pelaksanaan.",
                     })
 
-        assumptions = [_clean(item) for item in scope.get("assumptions", []) if _clean(item)]
-        dependencies = [_clean(item) for item in scope.get("dependencies", []) if _clean(item)]
-        deliverables = [_clean(item) for item in kak.get("deliverables", []) if _clean(item)]
+        def unique_clean(values: Any, max_words: int = 36) -> list[str]:
+            raw_values = values if isinstance(values, list) else [values]
+            result = []
+            seen = set()
+            for item in raw_values:
+                cleaned = _clean(item, max_words=max_words)
+                key = cleaned.lower()
+                if not cleaned or key in seen:
+                    continue
+                seen.add(key)
+                result.append(cleaned)
+            return result
+
+        assumptions = unique_clean(scope.get("assumptions", []))
+        dependencies = unique_clean(scope.get("dependencies", []))
+        deliverables = unique_clean([
+            *(scope.get("deliverables", []) or []),
+            *(kak.get("deliverables", []) or []),
+        ])
+        commitment_map = {
+            "scope": {
+                "in_scope": unique_clean(scope.get("in_scope", [])),
+                "out_of_scope": unique_clean(scope.get("out_of_scope", [])),
+            },
+            "deliverables": deliverables,
+            "timeline": _clean(timeline, max_words=18),
+            "commercial": _clean(budget, max_words=18),
+            "assumptions": assumptions,
+            "dependencies": dependencies,
+            "acceptance_criteria": unique_clean(
+                kak.get("acceptance_criteria", kak.get("acceptance", []))
+            ),
+        }
         thesis = (
             f"Proposal untuk {client} harus menunjukkan bagaimana {project} mengubah kebutuhan menjadi "
             "hasil yang terukur, batas pelaksanaan yang jelas, dan keputusan yang dapat dipertanggungjawabkan."
@@ -177,6 +245,7 @@ class ProposalDeliberationBuilder:
                 "forbidden": ["label agen", "nama dataset", "prompt", "chain-of-thought", "klaim tanpa bukti"],
                 "exemplar_profile": exemplar_profile,
             },
+            "commitment_map": commitment_map,
             "appendix_manifest": {
                 "traceability": claim_ledger,
                 "assumptions": assumptions,
@@ -195,12 +264,24 @@ class ProposalDeliberationBuilder:
         )
         accepted_ids = set(chapter_contract.get("required_claim_ids", []))
         claims = [item for item in contract.get("claim_ledger", []) if item.get("claim_id") in accepted_ids]
+        commitment_map = contract.get("commitment_map") or {}
+        commitments = {
+            key: copy.deepcopy(commitment_map.get(key))
+            for key in chapter_contract.get("commitment_keys", [])
+            if commitment_map.get(key)
+        }
+        editorial_contract = copy.deepcopy(contract.get("editorial_contract") or {})
+        editorial_contract["exemplar_profile"] = scope_uc1_exemplar_profile(
+            editorial_contract.get("exemplar_profile") or {},
+            chapter_id,
+        )
         payload = {
             "document_thesis": contract.get("document_thesis"),
             "chapter_contract": chapter_contract,
             "accepted_claims": claims,
+            "commitments": commitments,
             "data_gaps": [item for item in contract.get("data_gap_register", []) if item.get("area") == chapter_contract.get("title")],
-            "editorial_contract": contract.get("editorial_contract"),
+            "editorial_contract": editorial_contract,
         }
         return (
             "[DOCUMENT_DELIBERATION] Gunakan kontrak terstruktur ini secara internal. "

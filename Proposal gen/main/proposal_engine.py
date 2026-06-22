@@ -668,6 +668,22 @@ class ProposalEngineMixin:
                 evidence_cards=evidence_cards,
                 scope_contract=scope_contract,
                 kak_contract=supporting_context.get("kak_contract") or {},
+                proposal_mode=proposal_mode,
+                service_type=service_type,
+                project_type=project_type,
+                client_context=" ".join(
+                    item for item in (
+                        client,
+                        project,
+                        project_goal,
+                        notes,
+                        regulations,
+                        str(personalization_pack.get("profile_summary") or ""),
+                    )
+                    if item
+                ),
+                timeline=timeline,
+                budget=budget,
                 data_version=str(supporting_context.get("data_version") or ""),
             )
 

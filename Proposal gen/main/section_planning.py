@@ -7,6 +7,8 @@ import hashlib
 import copy
 from typing import Any
 
+from .proposal_exemplar_profile import scope_uc1_exemplar_profile
+
 
 def _compact(value: Any, limit: int = 420) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
@@ -22,7 +24,7 @@ def _digest(value: Any) -> str:
 
 class ProposalSectionPlanner:
     """Build hidden guidance for mixed-reader proposal writing."""
-    CACHE_VERSION = "proposal-section-plan-v2"
+    CACHE_VERSION = "proposal-section-plan-v3"
     _cache: dict[str, dict[str, Any]] = {}
     _stats = {"hits": 0, "misses": 0}
 
@@ -125,6 +127,24 @@ class ProposalSectionPlanner:
             paragraph_roles = ["konteks spesifik", "masalah atau peluang", "implikasi", "rekomendasi", "bukti pendukung"]
         evidence = _compact(evidence_summary) or "gunakan bukti internal, OSINT, dan konteks klien yang tersedia tanpa menyebut label dataset."
         candidate_angles, selected_angle = self._select_candidate_angle(chapter_id, evidence)
+        chapter_contract = next(
+            (
+                item for item in document_contract.get("chapter_contracts", [])
+                if item.get("section_id") == chapter_id
+            ),
+            {},
+        )
+        commitment_map = document_contract.get("commitment_map") or {}
+        commitments = {
+            key: copy.deepcopy(commitment_map.get(key))
+            for key in chapter_contract.get("commitment_keys", [])
+            if commitment_map.get(key)
+        }
+        editorial_contract = copy.deepcopy(document_contract.get("editorial_contract") or {})
+        editorial_contract["exemplar_profile"] = scope_uc1_exemplar_profile(
+            editorial_contract.get("exemplar_profile") or {},
+            chapter_id,
+        )
         plan = {
             "cache_key": cache_key,
             "data_version": data_version,
@@ -187,15 +207,10 @@ class ProposalSectionPlanner:
             "subsections": subs,
             "evidence_summary": evidence,
             "document_thesis": document_contract.get("document_thesis") or "",
-            "chapter_contract": next(
-                (
-                    item for item in document_contract.get("chapter_contracts", [])
-                    if item.get("section_id") == chapter_id
-                ),
-                {},
-            ),
+            "chapter_contract": chapter_contract,
+            "commitments": commitments,
             "data_gap_register": document_contract.get("data_gap_register") or [],
-            "editorial_contract": document_contract.get("editorial_contract") or {},
+            "editorial_contract": editorial_contract,
             "appendix_manifest": document_contract.get("appendix_manifest") or {},
         }
         return self._remember(cache_key, plan)
@@ -226,6 +241,7 @@ class ProposalSectionPlanner:
             f"Retrieval intent: {retrieval}. Evidence ledger: {ledger}. Rationale ringkas: {rationale}. "
             f"Bukti terpilih untuk dipakai secara natural: {plan.get('evidence_summary')}"
             f" Tesis dokumen: {plan.get('document_thesis')}. Kontrak bab: {plan.get('chapter_contract')}. "
+            f"Komitmen bab: {plan.get('commitments')}. "
             f"Kesenjangan data: {plan.get('data_gap_register')}. Kontrak editorial: {plan.get('editorial_contract')}."
         )
 
