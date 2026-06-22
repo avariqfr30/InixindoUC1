@@ -8,7 +8,6 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import diskcache as dc
-from ollama import Client
 from pydantic import BaseModel, Field
 
 from .config import (
@@ -17,6 +16,7 @@ from .config import (
     OLLAMA_WEB_SEARCH_URL,
     SEARCH_PROVIDER,
 )
+from .inference_gateway import get_inference_gateway
 from .proposal_shared import *
 
 # Initialize ultra-fast disk caching for OSINT (survives server restarts)
@@ -213,8 +213,7 @@ class Researcher:
         """
         
         try:
-            client = Client(host=OLLAMA_HOST)
-            res = client.chat(
+            res = get_inference_gateway().chat(
                 model=LLM_MODEL,
                 messages=[{'role': 'user', 'content': prompt}],
                 options={'temperature': 0.0}

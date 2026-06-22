@@ -290,6 +290,14 @@ if GENERATION_PROFILE not in {"balanced", "throughput"}:
 # run a small number of proposal jobs in parallel to protect end-to-end timing.
 MAX_ACTIVE_GENERATIONS = max(1, int(os.getenv("MAX_ACTIVE_GENERATIONS", "2")))
 MAX_GENERATION_BACKLOG = max(MAX_ACTIVE_GENERATIONS, int(os.getenv("MAX_GENERATION_BACKLOG", "18")))
+LLM_MAX_CONCURRENCY = max(1, int(os.getenv("LLM_MAX_CONCURRENCY", "2")))
+LLM_REQUEST_TIMEOUT_SECONDS = max(30, int(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "180")))
+LLM_MAX_RETRIES = min(1, max(0, int(os.getenv("LLM_MAX_RETRIES", "1"))))
+LLM_RETRY_BACKOFF_SECONDS = min(5.0, max(0.0, float(os.getenv("LLM_RETRY_BACKOFF_SECONDS", "1"))))
+LLM_OVERLOAD_COOLDOWN_SECONDS = min(
+    60.0,
+    max(0.0, float(os.getenv("LLM_OVERLOAD_COOLDOWN_SECONDS", "15"))),
+)
 JOB_RETENTION_SECONDS = max(300, int(os.getenv("JOB_RETENTION_SECONDS", "1800")))
 JOB_POLL_INTERVAL_MS = max(1000, int(os.getenv("JOB_POLL_INTERVAL_MS", "2000")))
 RESEARCH_CACHE_TTL_SECONDS = max(300, int(os.getenv("RESEARCH_CACHE_TTL_SECONDS", "1800")))

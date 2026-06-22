@@ -2,6 +2,7 @@
 
 from .proposal_shared import *
 from .data_sources import InternalDataClient
+from .inference_gateway import get_inference_gateway
 from .knowledge_store import KnowledgeBase
 from .proposal_engine import ProposalEngineMixin
 from .proposal_support import ProposalSupportMixin
@@ -109,7 +110,7 @@ class ProposalGenerator(ProposalEngineMixin, ProposalSupportMixin):
     PROPOSAL_CATEGORY_FLOOR = 70
 
     def __init__(self, kb_instance: KnowledgeBase) -> None:
-        self.ollama = Client(host=OLLAMA_HOST)
+        self.ollama = get_inference_gateway()
         self.kb = kb_instance
         self.io_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
         self.firm_api = InternalDataClient()

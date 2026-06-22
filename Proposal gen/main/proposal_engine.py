@@ -11,6 +11,7 @@ from .proposal_technique import build_proposal_technique_contract
 from .text_hygiene import naturalize_generation_text
 from .editorial_intelligence import assess_proposal_style, repair_proposal_document_spine
 from .proposal_deliberation import ProposalDeliberationBuilder
+from .generation_preflight import internal_api_serial_access, load_internal_preflight
 
 
 class ProposalEngineMixin:
@@ -470,11 +471,13 @@ class ProposalEngineMixin:
         proposal_mode: str = "canvassing",
         supporting_context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Document, str, Dict[str, Any]]:
+        preflight_started = time.monotonic()
         supporting_context = dict(supporting_context or {})
+        expert_bench_context = supporting_context.get("expert_bench_context")
         try:
-            expert_bench_context = supporting_context.get("expert_bench_context")
             if not isinstance(expert_bench_context, dict) or not expert_bench_context.get("available"):
-                expert_bench_context = self.firm_api.get_expert_bench_context(limit_products=8)
+                with internal_api_serial_access():
+                    expert_bench_context = self.firm_api.get_expert_bench_context(limit_products=8)
                 if expert_bench_context.get("available"):
                     supporting_context["expert_bench_context"] = expert_bench_context
             if isinstance(expert_bench_context, dict) and expert_bench_context.get("available"):
@@ -501,40 +504,6 @@ class ProposalEngineMixin:
         timeline = naturalize_generation_text(timeline, field="estimasi_waktu", client_name=client)
         notes = naturalize_generation_text(notes, field="permasalahan", client_name=client)
         regulations = naturalize_generation_text(regulations, field="potensi_framework", client_name=client)
-        framework_context = supporting_context.get("framework_context") or supporting_context.get("framework_options")
-        if not framework_context:
-            try:
-                framework_context = self.firm_api.get_framework_catalog()
-            except Exception:
-                framework_context = None
-        proposal_technique_contract = build_proposal_technique_contract(
-            client=client,
-            goals=project,
-            customer_notes=notes,
-            existing_condition=str(supporting_context.get("client_internal_context") or ""),
-            frameworks=regulations,
-            framework_context=framework_context,
-            client_use_cases=supporting_context.get("use_cases"),
-            osint_facts=supporting_context.get("osint_facts"),
-            kak_contract=supporting_context.get("kak_contract"),
-        )
-        supporting_context["proposal_technique_contract"] = proposal_technique_contract
-        selected_chapters = self._resolve_chapters(chapter_id, proposal_mode=proposal_mode)
-        chapter_targets = self._chapter_word_targets(selected_chapters)
-        content_word_budget = self._content_word_budget()
-
-        use_demo_logic = self.firm_api.uses_demo_logic()
-        app_state_store = getattr(self, "app_state_store", None)
-        firm_data = self.firm_api.get_delivery_guidance(project_type)
-        firm_profile = self.firm_api.get_firm_profile()
-        if app_state_store:
-            firm_profile = app_state_store.enrich_firm_profile(firm_profile)
-        includes_writer_profile = any(chapter.get("id") in {"c_11", "c_closing"} for chapter in selected_chapters)
-        writer_firm_profile = (
-            self._build_writer_firm_evidence_profile(firm_profile)
-            if includes_writer_profile
-            else dict(firm_profile or {})
-        )
         base_client = re.sub(r'\b(Cabang|Branch|Tbk)\b.*$|^(PT\.|CV\.)', '', client, flags=re.IGNORECASE).strip()
         ai_context = " ".join([
             project,
@@ -547,13 +516,47 @@ class ProposalEngineMixin:
             str(supporting_context.get("settings_context") or ""),
             str(supporting_context.get("client_internal_context") or ""),
         ]).strip()
-        relationship_context = self.firm_api.get_client_relationship(base_client)
+
+        use_demo_logic = self.firm_api.uses_demo_logic()
+        logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client)
+        internal_preflight_future = self.io_pool.submit(
+            load_internal_preflight,
+            self.firm_api,
+            project_type=project_type,
+            base_client=base_client,
+            expert_bench_context=expert_bench_context,
+            expert_bench_resolved=True,
+            framework_context=(
+                supporting_context.get("framework_context")
+                or supporting_context.get("framework_options")
+            ),
+        )
+
         research_bundle = self._get_research_bundle(
             base_client,
             regulations,
             include_collaboration=use_demo_logic,
             ai_context=ai_context,
         )
+        internal_preflight = internal_preflight_future.result()
+
+        framework_context = internal_preflight.framework_context
+        selected_chapters = self._resolve_chapters(chapter_id, proposal_mode=proposal_mode)
+        chapter_targets = self._chapter_word_targets(selected_chapters)
+        content_word_budget = self._content_word_budget()
+
+        app_state_store = getattr(self, "app_state_store", None)
+        firm_data = internal_preflight.firm_data
+        firm_profile = internal_preflight.firm_profile
+        if app_state_store:
+            firm_profile = app_state_store.enrich_firm_profile(firm_profile)
+        includes_writer_profile = any(chapter.get("id") in {"c_11", "c_closing"} for chapter in selected_chapters)
+        writer_firm_profile = (
+            self._build_writer_firm_evidence_profile(firm_profile)
+            if includes_writer_profile
+            else dict(firm_profile or {})
+        )
+        relationship_context = internal_preflight.relationship_context
         if not use_demo_logic:
             research_bundle = dict(research_bundle)
             research_bundle["collaboration"] = relationship_context.get("summary", "")
@@ -570,6 +573,20 @@ class ProposalEngineMixin:
             },
             research_bundle,
         )
+        proposal_technique_contract = build_proposal_technique_contract(
+            client=client,
+            goals=project,
+            customer_notes=notes,
+            existing_condition=str(supporting_context.get("client_internal_context") or ""),
+            frameworks=regulations,
+            framework_context=framework_context,
+            client_use_cases=supporting_context.get("use_cases"),
+            osint_facts=supporting_context.get("osint_facts"),
+            kak_contract=supporting_context.get("kak_contract"),
+        )
+        supporting_context["proposal_technique_contract"] = proposal_technique_contract
+        preflight_seconds = round(max(0.0, time.monotonic() - preflight_started), 3)
+        logger.info("Proposal preflight completed | seconds=%s", preflight_seconds)
         personalization_pack = self._build_personalization_pack(
             client=client,
             project=project,
@@ -614,7 +631,6 @@ class ProposalEngineMixin:
             proposal_mode=proposal_mode,
             supporting_context=supporting_context,
         )
-        logo_future = self.io_pool.submit(LogoManager.get_logo_and_color, base_client)
 
         structured_ids = {
             chapter["id"] for chapter in selected_chapters
@@ -1258,6 +1274,14 @@ class ProposalEngineMixin:
         except Exception:
             research_signal_score = None
 
+        performance_metadata: Dict[str, Any] = {"preflight_seconds": preflight_seconds}
+        metrics_snapshot = getattr(self.ollama, "metrics_snapshot", None)
+        if callable(metrics_snapshot):
+            try:
+                performance_metadata["llm"] = dict(metrics_snapshot() or {})
+            except Exception:
+                logger.exception("Could not snapshot inference metrics")
+
         metadata = {
             "acceptance_report": acceptance_report,
             "estimated_pages": acceptance_report.get("estimated_pages"),
@@ -1267,6 +1291,7 @@ class ProposalEngineMixin:
             "final_quality_gate": final_quality_gate,
             "scope_contract": scope_contract,
             "research_signal_score": research_signal_score,
+            "performance": performance_metadata,
             "document_deliberation": {
                 "cache_key": document_deliberation.get("cache_key"),
                 "accepted_claim_count": len(document_deliberation.get("claim_ledger") or []),

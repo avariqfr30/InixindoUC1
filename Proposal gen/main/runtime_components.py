@@ -8,7 +8,7 @@ from .proposal_shared import *
 from .schema_mapping import SchemaMapper
 from .research import Researcher
 from .capability_intelligence import build_capability_intelligence
-from ollama import Client
+from .inference_gateway import get_inference_gateway
 
 # ==========================================
 # PYDANTIC SCHEMAS FOR BULLETPROOF LLM DATA
@@ -1353,7 +1353,7 @@ class FirmAPIClient:
                 Respond ONLY with a valid JSON object matching the requested schema.
                 """
                 try:
-                    res = Client(host=OLLAMA_HOST).chat(
+                    res = get_inference_gateway().chat(
                         model=LLM_MODEL,
                         messages=[{'role': 'user', 'content': prompt}],
                         options={'temperature': 0.0}
